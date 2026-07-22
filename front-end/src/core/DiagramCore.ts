@@ -88,13 +88,30 @@ export class DiagramCore {
     return this.nodes.find(n => n.id === id);
   }
 
+  /**
+   * The stereotype category is the semantic source of truth.  `type` and
+   * `data.isObservable` are persisted rendering metadata and are checked at
+   * import time, but must not turn an ordinary stereotype into an Observable.
+   */
+  public isObservableNode(node: Node | undefined): boolean {
+    if (!node) return false;
+    const stereotype = this.getStereotype(String(node.data.stereotype ?? ""));
+    return stereotype?.isObservable === true;
+  }
+
   public getChilds(id: string): Node[] {
-    const childsIds = this.edges.filter(e => e.source === id).map(e => e.target);
+    const source = this.getNodeById(id);
+    const childsIds = this.edges
+      .filter((edge) => edge.source === id && !this.isObservableNode(source) && !this.isObservableNode(this.getNodeById(edge.target)))
+      .map((edge) => edge.target);
     return this.nodes.filter(n => childsIds.find(c_id => c_id === n.id));
   }
 
   public getParents(id: string): Node[] {
-    const parentsIds = this.edges.filter(e => e.target === id).map(e => e.source);
+    const target = this.getNodeById(id);
+    const parentsIds = this.edges
+      .filter((edge) => edge.target === id && !this.isObservableNode(target) && !this.isObservableNode(this.getNodeById(edge.source)))
+      .map((edge) => edge.source);
     return this.nodes.filter(n => parentsIds.find(c_id => c_id === n.id));
   }
 
@@ -109,7 +126,7 @@ export class DiagramCore {
     stereotype: StereotypeCore,
     x: number,
     y: number,
-    customConfig?: { name?: string; color?: string; width?: number; height?: number; params?: any; parentId?: string }
+    customConfig?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; enabled?: boolean }
   ) {
     this._captureUndoState();
     // 1. Name logic: if user provided a name use it, otherwise auto-generate (e.g. Tanh_0)
@@ -128,9 +145,10 @@ export class DiagramCore {
     const w = isInput ? 30 : (customConfig?.width || stereotype.view?.width || 140);
     const h = isInput ? 30 : (customConfig?.height || stereotype.view?.height || 60);
 
+    const isObservable = stereotype.isObservable;
     const newNode: Node = {
       id: crypto.randomUUID(),
-      type: 'custom',
+      type: isObservable ? 'observable' : 'custom',
       position: { x, y },
       width: w,
       height: h,
@@ -142,6 +160,8 @@ export class DiagramCore {
         params: this._mergeNodeParams(stereotype, customConfig?.params),
         isInput: isInput,
         isLoss: stereotype.isLoss,
+        isObservable,
+        enabled: customConfig?.enabled ?? true,
       }
     };
     // 3. Add the node to state
@@ -150,7 +170,7 @@ export class DiagramCore {
     this.events.emit("node_created", {
       nodeId: newNode.id,
       name: finalName,
-      type: "custom",
+      type: isObservable ? "observable" : "custom",
       stereotype: stereotype.name,
     });
     this.events.emit("graph_changed", {
@@ -229,7 +249,7 @@ export class DiagramCore {
 
   public updateModule(
     id: string,
-    config: { name?: string; label?: string; color?: string; width?: number; height?: number; params?: any; stereotype?: string }
+    config: { name?: string; label?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; stereotype?: string; enabled?: boolean }
   ) {
     this._captureUndoState();
     const changes: Record<string, unknown> = {};
@@ -240,6 +260,7 @@ export class DiagramCore {
     if (config.height !== undefined) changes.height = config.height;
     if (config.params !== undefined) changes.params = config.params;
     if (config.stereotype !== undefined) changes.stereotype = config.stereotype;
+    if (config.enabled !== undefined) changes.enabled = config.enabled;
 
     this.nodes = this.nodes.map(node => {
       if (node.id === id) {
@@ -253,6 +274,7 @@ export class DiagramCore {
             label: config.label ?? node.data.label,
             color: config.color ?? node.data.color,
             stereotype: config.stereotype ?? node.data.stereotype,
+            enabled: config.enabled ?? node.data.enabled,
             params: config.params ? JSON.parse(JSON.stringify(config.params)) : node.data.params,
             oldWidth: config.width ?? node.data.oldWidth,
             oldHeight: config.height ?? node.data.oldHeight,
@@ -458,8 +480,11 @@ export class DiagramCore {
     sourceHandle: string = "out",
     targetHandle: string = "in"
   ): Edge {
+    if (!this.getNodeById(source) || !this.getNodeById(target)) {
+      throw new Error("Cannot connect an edge to a missing node");
+    }
     // Validate before capturing undo state — don't waste an undo slot on a rejected connection
-    const validation = coreCheckValidConnection(this.edges, source, target, sourceHandle, targetHandle);
+    const validation = this.validateConnection(source, target, sourceHandle, targetHandle);
     if (!validation.valid) {
       throw new Error(validation.reason);
     }
@@ -514,15 +539,32 @@ export class DiagramCore {
     newSourceHandle?: string,
     newTargetHandle?: string
   ): void {
+    const currentEdge = this.edges.find((edge) => edge.id === edgeId);
+    if (!currentEdge) throw new Error(`Edge not found: ${edgeId}`);
+    const nextSource = newSource ?? currentEdge.source;
+    const nextTarget = newTarget ?? currentEdge.target;
+    const nextSourceHandle = newSourceHandle ?? currentEdge.sourceHandle ?? "out";
+    const nextTargetHandle = newTargetHandle ?? currentEdge.targetHandle ?? "in";
+    if (!this.getNodeById(nextSource) || !this.getNodeById(nextTarget)) {
+      throw new Error("Cannot reconnect an edge to a missing node");
+    }
+    const validation = this.validateConnection(
+      nextSource,
+      nextTarget,
+      nextSourceHandle,
+      nextTargetHandle,
+      this.edges.filter((edge) => edge.id !== edgeId),
+    );
+    if (!validation.valid) throw new Error(validation.reason);
     this._captureUndoState();
     this.edges = this.edges.map(e => {
       if (e.id === edgeId) {
         return {
           ...e,
-          source: newSource ?? e.source,
-          target: newTarget ?? e.target,
-          sourceHandle: newSourceHandle ?? e.sourceHandle,
-          targetHandle: newTargetHandle ?? e.targetHandle,
+          source: nextSource,
+          target: nextTarget,
+          sourceHandle: nextSourceHandle,
+          targetHandle: nextTargetHandle,
         };
       }
       return e;
@@ -595,17 +637,56 @@ export class DiagramCore {
     sourceHandle?: string,
     targetHandle?: string
   ): boolean {
-    const result = coreCheckValidConnection(
-      this.edges,
-      source,
-      target,
-      sourceHandle,
-      targetHandle
-    );
+    const result = this.validateConnection(source, target, sourceHandle, targetHandle);
     return result.valid;
   }
 
+  /** Shared non-mutating connection validator used by UI, RPC, import, and reconnect. */
+  public validateConnection(
+    source: string,
+    target: string,
+    sourceHandle?: string,
+    targetHandle?: string,
+    edges: Edge[] = this.edges,
+    includeOccupancy = true,
+    nodes: Node[] = this.nodes,
+  ): ReturnType<typeof coreCheckValidConnection> {
+    const targetNode = nodes.find((node) => node.id === target);
+    const observableTarget = this.isObservableNode(targetNode);
+    const observationError = observableTarget
+      ? this.getObservationConnectionError(source, target, sourceHandle ?? "out", targetHandle ?? "in", nodes)
+      : undefined;
+    if (observationError) return { valid: false, reason: observationError };
+    return coreCheckValidConnection(
+      includeOccupancy ? edges : [],
+      source,
+      target,
+      sourceHandle,
+      observableTarget ? targetHandle ?? "in" : targetHandle,
+      nodes,
+      (node) => this.isObservableNode(node),
+    );
+  }
+
   // ── Private Helpers ───────────────────────────────────────────
+
+  private getObservationConnectionError(sourceId: string, targetId: string, sourceHandle: string, targetHandle: string, nodes: Node[]): string | undefined {
+    const source = nodes.find((node) => node.id === sourceId);
+    const target = nodes.find((node) => node.id === targetId);
+    if (!this.isObservableNode(target)) return;
+    const targetStereo = target ? this.getStereotype(String(target.data.stereotype ?? "")) : undefined;
+    if (!targetStereo?.isObservable || !targetStereo.observable) return "Observable target is not compatible with its stereotype category";
+    if (sourceHandle !== "out") {
+      const sourceStereo = source ? this.getStereotype(String(source.data.stereotype ?? "")) : undefined;
+      if (!sourceStereo?.observablePoints.some((point) => point.id === sourceHandle)) {
+        return `Unknown Observable source point '${sourceHandle}'`;
+      }
+    }
+    if (!targetStereo.observable.inputs.some((input) => input.id === targetHandle)) {
+      return `Unknown Observable target handle '${targetHandle}'`;
+    }
+    return undefined;
+  }
 
   private getDefaultParams(stereotype: StereotypeCore): Record<string, { value: string; position?: string }> {
     if (!stereotype.parameters) {
@@ -628,7 +709,7 @@ export class DiagramCore {
    */
   private _mergeNodeParams(
     stereotype: StereotypeCore,
-    userParams?: Record<string, string | { value: string; position?: string }>
+    userParams?: Record<string, unknown>
   ): Record<string, { value: string; position?: string }> {
     const merged = this.getDefaultParams(stereotype);
     if (userParams) {
@@ -638,7 +719,7 @@ export class DiagramCore {
         // { value } wrapper (from duplicateNodes RPC)
         const innerValue =
           typeof value === 'object' && value !== null && 'value' in value
-            ? String((value as { value: string }).value)
+            ? String((value as { value: unknown }).value)
             : String(value);
         merged[key] = {
           value: innerValue,
@@ -664,21 +745,53 @@ export class DiagramCore {
       const parsedData = JSON.parse(jsonString);
 
       if (Array.isArray(parsedData.nodes) && Array.isArray(parsedData.edges)) {
-        this._captureUndoState();
-
-        // No callbacks needed — SubflowNode uses getContext to access diagram.
-        this.nodes = parsedData.nodes;
-        this.edges = parsedData.edges;
-
-        // Normalize edge handle IDs for backward compatibility.
-        // Old diagrams (pre-Phase 14) were saved without sourceHandle/targetHandle
-        // because CustomNode.svelte had no Handle id attribute back then.
-        // SvelteFlow now requires these fields to match Handle id="in"/"out".
-        this.edges = this.edges.map((edge: any) => {
-          if (!edge.sourceHandle) edge.sourceHandle = "out";
-          if (!edge.targetHandle) edge.targetHandle = "in";
-          return edge;
+        const importedNodes = parsedData.nodes as Node[];
+        const nodeIds = new Set(importedNodes.map((node) => node.id));
+        const importedEdges = (parsedData.edges as Edge[]).map((edge) => ({
+          ...edge,
+          sourceHandle: edge.sourceHandle ?? "out",
+          targetHandle: edge.targetHandle ?? "in",
+        }));
+        const categoryMismatch = importedNodes.find((node) => {
+          const structuralObservable = node.type === "observable" || node.data?.isObservable === true;
+          const categoryObservable = this.getStereotype(String(node.data?.stereotype ?? ""))?.isObservable === true;
+          return structuralObservable !== categoryObservable;
         });
+        if (categoryMismatch) {
+          throw new Error(
+            `Observable structure does not match stereotype category for node '${categoryMismatch.id}'`,
+          );
+        }
+        const invalidEdge = importedEdges.find((edge) => {
+          const source = importedNodes.find((node) => node.id === edge.source);
+          const target = importedNodes.find((node) => node.id === edge.target);
+          return !source || !target || this.isObservableNode(source);
+        });
+        if (invalidEdge) {
+          throw new Error(`Invalid imported edge '${invalidEdge.id}'`);
+        }
+        // Validate completely before replacing the current diagram.
+        if (importedNodes.some((node) => !node.id) || nodeIds.size !== importedNodes.length || importedEdges.some((edge) => !edge.id || !nodeIds.has(edge.source) || !nodeIds.has(edge.target))) {
+          throw new Error("Imported diagram contains invalid node or edge references");
+        }
+        for (const edge of importedEdges) {
+          const validation = this.validateConnection(
+            edge.source,
+            edge.target,
+            edge.sourceHandle ?? "out",
+            edge.targetHandle ?? "in",
+            importedEdges,
+            false,
+            importedNodes,
+          );
+          if (!validation.valid && validation.reason !== undefined && !validation.reason.includes("already occupied")) {
+            throw new Error(`Invalid imported edge '${edge.id}': ${validation.reason}`);
+          }
+        }
+        this._captureUndoState();
+        // No callbacks needed — SubflowNode uses getContext to access diagram.
+        this.nodes = importedNodes;
+        this.edges = importedEdges;
       } else {
         throw new Error("Il file JSON non contiene un formato valido (nodi o edges mancanti).");
       }

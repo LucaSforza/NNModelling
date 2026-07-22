@@ -1,0 +1,23 @@
+{
+  "category": "Observable",
+  "pythonClassName": "interpretability.ActivationStatistics",
+  "view": {"color": "#7c3aed", "width": 210, "height": 100},
+  "observable": {
+    "captureKind": "FORWARD_VALUE",
+    "supportedModes": ["TRAIN", "EVAL"],
+    "finalizePhase": "POST_EPOCH",
+    "defaultRetentionScope": "EPOCH",
+    "supportedRetentionScopes": ["BATCH", "EPOCH", "RUN"],
+    "defaultStorageStrategy": "STREAMING",
+    "supportedStorageStrategies": ["STREAMING"],
+    "inputs": [{"id": "in-0", "label": "activation", "required": true}],
+    "resultSchema": {"kind": "statistics", "fields": ["count", "mean", "variance", "norm", "sparsity"]}
+  },
+  "params": {
+    "execution_modes": {"type": "str", "default": "['TRAIN', 'EVAL']"},
+    "retention_scope": {"type": "str", "default": "EPOCH"},
+    "storage_strategy": {"type": "str", "default": "STREAMING"},
+    "wandb_table_name": {"type": "str", "default": ""}
+  },
+  "type_signature": {"kind": "observable", "input": [[{"kind": "wildcard"}]]}
+}

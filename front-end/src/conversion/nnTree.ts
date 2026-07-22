@@ -18,16 +18,34 @@ export class NNTree {
   public nodes: Map<string, NNTreeNode>;
   public root: string;
   public lossNode: ModuleData | null = null;
+  private readonly diagram: DiagramCore;
 
   constructor(diagram: DiagramCore) {
+    this.diagram = diagram;
     this.nodes = new Map();
-    const inputNodes: Node[] = diagram.nodes.filter(n => n.data.stereotype === "Input");
+    const inputNodes: Node[] = diagram.nodes.filter((node) => node.data.stereotype === "Input" && !this.isObservable(node));
     if (inputNodes.length !== 1) {
       throw new Error("Expected exactly one input node, but found " + inputNodes.length);
     }
     let new_root = this.processNode(inputNodes[0], diagram, new Set());
     if (new_root === undefined) throw new Error("root is undefined");
     this.root = new_root;
+  }
+
+  private isObservable(node: Node | undefined): boolean {
+    if (!node) return false;
+    const stereotype = this.diagram.getStereotype(String(node.data.stereotype ?? ""));
+    return stereotype?.isObservable === true;
+  }
+
+  private computationalChildren(id: string): Node[] {
+    const targets = new Set(this.diagram.edges.filter((edge) => edge.source === id && !this.isObservable(this.diagram.getNodeById(edge.source)) && !this.isObservable(this.diagram.getNodeById(edge.target))).map((edge) => edge.target));
+    return this.diagram.nodes.filter((node) => targets.has(node.id));
+  }
+
+  private computationalParents(id: string): Node[] {
+    const sources = new Set(this.diagram.edges.filter((edge) => edge.target === id && !this.isObservable(this.diagram.getNodeById(edge.source)) && !this.isObservable(this.diagram.getNodeById(edge.target))).map((edge) => edge.source));
+    return this.diagram.nodes.filter((node) => sources.has(node.id));
   }
 
   private getPythonClassName(diagram: DiagramCore, node: Node): string {
@@ -51,11 +69,12 @@ export class NNTree {
       stereotype: node.data.stereotype,
       pythonClassName: this.getPythonClassName(diagram, node),
       params: node.data.params,
+      moduleId: node.id,
     } as ModuleData;
   }
 
   private compileSubflowGraph(diagram: DiagramCore, subflowId: string): SubflowGraph {
-    const internalNodes = diagram.nodes.filter((n: any) => n.parentId === subflowId);
+    const internalNodes = diagram.nodes.filter((n) => n.parentId === subflowId && !this.isObservable(n));
     if (internalNodes.length === 0) {
       console.warn("Subflow " + subflowId + " has no internal nodes");
       return { entryNode: "", nodes: {} };
@@ -117,6 +136,7 @@ export class NNTree {
           stereotype: nd.stereotype as string,
           pythonClassName: this.getPythonClassName(diagram, n),
           params: nd.params,
+          moduleId: n.id,
           children,
           entryNode: nested.entryNode,
           nodes: nested.nodes,
@@ -131,6 +151,7 @@ export class NNTree {
           pythonClassName: this.getPythonClassName(diagram, n),
           taskType: this.getTaskType(diagram, n),
           params: nd.params,
+          moduleId: n.id,
           children,
           ...(isJoinNode ? { inputs: targetInputs[id] || [] } : {}),
         };
@@ -143,7 +164,7 @@ export class NNTree {
   private processSubflow(node: Node, diagram: DiagramCore, visited: Set<string>): string {
     const graph = this.compileSubflowGraph(diagram, node.id);
 
-    const outerChilds = diagram.getChilds(node.id);
+    const outerChilds = this.computationalChildren(node.id);
     const nextNodes: string[] = [];
     for (const child of outerChilds) {
       const nnNode = this.processNode(child, diagram, visited);
@@ -170,7 +191,7 @@ export class NNTree {
     seq.push(this.nodeToModule(node, diagram))
     do {
       let child = childs[0];
-      let parents = diagram.getParents(child.id);
+      let parents = this.computationalParents(child.id);
       if (parents.length > 1) {
         break;
       }
@@ -181,7 +202,7 @@ export class NNTree {
         break;
       }
       visited.add(child.id);
-      childs = diagram.getChilds(child.id);
+      childs = this.computationalChildren(child.id);
       if (childs.length === 0) {
         this.lossNode = {
           type: "module",
@@ -213,7 +234,7 @@ export class NNTree {
   }
 
   private handleJoin(node: Node, diagram: DiagramCore, visited: Set<string>): string {
-    let childs = diagram.getChilds(node.id);
+    let childs = this.computationalChildren(node.id);
     let next_tree_nodes: string[] = [];
     for (const child of childs) {
       let nn_node = this.processNode(child, diagram, visited);
@@ -225,7 +246,8 @@ export class NNTree {
       name: node.data.name,
       stereotype: node.data.stereotype,
       pythonClassName: this.getPythonClassName(diagram, node),
-      params: node.data.params
+      params: node.data.params,
+      moduleId: node.id
     } as JoinData));
     return node.id;
 
@@ -242,12 +264,12 @@ export class NNTree {
       return this.processSubflow(node, diagram, visited);
     }
 
-    let parents = diagram.getParents(node.id);
+    let parents = this.computationalParents(node.id);
     if (parents.length > 1) {
       return this.handleJoin(node, diagram, visited);
     }
 
-    let childs = diagram.getChilds(node.id);
+    let childs = this.computationalChildren(node.id);
     if (childs.length === 1) {
       return this.createSequential(node, diagram, visited, childs);
     } else if (childs.length > 1) {
@@ -262,6 +284,7 @@ export class NNTree {
     } else {
       this.lossNode = {
         type: "module",
+        moduleId: node.id,
         name: node.data.name,
         stereotype: node.data.stereotype,
         pythonClassName: this.getPythonClassName(diagram, node),
@@ -273,13 +296,87 @@ export class NNTree {
   }
 
   public toJson(): string {
+    const observables = this.diagram.nodes
+      .filter((node) => this.isObservable(node))
+      .map((node) => {
+        const stereo = this.diagram.getStereotype(String(node.data.stereotype));
+        const contract = stereo?.observable;
+        const params = (node.data.params ?? {}) as Record<string, { value?: string }>;
+        const inputs = this.diagram.edges
+          .filter((edge) => edge.target === node.id)
+          .sort((a, b) => this.compareTargetHandles(a.targetHandle ?? "in-0", b.targetHandle ?? "in-0"))
+          .map((edge) => ({ targetHandle: edge.targetHandle ?? "in-0", sourceNodeId: edge.source, sourcePoint: edge.sourceHandle ?? "out" }));
+        const validationErrors: string[] = [];
+        const structuralObservable = node.type === "observable" || node.data.isObservable === true;
+        if (!stereo?.isObservable || !contract || !structuralObservable) {
+          validationErrors.push("Observable node is not compatible with its stereotype category");
+        }
+        const expectedHandles = new Set(contract?.inputs.map((input) => input.id) ?? []);
+        const occupiedHandles = new Map<string, number>();
+        for (const input of inputs) {
+          occupiedHandles.set(input.targetHandle, (occupiedHandles.get(input.targetHandle) ?? 0) + 1);
+          if (!expectedHandles.has(input.targetHandle)) {
+            validationErrors.push(`Unknown Observable target handle '${input.targetHandle}'`);
+          }
+          const source = this.diagram.getNodeById(input.sourceNodeId);
+          if (this.isObservable(source)) {
+            validationErrors.push(`Observable '${input.sourceNodeId}' cannot be an observation source`);
+          }
+          const sourceStereo = source ? this.diagram.getStereotype(String(source.data.stereotype)) : undefined;
+          const pointExists = input.sourcePoint === "out" || sourceStereo?.observablePoints.some((point) => point.id === input.sourcePoint) === true;
+          if (!pointExists) validationErrors.push(`Unknown source point '${input.sourcePoint}'`);
+        }
+        for (const input of contract?.inputs ?? []) {
+          const count = occupiedHandles.get(input.id) ?? 0;
+          if (input.required && count !== 1) validationErrors.push(`Observable input '${input.label}' requires exactly one connection`);
+          if (!input.required && count > 1) validationErrors.push(`Observable input '${input.label}' has duplicate connections`);
+        }
+        for (const edge of this.diagram.edges.filter((candidate) => candidate.source === node.id)) {
+          if (!this.isObservable(this.diagram.getNodeById(edge.target))) {
+            validationErrors.push("Observable nodes cannot feed computational nodes");
+          }
+        }
+        return [node.id, {
+          id: node.id,
+          name: node.data.name,
+          stereotype: node.data.stereotype,
+          pythonClassName: stereo?.pythonClassName ?? "",
+          enabled: node.data.enabled !== false && validationErrors.length === 0,
+          captureKind: contract?.captureKind,
+          supportedModes: contract?.supportedModes ?? [],
+          executionModes: this.parseList(params.execution_modes?.value),
+          finalizePhase: contract?.finalizePhase,
+          retentionScope: params.retention_scope?.value ?? contract?.defaultRetentionScope,
+          storageStrategy: params.storage_strategy?.value ?? contract?.defaultStorageStrategy,
+          inputs,
+          params: node.data.params ?? {},
+          resultSchema: contract?.resultSchema ?? {},
+          validationErrors,
+        }];
+      });
     const serializableObject = {
       root: this.root,
       lossNode: this.lossNode,
-      nodes: Object.fromEntries(this.nodes)
+      nodes: Object.fromEntries(this.nodes),
+      ...(observables.length > 0 ? {
+        interpretability: {
+          enabled: observables.some(([, observable]) => (observable as { enabled: boolean }).enabled),
+          observables: Object.fromEntries(observables),
+        },
+      } : {})
     };
 
     return JSON.stringify(serializableObject, null, 2);
+  }
+
+  private parseList(value: string | undefined): string[] {
+    if (!value) return [];
+    return value.replace(/[\[\]'\s]/g, "").split(",").filter(Boolean);
+  }
+
+  private compareTargetHandles(a: string, b: string): number {
+    const number = (handle: string): number => Number.parseInt(handle.replace("in-", ""), 10) || 0;
+    return number(a) - number(b);
   }
 }
 
@@ -337,6 +434,7 @@ export interface JoinData {
   stereotype: string;
   pythonClassName?: string;
   params: any;
+  moduleId?: string;
 }
 
 export interface ModuleData {
@@ -346,6 +444,7 @@ export interface ModuleData {
   pythonClassName?: string;
   taskType?: string;
   params: any;
+  moduleId?: string;
 }
 
 export interface SubflowData {
@@ -374,4 +473,5 @@ export interface InternalNodeData {
   inputs?: string[];
   entryNode?: string;
   nodes?: Record<string, InternalNodeData>;
+  moduleId?: string;
 }

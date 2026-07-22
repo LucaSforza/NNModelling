@@ -167,48 +167,46 @@ export interface JoinConfig {
  *   - `concat`: for Concat joins, specifies which dimension is concatenated.
  *     `dim` is a string like `"params.dim"` resolving to a parameter on the node.
  */
-export interface TypeSignature {
-  /** 'module' | 'join' | 'subflow' */
-  kind: 'module' | 'join' | 'subflow';
-
-  /** Input pattern(s). Single ShapePattern for modules, array for joins. */
-  input: ShapePattern | ShapePattern[];
-
-  /** Output pattern. */
-  output: ShapePattern;
-
+interface TypeSignatureBase {
   /** Optional dtype constraints. */
   dtype?: {
     input?: DType;
     output?: DType;
   };
 
-  /**
-   * Optional subflow configuration (for `kind: 'subflow'` signatures).
-   * Declares how the engine should handle subflow type inference.
-   */
   subflow?: SubflowConfig;
-
-  /**
-   * Optional join configuration (for `kind: 'join'` signatures).
-   * Declares join-specific action (concat, element_wise, etc.).
-   */
   join?: JoinConfig;
-
-  /** Optional additional constraints (e.g. concat dimension).
-   *  @deprecated Use `join` or `subflow` instead.
-   */
   constraints?: {
     concat?: { dim: string };
   };
-
-  /**
-   * Optional advisory warnings for this stereotype.
-   * Each advisory defines a condition evaluated after type inference
-   * that, when truthy, produces a warning in the type result.
-   */
   advisories?: Advisory[];
 }
+
+export interface ModuleTypeSignature extends TypeSignatureBase {
+  kind: 'module';
+  input: ShapePattern;
+  output: ShapePattern;
+}
+
+export interface JoinTypeSignature extends TypeSignatureBase {
+  kind: 'join';
+  input: ShapePattern[];
+  output: ShapePattern;
+}
+
+export interface SubflowTypeSignature extends TypeSignatureBase {
+  kind: 'subflow';
+  input: ShapePattern;
+  output: ShapePattern;
+}
+
+/** Observable signatures intentionally have no output contract. */
+export interface ObservableTypeSignature {
+  kind: 'observable';
+  input: ShapePattern[];
+}
+
+export type TypeSignature = ModuleTypeSignature | JoinTypeSignature | SubflowTypeSignature | ObservableTypeSignature;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 10. TypeError — error/warning during type inference
@@ -322,7 +320,8 @@ export interface NodeTypeAnnotation {
   inputTypes?: TensorType[];
 
   /** Type produced by this node. */
-  outputType: TensorType;
+  /** Computational output. Observable annotations intentionally omit this. */
+  outputType?: TensorType;
 
   /** Primary node IDs whose type errors prevented inference here. */
   blockedBy?: string[];

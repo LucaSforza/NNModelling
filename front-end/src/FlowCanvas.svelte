@@ -32,6 +32,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import CustomNode from "./nodes/CustomNode.svelte";
   import SubflowNode from "./nodes/SubflowNode.svelte";
   import JoinNode from "./nodes/JoinNode.svelte";
+  import ObservableNode from "./nodes/ObservableNode.svelte";
   import {
     checkValidConnection,
     handleLoadModel,
@@ -57,6 +58,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     custom: CustomNode,
     subflow: SubflowNode,
     join: JoinNode,
+    observable: ObservableNode,
   };
 
   // 2. Istanziamo il nostro "Controller/Model"
@@ -177,7 +179,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   async function handleConversion() {
     const typeResult = diagram.refreshTypes();
     const blockingErrors = typeResult.errors.filter(
-      (error) => error.severity === "error",
+      (error) => error.severity === "error" && !diagram.isObservableNode(diagram.getNodeById(error.nodeId)),
     );
     if (blockingErrors.length > 0) {
       const summary = blockingErrors

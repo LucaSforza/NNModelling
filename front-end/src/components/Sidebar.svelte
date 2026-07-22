@@ -35,11 +35,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     width: 140,
     height: 60,
     params: {} as Record<string, any>,
+    enabled: true,
   });
 
   let selection = $state<Stereotype | null>(null);
   let isEditing = $derived(selectedNode !== null);
   let isSubflow = $derived(selectedNode?.type === "subflow"); // <-- Rileva se è un sottografo
+  let isObservable = $derived(selectedNode?.type === "observable" || selection?.isObservable === true);
   let subflowStereotypes = $derived(diagram.stereotypes.filter(s => s.isSubFlow));
 
   // --- LOGICA RESIZER ---
@@ -99,6 +101,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       form.width = vnode.width || 400;
       form.height = vnode.height || 300;
       form.params = {};
+      form.enabled = vnode.data.enabled !== false;
     } else {
       // Gestione standard per nodi Custom
       const stereotypeName = vnode.data.stereotype as string;
@@ -108,6 +111,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       form.width = vnode.width || 140;
       form.height = vnode.height || 60;
       form.params = {};
+      form.enabled = vnode.data.enabled !== false;
     }
 
     // Build params from stereotype defaults, then override with stored values
@@ -130,6 +134,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     form.width = 140;
     form.height = 60;
     form.params = {};
+    form.enabled = true;
   }
 
   function onStereotypeChange(newStereotype: Stereotype | null) {
@@ -256,6 +261,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           height: form.height,
           stereotype: selection?.name,
           params: { ...form.params }
+          ,enabled: isObservable ? form.enabled : undefined
         });
       }
       scheduleTypeCheck();
@@ -337,6 +343,16 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
               </div>
             {/each}
           </div>
+        {/if}
+      {/if}
+
+      {#if isObservable}
+        <label class="observable-enabled-control">
+          <input type="checkbox" bind:checked={form.enabled} onchange={handleManualUpdate} />
+          Enabled
+        </label>
+        {#if selection?.observable}
+          <p class="observable-contract">Captures {selection.observable.captureKind.toLowerCase()} · {selection.observable.finalizePhase.toLowerCase()}</p>
         {/if}
       {/if}
 

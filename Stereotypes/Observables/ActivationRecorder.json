@@ -1,0 +1,27 @@
+{
+  "category": "Observable",
+  "pythonClassName": "interpretability.ActivationRecorder",
+  "view": {"color": "#7c3aed", "width": 210, "height": 100},
+  "observable": {
+    "captureKind": "FORWARD_VALUE",
+    "supportedModes": ["TRAIN", "EVAL", "PREDICT"],
+    "finalizePhase": "POST_RUN",
+    "defaultRetentionScope": "RUN",
+    "supportedRetentionScopes": ["LAST", "BATCH", "EPOCH", "RUN"],
+    "defaultStorageStrategy": "SAMPLED",
+    "supportedStorageStrategies": ["FULL", "SAMPLED"],
+    "inputs": [{"id": "in-0", "label": "activation", "required": true}],
+    "resultSchema": {"kind": "tensor_reference", "fields": ["artifact", "shape", "dtype", "size"]}
+  },
+  "params": {
+    "execution_modes": {"type": "str", "default": "['TRAIN', 'EVAL', 'PREDICT']"},
+    "retention_scope": {"type": "str", "default": "RUN"},
+    "storage_strategy": {"type": "str", "default": "SAMPLED"},
+    "max_samples": {"type": "int", "default": "128"},
+    "sample_every": {"type": "int", "default": "1"},
+    "move_to_cpu": {"type": "bool", "default": "True"},
+    "detach": {"type": "bool", "default": "True"},
+    "wandb_table_name": {"type": "str", "default": ""}
+  },
+  "type_signature": {"kind": "observable", "input": [[{"kind": "wildcard"}]]}
+}

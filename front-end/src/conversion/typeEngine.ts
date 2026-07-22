@@ -49,6 +49,12 @@ interface PatternMatchResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class TypeEngine {
+  private static isObservableNode(diagram: DiagramCore, node: Node | undefined): boolean {
+    if (!node) return false;
+    const stereotype = diagram.getStereotype(String(node.data.stereotype ?? ""));
+    return stereotype?.isObservable === true;
+  }
+
   /**
    * Full-graph type inference.
    *
@@ -64,8 +70,12 @@ export class TypeEngine {
     const env: TypeEnvironment = new Map();
 
     // Only top-level nodes (subflow internals deferred to Phase 4)
-    const topLevelNodes = diagram.nodes.filter((n) => !n.parentId);
-    const sortedIds = this.topologicalSort(topLevelNodes, diagram.edges);
+    const isObservable = (node: Node): boolean => this.isObservableNode(diagram, node);
+    const observableIds = new Set(diagram.nodes.filter(isObservable).map((node) => node.id));
+    const computationalNodes = diagram.nodes.filter((node) => !isObservable(node));
+    const computationalEdges = diagram.edges.filter((edge) => !observableIds.has(edge.target) && !observableIds.has(edge.source));
+    const topLevelNodes = computationalNodes.filter((n) => !n.parentId);
+    const sortedIds = this.topologicalSort(topLevelNodes, computationalEdges);
 
     // Cycle detection
     if (sortedIds.length < topLevelNodes.length) {
@@ -100,7 +110,7 @@ export class TypeEngine {
             node.data as Record<string, unknown>
           ).params as Record<string, unknown>;
           // Compute input type inline (inputType not yet declared at this point)
-          const incEdges = diagram.edges.filter((e) => e.target === nodeId);
+          const incEdges = computationalEdges.filter((e) => e.target === nodeId);
           const blockedBy = this.blockedByFromEdges(incEdges, annotations);
           if (blockedBy.length > 0) {
             annotations.set(nodeId, this.blockedAnnotation(nodeId, blockedBy));
@@ -167,7 +177,7 @@ export class TypeEngine {
       const sig = stereotype.typeSignature;
 
       // ── Step d: Determine input type(s) ──────────────────────────
-      const incomingEdges = diagram.edges.filter((e) => e.target === nodeId);
+      const incomingEdges = computationalEdges.filter((e) => e.target === nodeId);
       const blockedBy = this.blockedByFromEdges(incomingEdges, annotations);
       if (blockedBy.length > 0) {
         annotations.set(nodeId, this.blockedAnnotation(nodeId, blockedBy));
@@ -193,7 +203,7 @@ export class TypeEngine {
         for (const e of sortedEdges) {
           const srcAnn = annotations.get(e.source);
           if (srcAnn) {
-            collected.push(srcAnn.outputType);
+            if (srcAnn.outputType) collected.push(srcAnn.outputType);
           } else {
             allFound = false;
           }
@@ -230,7 +240,7 @@ export class TypeEngine {
         for (const e of incomingEdges) {
           const srcAnn = annotations.get(e.source);
           if (srcAnn) {
-            collected.push(srcAnn.outputType);
+            if (srcAnn.outputType) collected.push(srcAnn.outputType);
           } else {
             allFound = false;
           }
@@ -299,14 +309,126 @@ export class TypeEngine {
       }
     }
 
+    this.validateObservableCategoryConsistency(diagram, errors);
+    this.validateObservables(diagram, observableIds, annotations, errors);
     const uniqueErrors = this.dedupeErrors(errors);
     return {
-      ok: uniqueErrors.every((e) => e.severity !== "error"),
+      ok: uniqueErrors.filter((error) => !error.nodeId || !observableIds.has(error.nodeId)).every((e) => e.severity !== "error"),
       annotations,
       errors: uniqueErrors,
       warnings,
       suggestions,
     };
+  }
+
+  private static validateObservableCategoryConsistency(
+    diagram: DiagramCore,
+    errors: TypeError[],
+  ): void {
+    for (const node of diagram.nodes) {
+      const structuralObservable = node.type === "observable" || node.data.isObservable === true;
+      const categoryObservable = this.isObservableNode(diagram, node);
+      if (structuralObservable !== categoryObservable) {
+        errors.push({
+          nodeId: node.id,
+          message: `Observable structure does not match stereotype category for node '${node.id}'`,
+          severity: "error",
+        });
+      }
+    }
+  }
+
+  private static validateObservables(
+    diagram: DiagramCore,
+    observableIds: Set<string>,
+    annotations: Map<string, NodeTypeAnnotation>,
+    errors: TypeError[],
+  ): void {
+    for (const node of diagram.nodes.filter((candidate) => observableIds.has(candidate.id))) {
+      const stereo = diagram.getStereotype(String(node.data.stereotype));
+      const contract = stereo?.observable;
+      const structuralObservable = node.type === "observable" || node.data.isObservable === true;
+      if (!stereo?.isObservable || !contract || !structuralObservable) {
+        errors.push({ nodeId: node.id, message: "Observable node has no valid Observable stereotype", severity: "error" });
+        continue;
+      }
+      const incoming = diagram.edges
+        .filter((edge) => edge.target === node.id)
+        .sort((a, b) => this.compareTargetHandles(a.targetHandle ?? "in-0", b.targetHandle ?? "in-0"));
+      const inputTypes: TensorType[] = [];
+      const signature = stereo.typeSignature;
+      const patterns = signature?.kind === "observable" ? signature.input : [];
+      for (const edge of diagram.edges.filter((candidate) => candidate.source === node.id)) {
+        if (!this.isObservableNode(diagram, diagram.getNodeById(edge.target))) {
+          errors.push({ nodeId: node.id, message: "Observable nodes cannot feed computational nodes", severity: "error" });
+        }
+      }
+      const byHandle = new Map<string, Edge[]>();
+      for (const edge of incoming) {
+        const handle = edge.targetHandle ?? "in-0";
+        const existing = byHandle.get(handle) ?? [];
+        existing.push(edge);
+        byHandle.set(handle, existing);
+        if (!contract.inputs.some((input) => input.id === handle)) {
+          errors.push({ nodeId: node.id, message: `Unknown Observable target handle '${handle}'`, severity: "error" });
+        }
+        const source = diagram.getNodeById(edge.source);
+        if (!source) {
+          errors.push({ nodeId: node.id, message: `Observable source '${edge.source}' does not exist`, severity: "error" });
+          continue;
+        }
+        if (this.isObservableNode(diagram, source)) {
+          errors.push({ nodeId: node.id, message: `Observable '${edge.source}' cannot be an observation source`, severity: "error" });
+        }
+        const sourcePoint = edge.sourceHandle ?? "out";
+        const sourceStereo = diagram.getStereotype(String(source.data.stereotype ?? ""));
+        if (sourcePoint !== "out" && !sourceStereo?.observablePoints.some((point) => point.id === sourcePoint)) {
+          errors.push({ nodeId: node.id, message: `Unknown source point '${sourcePoint}'`, severity: "error" });
+        }
+      }
+      for (let index = 0; index < contract.inputs.length; index++) {
+        const input = contract.inputs[index];
+        const matchingEdges = byHandle.get(input.id) ?? [];
+        if (input.required && matchingEdges.length !== 1) {
+          errors.push({ nodeId: node.id, message: `Observable input '${input.label}' requires exactly one connection`, severity: "error" });
+        } else if (!input.required && matchingEdges.length > 1) {
+          errors.push({ nodeId: node.id, message: `Observable input '${input.label}' has duplicate connections`, severity: "error" });
+        }
+        const edge = matchingEdges[0];
+        if (!edge) {
+          continue;
+        }
+        const source = annotations.get(edge.source);
+        if (!source?.outputType) {
+          errors.push({ nodeId: node.id, message: `Observable source '${edge.source}' has no computational output`, severity: "error" });
+          continue;
+        }
+        inputTypes.push(source.outputType);
+        const pattern = patterns[index];
+        if (pattern) {
+          const match = this.patternMatch(source.outputType.shape, pattern as ShapePattern, {}, new Map());
+          if (isTypeError(match)) errors.push({ nodeId: node.id, message: `${input.label}: ${match.message}`, severity: "error" });
+        }
+      }
+      const params = (node.data.params ?? {}) as Record<string, { value?: string }>;
+      const selectedModes = this.parseStringList(params.execution_modes?.value);
+      for (const mode of selectedModes) {
+        if (!contract.supportedModes.includes(mode)) errors.push({ nodeId: node.id, message: `Execution mode '${mode}' is not supported by ${stereo.name}`, severity: "error" });
+      }
+      const retention = params.retention_scope?.value ?? contract.defaultRetentionScope;
+      if (!contract.supportedRetentionScopes.includes(retention)) errors.push({ nodeId: node.id, message: `Retention scope '${retention}' is not supported`, severity: "error" });
+      const storage = params.storage_strategy?.value ?? contract.defaultStorageStrategy;
+      if (!contract.supportedStorageStrategies.includes(storage)) errors.push({ nodeId: node.id, message: `Storage strategy '${storage}' is not supported`, severity: "error" });
+      annotations.set(node.id, { nodeId: node.id, inputTypes });
+    }
+  }
+
+  private static parseStringList(value: string | undefined): string[] {
+    if (!value) return [];
+    try {
+      const parsed: unknown = JSON.parse(value.replaceAll("'", '"'));
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [value];
+    } catch { return value.split(",").map((item) => item.trim()).filter(Boolean); }
   }
 
   /**
@@ -342,15 +464,17 @@ export class TypeEngine {
     // Validate parameters referenced only by the output pattern as well.
     // Input-side param refs are checked by patternMatch, but output-only refs
     // (for example Linear.out_features) would otherwise degrade to a symbol.
-    for (const outputDim of sig.output) {
-      if (outputDim.kind !== "param_ref") continue;
-      const resolution = this.resolveParamRef(outputDim.name, params);
-      if (resolution.status === "invalid") {
-        return {
-          nodeId: nodeId ?? "",
-          message: `parameter ${outputDim.name} has invalid value "${resolution.value}", expected a number`,
-          severity: "error",
-        } satisfies TypeError;
+    if (sig.kind !== "observable") {
+      for (const outputDim of sig.output) {
+        if (outputDim.kind !== "param_ref") continue;
+        const resolution = this.resolveParamRef(outputDim.name, params);
+        if (resolution.status === "invalid") {
+          return {
+            nodeId: nodeId ?? "",
+            message: `parameter ${outputDim.name} has invalid value "${resolution.value}", expected a number`,
+            severity: "error",
+          } satisfies TypeError;
+        }
       }
     }
 
@@ -921,6 +1045,13 @@ export class TypeEngine {
         }
       }
 
+      case "observable":
+        return {
+          nodeId: nodeId ?? "",
+          message: `Observable "${stereotype.name}" has no computational output`,
+          severity: "error",
+        } satisfies TypeError;
+
       default:
         return {
           nodeId: "",
@@ -956,7 +1087,7 @@ export class TypeEngine {
   ): TensorType | TypeError {
     // 1. Collect internal nodes
     const internalNodes = diagram.nodes.filter(
-      (n) => n.parentId === subflowNodeId,
+      (n) => n.parentId === subflowNodeId && !this.isObservableNode(diagram, n),
     );
     if (internalNodes.length === 0) {
       return {
@@ -972,6 +1103,11 @@ export class TypeEngine {
       (e) =>
         internalNodeIds.has(e.source) && internalNodeIds.has(e.target),
     );
+    const computationalInternalEdges = internalEdges.filter((edge) => {
+      const source = diagram.getNodeById(edge.source);
+      const target = diagram.getNodeById(edge.target);
+      return !this.isObservableNode(diagram, source) && !this.isObservableNode(diagram, target);
+    });
 
     // 3. Find the single entry node (internal Input or topological source).
     const declaredInputs = internalNodes.filter((n) => {
@@ -994,7 +1130,7 @@ export class TypeEngine {
     // Fallback: if no Input node, use node(s) with no internal incoming edges
     if (!entryNode) {
       const sources = internalNodes.filter(
-        (n) => !internalEdges.some((e) => e.target === n.id),
+        (n) => !computationalInternalEdges.some((e) => e.target === n.id),
       );
       if (sources.length !== 1) {
         return {
@@ -1017,7 +1153,7 @@ export class TypeEngine {
     // 4. Find exit node(s) — internal nodes with no internal outgoing edges.
     //    The entry node CAN be an exit too (single-node subflows).
     let exitNodes = internalNodes.filter(
-      (n) => !internalEdges.some((e) => e.source === n.id),
+      (n) => !computationalInternalEdges.some((e) => e.source === n.id),
     );
     if (exitNodes.length === 0) {
       return {
@@ -1051,7 +1187,7 @@ export class TypeEngine {
     }
 
     // 6. Topological sort internal nodes
-    const sortedIds = this.topologicalSort(internalNodes, internalEdges);
+    const sortedIds = this.topologicalSort(internalNodes.filter((n) => !this.isObservableNode(diagram, n)), computationalInternalEdges);
 
     // 7. Build fast id→node lookup
     const nodesById = new Map<string, Node>();
@@ -1084,7 +1220,7 @@ export class TypeEngine {
           // Compute input type: entry node gets externalInputType,
           // other nodes get it from internal predecessor annotations
           let nestedInputType: TensorType | undefined;
-          const nestedIncomingEdges = internalEdges.filter(
+          const nestedIncomingEdges = computationalInternalEdges.filter(
             (e) => e.target === internalNodeId,
           );
           const blockedBy = this.blockedByFromEdges(nestedIncomingEdges, annotations);
@@ -1098,7 +1234,7 @@ export class TypeEngine {
           if (isEntry && externalInputType) {
             nestedInputType = externalInputType;
           } else {
-            const incomingEdges = internalEdges.filter(
+            const incomingEdges = computationalInternalEdges.filter(
               (e) => e.target === internalNodeId,
             );
             if (incomingEdges.length === 1) {
@@ -1153,7 +1289,7 @@ export class TypeEngine {
       const sig = stereotype.typeSignature;
 
       // 8d. Determine input type from internal edges
-      const localIncomingEdges = internalEdges.filter(
+      const localIncomingEdges = computationalInternalEdges.filter(
         (e) => e.target === internalNodeId,
       );
       const blockedBy = this.blockedByFromEdges(localIncomingEdges, annotations);
@@ -1182,7 +1318,7 @@ export class TypeEngine {
         });
         for (const e of sortedEdges) {
           const srcAnn = annotations.get(e.source);
-          if (srcAnn) collected.push(srcAnn.outputType);
+          if (srcAnn?.outputType) collected.push(srcAnn.outputType);
         }
         localInputTypes =
           collected.length > 0 ? collected : undefined;
@@ -1225,7 +1361,7 @@ export class TypeEngine {
             ));
         const preservesUsefulType =
           hasUnknownInput &&
-          (previousAnnotation?.outputType.shape.length ?? 0) > 0;
+          (previousAnnotation?.outputType?.shape.length ?? 0) > 0;
         if (!preservesUsefulType) {
           annotations.set(internalNodeId, {
             nodeId: internalNodeId,
@@ -1257,7 +1393,7 @@ export class TypeEngine {
     // 9. Return the single exit node's output type
     const exitNode = exitNodes[0];
     const exitAnn = annotations.get(exitNode.id);
-    if (!exitAnn) {
+    if (!exitAnn?.outputType) {
       return {
         nodeId: subflowNodeId,
         message: "Subflow exit node has no type annotation",

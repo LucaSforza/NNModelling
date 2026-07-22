@@ -13,7 +13,6 @@
 
 import { type Connection, type Edge, type InternalNode, type Node } from "@xyflow/svelte";
 import type { Diagram } from "./Diagram.svelte";
-import { checkValidConnection as coreCheckValidConnection } from "./core/validation";
 
 // Tipo esatto per il payload dell'evento di trascinamento
 export type NodeDragPayload = {
@@ -185,12 +184,11 @@ export function onNodeDragStop(
 
 // --- VALIDAZIONE CONNESSIONI ---
 export function checkValidConnection(diagram: Diagram, connection: Connection | Edge): boolean {
-  const result = coreCheckValidConnection(
-    diagram.edges,
+  const result = diagram.validateConnection(
     connection.source,
     connection.target,
     connection.sourceHandle ?? undefined,
-    connection.targetHandle ?? undefined
+    connection.targetHandle ?? undefined,
   );
   return result.valid;
 }

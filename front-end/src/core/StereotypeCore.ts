@@ -27,6 +27,30 @@ export interface StereotypeView {
   height: number;
 }
 
+export interface ObservableInput {
+  id: string;
+  label: string;
+  required: boolean;
+}
+
+export interface ObservableContract {
+  captureKind: "FORWARD_VALUE" | "BACKWARD_GRADIENT";
+  supportedModes: string[];
+  finalizePhase: string;
+  defaultRetentionScope: string;
+  supportedRetentionScopes: string[];
+  defaultStorageStrategy: string;
+  supportedStorageStrategies: string[];
+  inputs: ObservableInput[];
+  resultSchema: Record<string, unknown>;
+}
+
+export interface ObservablePoint {
+  id: string;
+  label: string;
+  tensorType?: TypeSignature;
+}
+
 export interface StereotypeJson {
   category?: string;
   pythonClassName?: string;
@@ -35,6 +59,8 @@ export interface StereotypeJson {
   view?: Partial<StereotypeView>;
   params?: Record<string, ModuleParameter>;
   type_signature?: TypeSignature;
+  observable?: ObservableContract;
+  observablePoints?: ObservablePoint[];
 }
 
 export class StereotypeCore {
@@ -47,10 +73,13 @@ export class StereotypeCore {
   public readonly parameters: Record<string, ModuleParameter>;
   public readonly view: StereotypeView;
   public readonly typeSignature?: TypeSignature;
+  public readonly observable?: ObservableContract;
+  public readonly observablePoints: ObservablePoint[];
   public readonly isJoin: boolean;
   public readonly isInput: boolean;
   public readonly isLoss: boolean;
   public readonly isSubFlow: boolean;
+  public readonly isObservable: boolean;
 
   constructor(filePath: string, data: StereotypeJson) {
     this.id = filePath;
@@ -85,12 +114,16 @@ export class StereotypeCore {
     };
 
     this.typeSignature = StereotypeCore.parseTypeSignature(data.type_signature);
+    this.observable = data.observable;
+    this.observablePoints = data.observablePoints ? [...data.observablePoints] : [];
 
     // Category flags
     this.isJoin   = data.category === "Join"   || filePath.includes("/Joins/");
     this.isInput  = data.category === "Input";
     this.isLoss   = data.category === "Loss";
     this.isSubFlow = data.category === "Subflow" || filePath.includes("/SubFlows/");
+    // Category is authoritative; directory placement is only a loader detail.
+    this.isObservable = data.category === "Observable";
   }
 
   // ── Vite loader (browser) ─────────────────────
@@ -154,18 +187,23 @@ export class StereotypeCore {
     if (!raw) return undefined;
     // Distinguish join input (ShapePattern[]) from module input (ShapePattern):
     // join input's first element is itself an array.
-    const joined = Array.isArray(raw.input[0]);
+    if (raw.kind === "observable") {
+      return {
+        kind: "observable",
+        input: (raw.input as ShapePattern[]).map((pat) => pat.map((d) => StereotypeCore.stripDollar(d))),
+      };
+    }
+    if (raw.kind === "join") {
+      return {
+        ...raw,
+        input: raw.input.map((pattern) => pattern.map((dimension) => StereotypeCore.stripDollar(dimension))),
+        output: raw.output.map((dimension) => StereotypeCore.stripDollar(dimension)),
+      };
+    }
     return {
-      kind: raw.kind,
-      input: joined
-        ? (raw.input as ShapePattern[]).map((pat) => pat.map((d) => StereotypeCore.stripDollar(d)))
-        : (raw.input as ShapePattern).map((d) => StereotypeCore.stripDollar(d)),
-      output: raw.output.map((d) => StereotypeCore.stripDollar(d)),
-      dtype: raw.dtype ? { ...raw.dtype } : undefined,
-      constraints: raw.constraints ? { ...raw.constraints } : undefined,
-      subflow: raw.subflow ? { ...raw.subflow } : undefined,
-      join: raw.join ? { ...raw.join } : undefined,
-      advisories: raw.advisories ? [...raw.advisories] : undefined,
+      ...raw,
+      input: raw.input.map((dimension) => StereotypeCore.stripDollar(dimension)),
+      output: raw.output.map((dimension) => StereotypeCore.stripDollar(dimension)),
     };
   }
 

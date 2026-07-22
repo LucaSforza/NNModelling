@@ -265,7 +265,7 @@ export class BrowserRPCHandler {
           result = this.handleValidateGraph();
           break;
         case "validate_connections":
-          result = { valid: true, errors: [], warnings: [] };
+          result = this.handleValidateConnections();
           break;
         case "validate_parameters":
           result = { valid: true, errors: [], warnings: [] };
@@ -420,6 +420,8 @@ export class BrowserRPCHandler {
         isInput: s.isInput,
         isLoss: s.isLoss,
         isSubFlow: s.isSubFlow,
+        isObservable: s.isObservable,
+        observable: s.observable,
         parameters: s.parameters,
         view: s.view,
       })),
@@ -455,6 +457,7 @@ export class BrowserRPCHandler {
         width: config.width as number | undefined,
         height: config.height as number | undefined,
         params: (config.params as Record<string, string>) ?? {},
+        enabled: config.enabled as boolean | undefined,
       });
     }
 
@@ -984,10 +987,11 @@ export class BrowserRPCHandler {
     // Detect orphan nodes (no incoming or outgoing connections, except Input/Loss)
     for (const node of this.diagram.nodes) {
       const stereo = this.diagram.getStereotype((node.data as Record<string, unknown>).stereotype as string);
+      if (stereo?.isObservable) continue;
       if (stereo?.isInput || stereo?.isLoss) continue;
 
       const hasIncoming = this.diagram.edges.some((e) => e.target === node.id);
-      const hasOutgoing = this.diagram.edges.some((e) => e.source === node.id);
+      const hasOutgoing = this.diagram.edges.some((e) => e.source === node.id && !this.diagram.isObservableNode(this.diagram.getNodeById(e.target)));
 
       if (!hasIncoming && !hasOutgoing) {
         warnings.push(
@@ -1010,6 +1014,21 @@ export class BrowserRPCHandler {
       errors,
       warnings,
     };
+  }
+
+  private handleValidateConnections(): Record<string, unknown> {
+    const errors: Array<{ edgeId: string; message: string }> = [];
+    for (const edge of this.diagram.edges) {
+      const result = this.diagram.validateConnection(
+        edge.source,
+        edge.target,
+        edge.sourceHandle ?? undefined,
+        edge.targetHandle ?? undefined,
+        this.diagram.edges.filter((candidate) => candidate.id !== edge.id),
+      );
+      if (!result.valid) errors.push({ edgeId: edge.id, message: result.reason ?? "Invalid connection" });
+    }
+    return { valid: errors.length === 0, errors, warnings: [] };
   }
 
   // ── Canvas / Viewport Handlers ─────────────────────────────────────

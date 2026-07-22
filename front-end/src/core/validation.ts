@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-import type { Edge } from "@xyflow/svelte";
+import type { Edge, Node } from "@xyflow/svelte";
 
 export interface ConnectionValidation {
   valid: boolean;
@@ -47,11 +47,18 @@ export function checkValidConnection(
   source: string,
   target: string,
   sourceHandle?: string,
-  targetHandle?: string
+  targetHandle?: string,
+  nodes?: Node[],
+  isObservable?: (node: Node) => boolean,
 ): ConnectionValidation {
   // Self-loop check
   if (source === target) {
     return { valid: false, reason: "Cannot connect a node to itself" };
+  }
+
+  const sourceNode = nodes?.find((node) => node.id === source);
+  if (sourceNode && isObservable?.(sourceNode)) {
+    return { valid: false, reason: "Observable nodes cannot be connection sources" };
   }
 
   // Target handle occupancy check

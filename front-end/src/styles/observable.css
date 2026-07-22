@@ -1,0 +1,21 @@
+.observable-node {
+  position: relative;
+  min-width: 190px;
+  min-height: 80px;
+  padding: 22px 12px 10px;
+  border: 2px dotted #7c3aed;
+  border-radius: 10px;
+  background: #f3e8ff;
+  color: #4c1d95;
+  text-align: center;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.observable-node.observable-disabled { opacity: 0.52; }
+.observable-title { font-weight: 700; font-size: 0.9rem; }
+.observable-stereotype { margin-top: 4px; font-size: 0.72rem; color: #6d28d9; }
+.observable-paused { margin-top: 5px; font-size: 0.7rem; font-weight: 700; color: #581c87; }
+.observable-handles { position: absolute; inset: 0 0 auto; height: 22px; }
+.observable-input { position: absolute; top: 0; transform: translateX(-50%); font-size: 0.62rem; white-space: nowrap; }
+.observable-input span { display: block; margin-top: 2px; }

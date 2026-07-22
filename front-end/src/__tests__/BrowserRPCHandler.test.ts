@@ -159,6 +159,38 @@ describe("BrowserRPCHandler", () => {
     });
   });
 
+  it("rejects an unknown Observable target handle through validate_connections", () => {
+    const { handler, diagram, mockSend } = createHandler();
+    const dispatch = (id: string, method: string, params: Record<string, unknown>) => {
+      mockSend.mockClear();
+      (handler as any).handleMessage({ data: JSON.stringify({ id, method, params }) });
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      return JSON.parse(mockSend.mock.calls[0][0]);
+    };
+    const input = dispatch("input", "create_node", { stereotype: "Input" }).result.nodeId as string;
+    const observable = dispatch("observable", "create_node", { stereotype: "ActivationRecorder" }).result.nodeId as string;
+    diagram.edges = [{ id: "bad-handle", source: input, target: observable, sourceHandle: "out", targetHandle: "in-9" }];
+    const response = dispatch("validate-handle", "validate_connections", {});
+    expect(response.result.valid).toBe(false);
+    expect(response.result.errors[0].message).toContain("Unknown Observable target handle");
+  });
+
+  it("rejects an unknown Observable source point through validate_connections", () => {
+    const { handler, diagram, mockSend } = createHandler();
+    const dispatch = (id: string, method: string, params: Record<string, unknown>) => {
+      mockSend.mockClear();
+      (handler as any).handleMessage({ data: JSON.stringify({ id, method, params }) });
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      return JSON.parse(mockSend.mock.calls[0][0]);
+    };
+    const input = dispatch("input", "create_node", { stereotype: "Input" }).result.nodeId as string;
+    const observable = dispatch("observable", "create_node", { stereotype: "ActivationRecorder" }).result.nodeId as string;
+    diagram.edges = [{ id: "bad-point", source: input, target: observable, sourceHandle: "hidden", targetHandle: "in-0" }];
+    const response = dispatch("validate-point", "validate_connections", {});
+    expect(response.result.valid).toBe(false);
+    expect(response.result.errors[0].message).toContain("Unknown Observable source point");
+  });
+
   it("preserves parameter presentation metadata when values are updated", () => {
     const { handler, diagram, mockSend } = createHandler();
     const linear = diagram.getStereotype("Linear")!;
