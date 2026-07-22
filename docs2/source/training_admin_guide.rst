@@ -26,7 +26,8 @@ Architecture and trust boundary
 
 FastAPI owns authentication, job ownership, queueing, and live executor
 handles. Valkey persists session, queue, job, and event metadata. Job configs,
-logs, checkpoints, and results live under ``NNM_BACKEND_ARTIFACT_ROOT``.
+logs, checkpoints, model packages, and Observable results live under
+``NNM_BACKEND_ARTIFACT_ROOT``.
 
 The administrator capability is a random machine-local secret, not a user
 password. It is stored in ``converted/valkey-data/admin.token`` by default,
@@ -180,6 +181,53 @@ an unsupported dataset adapter. Keep the artifact root persistent and include
 wheels in backup/retention policies: they are the portable form of trained
 models.
 
+Observable artifact layout
+--------------------------
+
+When the submitted NNTree contains enabled Observables, conversion writes
+their definitions to ``JOB_ARTIFACT_DIR/cfg/interpretability/observables.yaml``.
+The runtime writes finalized JSON tables and, for ``ActivationRecorder``,
+large tensor files below a run-isolated directory:
+
+.. code-block:: text
+
+   JOB_ARTIFACT_DIR/
+   ├── cfg/interpretability/observables.yaml
+   ├── <run-id>/
+   │   ├── <observable-id>.json
+   │   └── <observable-id>_<index>_<uuid>.pt
+   ├── weights.safetensors
+   └── dist/nnm_<name>-0.1.0-py3-none-any.whl
+
+The exact run ID is printed as ``Observable results: ...`` in the job log. The
+remote local executor sets ``trainer.default_root_dir`` to the job artifact
+directory, so the normal runtime parent is the job directory and each run gets
+a child directory beneath it. This isolation prevents a later inference or
+retry from appending to an earlier run's result files.
+
+For standalone training, ``NNM_INTERPRETABILITY_ROOT`` sets the stable parent
+when the Hydra configuration does not provide a runtime root, and
+``NNM_INTERPRETABILITY_RUN_ID`` supplies an optional run ID. Direct inference
+has equivalent explicit flags:
+
+.. code-block:: bash
+
+   uv run python src/infer.py --config-path cfg --config-name base \
+       --weights weights.pt \
+       --interpretability-root /srv/nnm-runs/interpretability \
+       --interpretability-run-id predict-001
+
+Remote jobs normally inherit the job-specific trainer root. If an override is
+needed, keep it inside the configured artifact storage; do not redirect
+Observable output to an unrelated temporary directory or a path that is not
+mounted on Slurm compute nodes. Preserve per-job separation when using an
+override.
+
+Observable files are interpretability results, not model state. They are not
+embedded in ``weights.safetensors`` or the exported wheel, so retention and
+backup policies must include the run directories separately when these results
+are needed.
+
 Configuration reference
 -----------------------
 
@@ -201,7 +249,13 @@ Configuration reference
      - Persistent control-plane connection
    * - ``NNM_BACKEND_ARTIFACT_ROOT``
      - ``converted/jobs``
-     - Config, log, checkpoint, and result directory
+     - Config, log, checkpoint, model package, and Observable result directory
+   * - ``NNM_INTERPRETABILITY_ROOT``
+     - trainer/job artifact root
+     - Stable parent for standalone Observable run directories; keep overrides inside artifact storage
+   * - ``NNM_INTERPRETABILITY_RUN_ID``
+     - generated UUID
+     - Optional run ID for standalone training; inference can set the equivalent CLI flag
    * - ``NNM_ALLOWED_ORIGINS``
      - local Vite Origins
      - Comma-separated exact browser Origins
@@ -240,7 +294,8 @@ Cluster prerequisites
 2. Install the repository and ``uv sync`` on a filesystem visible to every
    compute node.
 3. Put ``NNM_BACKEND_ARTIFACT_ROOT`` on the same shared filesystem. Compute
-   nodes must see the artifact path under the identical absolute path.
+   nodes must see the artifact path, including Observable run directories,
+   under the identical absolute path.
 4. Ensure ``python`` in the submitted environment resolves to the NNModelling
    environment and can import PyTorch, Lightning, Hydra, datasets, and the
    project. Slurm normally exports the submission environment, but verify this
@@ -319,15 +374,22 @@ Slurm smoke test
 4. Confirm the Slurm ID with ``squeue`` and inspect
    ``JOB_ARTIFACT_DIR/batch.sh``.
 5. Verify terminal status, ``stdout.log``, ``stderr.log``, and checkpoint files.
-6. Submit a second job and test ``just ... admin-job-cancel JOB_ID``; confirm
+6. If the fixture includes Observables, verify
+   ``cfg/interpretability/observables.yaml`` and at least one run-isolated
+   Observable JSON result (plus a tensor artifact for ``ActivationRecorder``)
+   under ``JOB_ARTIFACT_DIR/<run-id>/``. With W&B disabled, this local result
+   is the expected verification target.
+7. Submit a second job and test ``just ... admin-job-cancel JOB_ID``; confirm
    that ``scancel`` removes it.
 
 Operations, backup, and recovery
 --------------------------------
 
-Back up both Valkey persistence files and the artifact root. They form one
-logical state: Valkey records point to filesystem artifacts. Preserve the
-administrator token separately with mode ``0600``.
+Back up both Valkey persistence files and the complete artifact root, including
+every run-isolated Observable directory. They form one logical state: Valkey
+records point to filesystem artifacts, while Observable JSON and tensor files
+may be the only durable copy of interpretability results when W&B is disabled
+or unavailable. Preserve the administrator token separately with mode ``0600``.
 
 To rotate the administrator capability, stop FastAPI, move the old file to a
 protected backup, run ``just ... admin-init``, then restart FastAPI. Existing

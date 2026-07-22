@@ -111,6 +111,7 @@ for the interactive canvas.
 | ``JoinNode.svelte``         | Multi-input merge node                  |
 +-----------------------------+-----------------------------------------+
 | ``SubflowNode.svelte``      | Collapsible container                   |
+| ``ObservableNode.svelte``   | Passive interpretability node           |
 +-----------------------------+-----------------------------------------+
 
 ### core/ (Pure TypeScript)
@@ -186,6 +187,13 @@ This is the heart of the frontend logic, written with zero Svelte dependencies.
       expose a conceptual rank-1 ``[B]`` output in the editor and set the task
       type for metric selection. The current Python backend still extracts them
       as terminal objectives; runtime output propagation is future work.
+    * **Observable partition** — nodes whose stereotype category is
+      ``Observable`` and edges targeting them are removed from computational
+      traversals. Their definitions are compiled under an additive
+      ``interpretability.observables`` section instead.
+    * **Stable source binding** — each compacted ``ModuleData`` layer retains
+      its visual ``moduleId``. This lets the runtime bind a public ``out``
+      observation to the original visual node without changing model topology.
 
 ### mcp-server/ (Thin Proxy)
 
@@ -281,18 +289,20 @@ Stereotype System
 -----------------
 
 Stereotypes define the behavior and appearance of node types. They are stored
-as JSON files in three directories:
+as JSON files in four directories:
 
 .. code-block:: text
 
    Stereotypes/
    ├── Modules/      # 27 node templates (Linear, Conv2d, ReLU, ...)
    ├── Joins/        # 6 merge operations (Addition, Concat, ...)
-   └── SubFlows/     # 2 container templates (Repeat, HorizontalRepeat)
+   ├── SubFlows/     # 2 container templates (Repeat, HorizontalRepeat)
+   └── Observables/  # Passive analyses (ActivationRecorder, ActivationStatistics)
 
 Each JSON defines:
 
-* **category** — determines node behavior (Input, Layer, Join, Loss, etc.)
+* **category** — determines node behavior (Input, Layer, Join, Loss,
+  Observable, etc.)
 * **pythonClassName** — maps to the Python class (e.g. ``nn.Linear``)
 * **params** — configurable parameters with type, default, and position
 * **view** — visual properties (color, width, height)
@@ -301,6 +311,32 @@ The ``StereotypeCore`` class provides two loading strategies:
 
 * ``loadFromDirectory()`` — uses Vite's ``import.meta.glob`` (browser)
 * ``loadFromDirectoryNode(path)`` — uses Node's ``fs`` module (MCP server)
+
+Observable runtime separation
+-----------------------------
+
+The Python side keeps interpretability outside the trainable model. ``Net``
+owns an ``ObservableManager`` collaborator, but the manager is not an
+``nn.Module`` and its hooks, transient buffers, and publishers are not part of
+``ModuleDict``, ``state_dict`` or saved weights. The manager resolves compiled
+``moduleId`` values, attaches passive hooks that return ``None``, handles
+Input/Fork passthrough captures, gates by execution mode, and routes
+``POST_BATCH``, ``POST_STEP``, ``POST_EPOCH`` and ``POST_RUN`` events.
+
+The runtime is separated into three responsibilities:
+
+* ``interpretability.base`` and the recorder/statistics implementations hold
+  capture context, aggregation state, and result schemas;
+* ``interpretability.manager.ObservableManager`` validates definitions, binds
+  sources, manages lifecycle and clears state before serialization;
+* ``interpretability.publishers`` writes one table per Observable to optional
+  W&B and always provides local JSON/tensor artifact persistence.
+
+``convert.py`` writes the optional ``interpretability/observables.yaml`` Hydra
+group rather than placing Observables in ``cfg.net.nodes``. Local output uses a
+unique ``<root>/<run-id>/`` directory per execution. Missing or failed W&B
+publication is non-fatal, and invalid Observables are skipped without blocking
+the valid computational model.
 
 Data Flow
 ---------

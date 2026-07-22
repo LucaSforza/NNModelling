@@ -9,7 +9,10 @@ OpenAI or DeepSeek implementer explicitly requested by the user.
 
 ## Project Overview
 
-**NNModelling** — DSL for designing neural networks via visual node editor. Diagrams convert to PyTorch/Lightning code.
+**NNModelling** — DSL for designing neural networks via visual node editor, with
+passive Observable nodes for interpretability. Diagrams convert to
+PyTorch/Lightning code while keeping the computational and observation graphs
+separate.
 
 Three main packages (pnpm workspace):
 
@@ -54,6 +57,9 @@ screenshot inspection, training workflow, and port-leak diagnostics. Reuse its
 3. Configure parameters via sidebar (position, color, params)
 4. Save/Load diagrams as JSON (`.json` files)
 5. Convert to Python: Diagram → NNTree → JSON → `convert.py` → Hydra YAML configs
+6. Optionally attach Observable nodes to public `out` handles; their definitions
+   compile into a separate `interpretability` configuration and never become
+   model layers
 
 ## Dev Commands
 
@@ -120,6 +126,7 @@ NNModelling/
 │   │   ├── BrowserRPCHandler.test.ts  # RPC handler tests
 │   │   ├── undoRedo.test.ts     # Undo/redo snapshot-based tests
 │   │   ├── expr.test.ts        # Expression tokenizer, parser, evaluator (54 tests)
+│   │   ├── observableNodes.test.ts # Observable creation, compilation and type isolation
 │   │       ├── fuzz/               # Fuzz testing (compilability, serialization, operation commutativity)
 │   │       │   ├── helpers.ts
 │   │       │   ├── compilability.test.ts
@@ -143,7 +150,8 @@ NNModelling/
 │   ├── nodes/
 │   │   ├── CustomNode.svelte   # Standard NN module node (with type error indicator badges)
 │   │   ├── JoinNode.svelte     # Merge node (multi-input) (with type error indicator badges)
-│   │   └── SubflowNode.svelte  # Collapsible submodel container (with type error indicator badges)
+│   │   ├── SubflowNode.svelte  # Collapsible submodel container (with type error indicator badges)
+│   │   └── ObservableNode.svelte # Passive fixed-target interpretability node (no outputs)
 │   ├── conversion/
 │   │   ├── nnTree.ts           # Diagram → tree representation
 │   │   ├── tensortypes.ts      # Tensor type model interfaces
@@ -154,7 +162,7 @@ NNModelling/
 │   │   ├── parser.ts             # Recursive descent parser (precedence, groups, calls)
 │   │   ├── evaluator.ts          # AST evaluator with env/params resolution
 │   │   └── index.ts              # Public API: parseExpr (cached), evaluate
-│   ├── styles/                 # CSS (flowcanvas, node, sidebar, join, subflow, dropdown)
+│   ├── styles/                 # CSS (flowcanvas, node, sidebar, join, subflow, observable, dropdown)
 │   ├── components/
 │   │   ├── Sidebar.svelte      # Node create/edit form
 │   │   ├── TrainingSidebar.svelte # Dataset, Hydra, resources, and jobs
@@ -167,9 +175,10 @@ NNModelling/
 │   ├── App.svelte              # Entry point (SvelteFlowProvider)
 │   └── main.ts                 # Mount point
 ├── Stereotypes/                # JSON template definitions
-│   ├── Modules/                # 27 layers (Input, Linear, Conv2d, ReLU, etc.)
+│   ├── Modules/                # 29 computational stereotypes (Input, Linear, Conv2d, ReLU, etc.)
 │   ├── Joins/                  # Addition, Concat, Einsum, MatMul, ScaledDotProduct, MaskedScaledDotProduct
-│   └── SubFlows/               # Repeat, HorizontalRepeat templates
+│   ├── SubFlows/               # Repeat, HorizontalRepeat templates
+│   └── Observables/            # ActivationRecorder, ActivationStatistics templates
 ├── examples/                   # Test fixtures for integration tests
 │   ├── manifest.json           # Diagram metadata (input shapes, task type, trainable flags)
 │   ├── diagrams/               # Svelte Flow format source diagrams
@@ -197,6 +206,7 @@ NNModelling/
 │   ├── main.py                 # Training entry point (Hydra + Lightning)
 │   ├── infer.py                # Inference on trained model (--output, --image-dir)
 │   ├── model_package/           # Portable wheel exporter, GraphNet runtime, and input adapters
+│   ├── interpretability/        # ObservableManager, passive analyses, lifecycle and publishers
 │   └── tests/                  # Python test suite (pytest)
 │       ├── test_ops.py         # 36 ops unit tests
 │       ├── test_convert.py     # 35 convert.py unit tests
@@ -204,7 +214,9 @@ NNModelling/
 │       ├── test_integration.py # 11 end-to-end integration tests
 │       ├── test_main.py        # 2 training smoke tests
 │       ├── test_infer.py       # 4 inference validation tests
-│       └── test_remote_backend.py # Backend API, queue, and executor tests
+│       ├── test_remote_backend.py # Backend API, queue, and executor tests
+│       ├── test_interpretability.py # Observable runtime, conversion and lifecycle tests
+│       └── fixtures/observable_nntree.json # Handwritten Observable pipeline fixture
 ├── converted/backend/          # Valkey config and Docker deployment
 ├── mcp-server/                        # MCP server package (Node.js ESM)
 │   ├── package.json
@@ -257,6 +269,7 @@ NNModelling/
 │   │   ├── python_api.rst      # Auto-generated Python API docs
 │   │   ├── typescript_api.rst  # TypeDoc integration page
 │   │   ├── type_system.rst     # Educational tensor type system guide
+│   │   ├── observables.rst     # Observable graph, runtime and storage guide
 │   │   ├── examples.rst        # Walkthrough of all 10 example diagrams
 │   │   └── _static/            # Static assets
 │   └── build/                  # Build output (generated)
@@ -272,7 +285,7 @@ NNModelling/
 - **Pattern**: Pure TS unit tests, no DOM/browser
 - **Real Diagram**: Tests use real `Diagram` class (Svelte `$state.raw` compiled by Vite plugin). Stub `globalThis.window` before construction.
 - **Helpers**: `node(id, stereo, name, params, overrides?)` and `edge(id, source, target, handles?)` for concise fixtures.
-- **Coverage**: **293 tests passed, 5 skipped** — sequential chain, skip/joins, autoencoder, subflow compilation, nested subflows, hidden nodes, error handling, connection validation, Fork node, type inference (Input, Linear, ReLU, Conv1d, Conv2d, Flatten, Unflatten, MaxPool2d, wildcards, mismatches, edge cases, computed dimensions, param_spread, join type checking, Repeat/HorizontalRepeat subflows, generic subflow recursion, nested subflows, loss nodes, complex modules), BrowserRPCHandler, MCP type serialization, undo/redo, param merging, edge handle defaults, viewport injection, invalid parameter validation, parentId placement, fuzz testing, expression evaluator, dtype validation, advisory warnings, shape suggestions, join input labels, Einsum shape inference, model loading validation, and training API helpers
+- **Coverage**: **325 tests passed, 5 skipped at Observable v1 validation** — sequential chain, skip/joins, autoencoder, subflow compilation, nested subflows, hidden nodes, error handling, connection validation, Fork node, Observable creation/compilation and isolated type validation, type inference (Input, Linear, ReLU, Conv1d, Conv2d, Flatten, Unflatten, MaxPool2d, wildcards, mismatches, edge cases, computed dimensions, param_spread, join type checking, Repeat/HorizontalRepeat subflows, generic subflow recursion, nested subflows, loss nodes, complex modules), BrowserRPCHandler, MCP type serialization, undo/redo, param merging, edge handle defaults, viewport injection, invalid parameter validation, parentId placement, fuzz testing, expression evaluator, dtype validation, advisory warnings, shape suggestions, join input labels, Einsum shape inference, model loading validation, and training API helpers
 
 ### Testing — Integration (Vitest + Python Pipeline)
 
@@ -295,10 +308,10 @@ NNModelling/
 
 - **Framework**: pytest (via `uv run pytest`)
 - **Files**: `converted/src/tests/` — pure Python tests (no TS/Vitest dependency)
-- **Coverage**: **112 fast non-training Python tests** currently pass across the conversion, runtime, integration, and remote-backend suites; full training/inference pipeline tests remain separate because they are slow and may download data.
+- **Coverage**: **190 Python tests passed at final Observable v1 feature validation** across conversion, interpretability runtime, integration, and remote-backend suites; full training/inference tiers remain separate because they are slow and may download data.
 - **Fixtures**: NNTree JSON files from `examples/nntrees/` — shared between Python and Vitest integration tests
 
-### Front-end Data Flow
+### Front-end Data Flow and Two-Graph Architecture
 
 ```
 Stereotypes/ (JSON) → StereotypeCore → DiagramCore (pure TS state + EventBus)
@@ -309,8 +322,18 @@ Stereotypes/ (JSON) → StereotypeCore → DiagramCore (pure TS state + EventBus
                                             ↓
                                        NNTree class (conversion)
                                             ↓
-                                        JSON → convert.py (Hydra configs)
+                                         JSON → convert.py (Hydra configs)
+                                             └── interpretability.observables → interpretability/observables.yaml
 ```
+
+The source diagram overlays two partitions. The computational graph contains
+Input, modules, joins, subflows and loss nodes; its edges determine topology,
+forward execution, type inference and `net` configuration. The observation graph
+contains Observable nodes and edges targeting them. Observation edges remain in
+editable source JSON but are excluded from computational traversal, cycle
+detection, children lists and model ordering. An Observable receives a forked
+public `out` value, has fixed target handles and no output, and cannot feed the
+computational graph.
 
 ### MCP Server & Browser RPC
 
@@ -349,8 +372,8 @@ MCP Server (thin proxy, no DiagramCore)
 - **Diagram.svelte.ts** — Thin Svelte 5 wrapper extending `DiagramCore`. Overrides `nodes`/`edges` with `$state.raw` for reactive UI. Handles Svelte-specific concern: auto-spawn Input node. (No callback re-hydration needed — SubflowNode uses `getContext`.)
 - **StereotypeCore** (core/StereotypeCore.ts) — Pure TypeScript stereotype with dual loader: `loadFromDirectory()` uses Vite's `import.meta.glob` for browser; `loadFromDirectoryNode(path)` uses `fs.readdirSync` for Node.js/MCP server.
 - **Stereotype** (stereotype.ts) — Thin wrapper extending `StereotypeCore`. Delegates to Vite loader via `StereotypeCore.loadFromDirectory()`.
-- **NNTree** (conversion/nnTree.ts) — Converts visual graph to tree representation. Handles sequential chains, joins (multiple parents), loss nodes, and subflow containers with Kahn's topological sort. Subflows are type `"subflow"` with `entryNode` + internal `nodes` map (not flattened to sequential). Supports recursive nested subflows via `compileSubflowGraph`. Output JSON consumed by Python side.
-- **TypeEngine** (conversion/typeEngine.ts) — Constraint-based static tensor type checker. **Fully data-driven** — no hardcoded module names, formula bodies, or constraint checks. Interprets `type_signature` from stereotype JSON. Implements pattern matching with symbolic dimension binding, wildcard capture, param reference resolution, dtype propagation, expression-based computed dims, declarative subflow transforms (`SubflowConfig`), declarative join operations (`JoinConfig`), dtype input validation, advisory warnings, shape suggestions, join input labels, and Einsum shape inference. Phases: computed dims (Phase 2), join checking (Phase 3), subflow inference (Phase 4), editor integration (Phase 5), expression language + declarative configs (Phase 6), type system improvements (Phase 7).
+- **NNTree** (conversion/nnTree.ts) — Converts visual graph to tree representation. First partitions computational and observation nodes/edges, including inside supported subflows. Computational output preserves sequential chains, joins (multiple parents), loss nodes, and subflow containers with Kahn's topological sort; observation definitions are additive under `interpretability.observables`. Subflows are type `"subflow"` with `entryNode` + internal `nodes` map (not flattened to sequential). Observation inputs are ordered by numeric target handle, source point is the public `out`, and every compiled module layer preserves its visual `moduleId` for runtime binding. Supports recursive nested subflows via `compileSubflowGraph`. Output JSON is consumed by Python side.
+- **TypeEngine** (conversion/typeEngine.ts) — Constraint-based static tensor type checker. **Fully data-driven** — no hardcoded module names, formula bodies, or constraint checks. Interprets `type_signature` from stereotype JSON. Implements pattern matching with symbolic dimension binding, wildcard capture, param reference resolution, dtype propagation, expression-based computed dims, declarative subflow transforms (`SubflowConfig`), declarative join operations (`JoinConfig`), dtype input validation, advisory warnings, shape suggestions, join input labels, and Einsum shape inference. Observable nodes use the same graph partition: required fixed handles, ordered input count/labels, source point, selected modes, retention and storage are validated; annotations expose `inputTypes` but no `outputType`. Observable errors are attributed to the Observable and do not block an otherwise valid computational model; they never create `blockedBy` diagnostics on computational nodes. Phases: computed dims (Phase 2), join checking (Phase 3), subflow inference (Phase 4), editor integration (Phase 5), expression language + declarative configs (Phase 6), type system improvements (Phase 7).
 
   **Phase 2 (computed dims)**: Supports `computed` dimension patterns via an **expression language** — replacing the old hardcoded formula system (removed `resolveFormula`, `resolveComputedArg`). Conv2d output H/W: `floor(($H + 2*padding - dilation*(kernel_size - 1) - 1)/stride + 1)`. MaxPool2d/AvgPool2d: `floor(($H + 2*padding - kernel_size)/stride + 1)`. Flatten: `$*` (product of captured dims). Unsample: `$H * scale_factor`. All formulas are expression strings in JSON.
 
@@ -366,7 +389,7 @@ MCP Server (thin proxy, no DiagramCore)
 
   **Parameter validation**: `resolveParamRef` returns a `ParamResolution` discriminated union (`unset` | `invalid` | `resolved`). Invalid parameter values (e.g. "cazz" for an int param) generate type errors instead of being silently treated as unset.
 - **Tensor Types** (conversion/tensortypes.ts) — Type model: ShapeDimension (const/symbolic/param_ref/wildcard discriminated union), TensorType (shape + dtype), TypeSignature (declarative input/output patterns), TypeEnvironment (symbolic bindings), TypeResult (annotations + errors/warnings/suggestions), NodeTypeAnnotation (`blockedBy` records upstream errors whose consequences were suppressed), ParamResolution (unset/invalid/resolved for parameter validation).
-- **FlowCanvas.svelte** — Main editor component. Renders SvelteFlow canvas, toolbar (Save/Load/Convert), and Sidebar. Three node types: `custom`, `subflow`, `join`.
+- **FlowCanvas.svelte** — Main editor component. Renders SvelteFlow canvas, toolbar (Save/Load/Convert), and Sidebar. Four node types: `custom`, `subflow`, `join`, and passive `observable`.
 - **Sidebar.svelte** — Node create/edit form. Resizable. Updates Diagram state reactively.
 
 ### Node Types
@@ -376,6 +399,7 @@ MCP Server (thin proxy, no DiagramCore)
 | `custom` | CustomNode.svelte | Standard NN module (Linear, Conv2d, ReLU, etc.). Single input handle, single output handle. |
 | `join` | JoinNode.svelte | Merge node (Addition, Einsum). Multiple input handles, single output. |
 | `subflow` | SubflowNode.svelte | Container for nested nodes. Collapsible, hierarchical parent/child relationships. |
+| `observable` | ObservableNode.svelte | Passive fixed-target observation node. N stereotype-defined target handles, zero source/output handles. |
 
 ### Connection Rules
 
@@ -398,6 +422,7 @@ The `category` field in every stereotype JSON determines the node's role and han
 | `"Loss"` | Conceptual loss layer / output node (BCELoss, CrossEntropyLoss, ...) | 1 in, 1 conceptual output |
 | `"Join"` | Multi-input merge node (Addition, Concat, MatMul, ...) | N in, 1 out |
 | `"Subflow"` | Container holding a sub-graph with structural transformation | 1 in, 1 out |
+| `"Observable"` | Passive interpretability analysis; excluded from model topology | N fixed target handles, 0 out |
 | `"Module"` | Generic; reserved for future use | Depends |
 
 **Note**: `"expr"` top-level field was removed from all stereotypes (Einsum's `params.expr` is preserved as a user parameter). Categories like `"Activation"`, `"Normalization"`, `"Pooling"`, etc. were consolidated into `"Layer"`.
@@ -415,6 +440,8 @@ Params in stereotype JSON can have `position: "top"` or `"bottom"` for display p
 **Joins (6):** Addition, Einsum, MatMul, ScaledDotProduct, Concat, MaskedScaledDotProduct
 
 **SubFlows (2):** Repeat (iterations param), HorizontalRepeat (n param)
+
+**Observables (2):** ActivationRecorder, ActivationStatistics
 
 **Ops (11):** Addition, Einsum, MatMul, ScaledDotProduct, Concat, Subflow, Repeat, HorizontalRepeat, MaskedScaledDotProduct, PositionalEncoding, SequencePool
 
@@ -442,7 +469,7 @@ Each stereotype JSON can optionally include a `type_signature` field declaring t
 
 **Dimension kinds**: `const` (literal int), `symbolic` (e.g. `$B` for batch), `param_ref` (references node param), `wildcard` (matches zero or more arbitrary dims), `computed` (expression-based formula), `param_spread` (expands tuple parameter into multiple output dimensions).
 
-**All 36 stereotypes** have type signatures or are explicitly handled. Modules with type_signature JSON: Input, Linear, ReLU, Tanh, Sigmoid, Softmax, Dropout, BatchNorm1d, BatchNorm2d, LayerNorm, Conv1d, Conv2d, MaxPool2d, AvgPool2d, Flatten, Unflatten, Embedding, MultiheadAttention, Transformer, TransformerEncoderLayer, TransformerDecoderLayer, PositionalEncoding, SequencePool, Unsample, Fork, BCELoss, BCEWithLogitsLoss, CrossEntropyLoss, MSELoss (+6 joins: Addition, Concat, MatMul, ScaledDotProduct, MaskedScaledDotProduct, Einsum). Repeat and HorizontalRepeat have subflow-kind signatures handled by engine logic. Einsum uses a declarative `join.action: "einsum"` with a 5-step label-mapping inference algorithm.
+All computational stereotypes have type signatures or are explicitly handled. Modules with type_signature JSON: Input, Linear, ReLU, Tanh, Sigmoid, Softmax, Dropout, BatchNorm1d, BatchNorm2d, LayerNorm, Conv1d, Conv2d, MaxPool2d, AvgPool2d, Flatten, Unflatten, Embedding, MultiheadAttention, Transformer, TransformerEncoderLayer, TransformerDecoderLayer, PositionalEncoding, SequencePool, Unsample, Fork, BCELoss, BCEWithLogitsLoss, CrossEntropyLoss, MSELoss (+6 joins: Addition, Concat, MatMul, ScaledDotProduct, MaskedScaledDotProduct, Einsum). Repeat and HorizontalRepeat have subflow-kind signatures handled by engine logic. Observable signatures declare inputs only: they expose no output type. Einsum uses a declarative `join.action: "einsum"` with a 5-step label-mapping inference algorithm.
 
 The TypeEngine interprets these declarative signatures via constraint-based inference. Adding a new module requires only updating its stereotype JSON — no TypeScript changes needed.
 
@@ -471,15 +498,33 @@ From `analysis/requirements/reqs.md` — the DSL spec:
 ## Conversion Pipeline
 
 ```
-NNTree JSON → convert.py → Hydra YAML configs (net/, optimizer/, trainer/, wandb/, dataset/, early_stopping/)
+NNTree JSON → convert.py → Hydra YAML configs
+                         ├── net/, optimizer/, trainer/, wandb/, dataset/, early_stopping/
+                         └── interpretability/observables.yaml
 ```
 
-- **convert.py** — Reads NNTree JSON, generates Hydra-compatible config directory. Parses param strings via `ast.literal_eval`. Builds `_target_` paths for Hydra instantiation. Handles `type:"subflow"` nodes with `_recursive_: false` config. Supports `--num-classes` and `--dataset` CLI flags.
+- **convert.py** — Reads NNTree JSON, generates Hydra-compatible config directory. Parses param strings via `ast.literal_eval`. Builds `_target_` paths for Hydra instantiation. Handles `type:"subflow"` nodes with `_recursive_: false` config and writes the additive `interpretability/observables.yaml` group separately from `net.nodes`; diagrams without observations receive a disabled no-op group. Supports `--num-classes` and `--dataset` CLI flags.
 - **net/base.py** — `Net` class (LightningModule). Dynamically builds `ModuleDict` from config nodes. Topological sort for forward pass (BFS with in-degree tracking). Handles sequential chains, joins, subflows. Flatten is explicit via Flatten stereotype (no auto-flatten heuristic). Detects taskType (classification/regression) for metric selection. At test-epoch end, classification models log whole-test-set accuracy, macro/per-class precision/recall/F1, confusion matrix, ROC, and precision-recall charts to W&B; regression and autoencoder paths skip this reporting.
   - **Join input ordering**: Join nodes receive inputs ordered by `targetHandle` ("in-0", "in-1", ...) preserved from diagram edges, not BFS traversal order. The `inputs` field lists parent node IDs in handle order. Non-commutative joins (MatMul, ScaledDotProduct) depend on this for correct behavior.
 - **ops/addition.py**, **ops/einsum.py**, **ops/concat.py** — Custom join operations for forward pass.
 - **dataset/** — MNIST, AutoencoderMNIST, and EnronSpam text classification dataset classes. Selectable via `--dataset` flag.
 - **main.py** — Training entry point. Hydra-powered config with wandb logging, early stopping support.
+- **converted/src/interpretability/** — `ObservableManager` and passive
+  `ActivationRecorder`/`ActivationStatistics` analyses. The manager is a plain
+  runtime collaborator, not a trainable module: it resolves `moduleId` source
+  bindings, captures through passive hooks (and Input/Fork passthrough paths),
+  gates `TRAIN`/`EVAL`/`PREDICT`, routes `IMMEDIATE`/`POST_BATCH`/`POST_STEP`/
+  `POST_EPOCH`/`POST_RUN` lifecycle phases, and supports `LAST`/`BATCH`/`EPOCH`/
+  `RUN` retention plus `FULL`/`SAMPLED`/`STREAMING` storage. Repeat, HorizontalRepeat,
+  and nested subflow source bindings are supported. Hooks return `None`, values
+  detach by default, and temporary state/hooks are removed before serialization;
+  Observables never enter `ModuleDict`, parameters, buffers, `state_dict`, or
+  exported model wheels.
+- Each Observable owns one W&B table/publication key. W&B is optional and best
+  effort; a missing, disabled, or failed publisher falls back to local JSON and
+  tensor artifacts under an isolated `<root>/<run-id>/` directory. Inference
+  uses a fresh run scope, and remote jobs keep generated config and local
+  interpretability results inside that job's artifact directory.
 
 ## Project History
 
@@ -806,6 +851,32 @@ Implemented the initial issue #14 training workflow:
 - Added `docs2/source/remote_training.rst` and the design implementation notes
   under `docs/designs/remote-training-backend/`.
 
-Remote training verification includes 307 frontend unit tests (5 skipped),
+Remote training verification includes 325 frontend unit tests (5 skipped),
 source-model validation for the transformer fixture, backend tests, and a
 completed local MNIST training job through the browser UI.
+
+### Phase 20 — Observable Nodes and Interpretability (commits f3fbd67, 7abdde8, d0f3311)
+
+Added passive Observable nodes as a separate observation graph and completed
+the v1 browser-to-runtime path:
+
+- `ActivationRecorder` and `ActivationStatistics` stereotypes live under
+  `Stereotypes/Observables/`; `ObservableNode.svelte` renders fixed semantic
+  target handles and no output handle. Observable edges remain ordinary source
+  diagram edges but cannot feed computational nodes.
+- NNTree partitions computational and observation nodes/edges, preserves
+  ordered Observable inputs and public `out` source points, emits additive
+  `interpretability.observables`, and preserves visual `moduleId` metadata for
+  runtime binding. The TypeEngine validates Observable inputs in isolation,
+  exposes no output type, and keeps Observable diagnostics non-blocking for
+  model validity.
+- `converted/src/interpretability/` provides `ObservableManager`, passive hooks,
+  mode gating, lifecycle finalization, retention/storage policies, Repeat and
+  HorizontalRepeat source binding, per-instance W&B tables, run-isolated local
+  fallback, and cleanup before serialization. Conversion writes a separate
+  `interpretability/observables.yaml` Hydra group; remote job configs and local
+  results remain inside the job artifact directory.
+- Final feature validation recorded 325 frontend tests passing with 5 skipped
+  and 190 Python tests passing. Focused coverage includes Observable creation,
+  compilation, isolated type checking, conversion, lifecycle behavior, source
+  binding, W&B fallback, and serialization cleanup.

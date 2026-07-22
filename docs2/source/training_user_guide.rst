@@ -109,6 +109,60 @@ The report is emitted once after testing, so the scalar charts show one point
 at the final training step. Regression and autoencoder tasks do not collect
 classification predictions or emit these charts.
 
+Observable results from remote jobs
+-----------------------------------
+
+An Observable attached to the submitted diagram is compiled into the separate
+Hydra group ``interpretability/observables.yaml``. It is managed by the
+passive ``ObservableManager`` rather than added to the computational model.
+For the design and the currently supported analyses, see
+:doc:`observables`.
+
+When a job runs with Observables enabled, each Observable instance publishes
+its own result table. In W&B, this means one stable table per instance rather
+than one shared table whose rows could be confused between analyses. Common
+row/source metadata can include:
+
+* ``observable_id``, ``observable_name``, and ``stereotype``;
+* ``execution_mode`` (``TRAIN``, ``EVAL``, or ``PREDICT``), ``epoch``,
+  ``global_step``, and ``batch_index``;
+* ``sources`` (or the source fields), identifying the observed node and public
+  ``out`` point;
+* ``sample_count`` and ``timestamp``; and
+* analysis-specific values such as ``count``, ``mean``, ``variance``, ``norm``,
+  and ``sparsity`` for ``ActivationStatistics``.
+
+``ActivationRecorder`` does not put a large tensor directly into a table row.
+It writes a local tensor artifact and records its ``artifact`` reference,
+``shape``, ``dtype``, and ``size``. This keeps tables usable while preserving a
+path to the captured value in the job artifacts. ``ActivationStatistics`` uses
+streaming aggregates and therefore normally emits scalar statistics without
+retaining every activation.
+
+W&B is optional. With W&B disabled or unavailable, the runtime keeps the same
+results locally; a W&B publication error is non-fatal and local persistence is
+the fallback. For a remote job, the result directory is isolated beneath that
+job's artifact directory, typically as ``<job-artifacts>/<run-id>/``. A fresh
+run ID keeps separate executions from appending to one another; phases within
+one execution may intentionally contribute rows to the same per-Observable
+table. Observable state is temporary runtime state: it is cleaned up before
+model serialization and is excluded from both the downloaded weights and the
+exported wheel.
+
+For direct inference, the result location and run identity can be made
+explicit. These flags affect Observable output only; ``--output`` and
+``--image-dir`` continue to control prediction JSON and image files:
+
+.. code-block:: bash
+
+   uv run python src/infer.py --config-path cfg --config-name base \
+       --weights weights.pt \
+       --interpretability-root ./runs/interpretability \
+       --interpretability-run-id predict-001
+
+The corresponding flags are ``--interpretability-root`` (the stable parent)
+and ``--interpretability-run-id`` (an optional externally assigned run ID).
+
 Install and use an exported model
 ---------------------------------
 

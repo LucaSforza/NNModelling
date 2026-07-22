@@ -39,6 +39,9 @@ configuration:
    * - ``Subflow``
      - Container holding a sub-graph with structural transformation
      - 1 input, 1 output
+   * - ``Observable``
+     - Passive interpretability or monitoring analysis
+     - Fixed target inputs, no source/output handle
    * - ``Module``
      - Generic; reserved for future use, currently unused
      - Depends on implementation
@@ -61,7 +64,7 @@ Every stereotype JSON can use these fields:
      - string
      - yes
      -
-     - One of: ``Input``, ``Fork``, ``Layer``, ``Loss``, ``Join``, ``Subflow``, ``Module``
+     - One of: ``Input``, ``Fork``, ``Layer``, ``Loss``, ``Join``, ``Subflow``, ``Observable``, ``Module``
    * - ``pythonClassName``
      - string
      - yes
@@ -107,6 +110,20 @@ Every stereotype JSON can use these fields:
      - no
      -
      - Display position on the node: ``"top"``, ``"bottom"``, or omit for sidebar-only.
+   * - ``observable``
+     - object
+     - required for ``Observable``
+     -
+     - Fixed analysis contract: capture kind, supported modes, finalization,
+       retention/storage options, ordered input handles, and result schema.
+       These semantics are not freely editable instance parameters.
+   * - ``type_signature``
+     - object
+     - no
+     -
+     - Tensor contract. An Observable uses ``{"kind": "observable", "input": [...]}``
+       to validate incoming signals; it has no output type and never propagates
+       a type into the computational graph.
 
 Examples
 --------
@@ -203,6 +220,50 @@ with ``parentId`` set to the subflow node). The ``pythonClassName`` references
 a structural operation that runs or transforms the sub-graph. Subflows use
 ``_recursive_: false`` in the generated Hydra config to prevent recursive
 instantiation.
+
+Observable: ActivationStatistics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: json
+
+   {
+     "category": "Observable",
+     "pythonClassName": "interpretability.ActivationStatistics",
+     "view": {"color": "#7c3aed", "width": 210, "height": 100},
+     "observable": {
+       "captureKind": "FORWARD_VALUE",
+       "supportedModes": ["TRAIN", "EVAL"],
+       "finalizePhase": "POST_EPOCH",
+       "defaultRetentionScope": "EPOCH",
+       "supportedRetentionScopes": ["BATCH", "EPOCH", "RUN"],
+       "defaultStorageStrategy": "STREAMING",
+       "supportedStorageStrategies": ["STREAMING"],
+       "inputs": [{"id": "in-0", "label": "activation", "required": true}],
+       "resultSchema": {
+         "kind": "statistics",
+         "fields": ["count", "mean", "variance", "norm", "sparsity"]
+       }
+     },
+     "params": {
+       "execution_modes": {"type": "str", "default": "['TRAIN', 'EVAL']"},
+       "retention_scope": {"type": "str", "default": "EPOCH"},
+       "storage_strategy": {"type": "str", "default": "STREAMING"},
+       "wandb_table_name": {"type": "str", "default": ""}
+     },
+     "type_signature": {
+       "kind": "observable",
+       "input": [[{"kind": "wildcard"}]]
+     }
+   }
+
+Observable stereotypes live in ``Stereotypes/Observables/``. Their target
+handles are fixed by ``observable.inputs`` and ordered by identifiers such as
+``in-0``. The normal computational source handle is the public ``out`` point;
+an Observable has no source handle and its result cannot connect to a model
+node. ``ActivationRecorder`` is the other initial stereotype: it supports
+``TRAIN``, ``EVAL`` and ``PREDICT``, defaults to sampled run retention, and
+records tensor references. ``GradientStatistics``, internal QKV points, and
+CKA analyses are deferred rather than implied by this schema.
 
 Notes
 -----

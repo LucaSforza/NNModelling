@@ -7,6 +7,14 @@ Diagram → NNTree JSON → convert.py → Hydra YAML configs → main.py → tr
                                                          → infer.py  → inference
 ```
 
+Observable analyses are a separate, passive interpretability path. They observe
+forward values without becoming model layers, parameters, or weights:
+
+```
+NNTree interpretability → interpretability/observables.yaml → ObservableManager
+                                                              → local/W&B results
+```
+
 ## Setup
 
 ```bash
@@ -43,8 +51,13 @@ cfg/
 ├── trainer/default.yaml       # max_epochs, accelerator
 ├── dataset/dataset.yaml       # Dataset class, batch_size, train/val split
 ├── wandb/wandb.yaml           # W&B project settings
+├── interpretability/observables.yaml # Passive Observable definitions
 └── early_stopping/default.yaml
 ```
+
+``interpretability/observables.yaml`` is composed as its own Hydra group; its
+definitions are not merged into ``net.nodes``. A source diagram without an
+``interpretability`` section gets a disabled, no-op group.
 
 ### Train
 
@@ -57,6 +70,39 @@ uv run python src/main.py --config-path <dir> --config-name base
 - Logs to Weights & Biases (project: `NeuralNetworks`)
 - Saves trained model to `weights.pt`
 - Applies early stopping
+- Finalizes enabled Observables and writes their results before model cleanup
+
+### Interpretability and Observable results
+
+The ``converted/src/interpretability/`` package contains the separate
+``ObservableManager`` runtime and the passive ``ActivationRecorder`` and
+``ActivationStatistics`` analyses. The manager owns hooks, temporary capture
+state, lifecycle routing, and publication, but is not a ``torch.nn.Module``.
+Hooks return ``None`` and captured values are detached by default, so enabling
+an Observable does not replace an activation, change gradients, or alter the
+model's ``state_dict``.
+
+``ActivationRecorder`` samples forward tensors and stores large values as local
+tensor artifacts. Its result rows contain references and metadata rather than
+embedding large tensors in a table. ``ActivationStatistics`` updates streaming
+count, mean, variance, norm, and sparsity without retaining all activations.
+Each Observable instance owns a separate stable table/publication key when W&B
+is available. W&B publication is best effort: if W&B is disabled, unavailable,
+or a publication fails, the same result is retained in local JSON and tensor
+artifacts.
+
+Results are isolated below a run directory. The parent is taken from the
+generated ``trainer.default_root_dir`` (and therefore is normally the remote
+job artifact directory), or from ``NNM_INTERPRETABILITY_ROOT`` when no config
+root is supplied. A fresh run ID is generated for each execution unless
+``NNM_INTERPRETABILITY_RUN_ID`` or an explicit run ID is provided. Thus an
+inference run does not append to training output when it is configured with its
+own run ID/root. Cleanup removes hooks and transient in-memory state while
+leaving the local result files in place.
+
+Observable definitions and results are deliberately not included in exported
+model weights or wheels. The exported model remains a portable inference
+artifact, while interpretability output belongs to the originating run.
 
 ### Inference
 
@@ -70,6 +116,8 @@ uv run python src/infer.py --config-path <dir> --config-name base --weights <pat
 | `--output` | — | Path to save predictions JSON |
 | `--image-dir` | — | Directory for prediction visualizations (montage + per-sample strips) |
 | `--device` | `cpu` | Device for inference |
+| `--interpretability-root` | — | Stable parent directory for this inference run's Observable results |
+| `--interpretability-run-id` | — | Optional externally assigned ID for this inference run |
 
 Supports both classification (argmax labels) and autoencoder (image reconstruction) outputs.
 
@@ -81,6 +129,16 @@ Supports both classification (argmax labels) and autoencoder (image reconstructi
 uv run python src/convert.py ../examples/nntrees/transformer_classifier.json cfg --num-classes 2 \
   --dataset dataset.enron_spam.EnronSpamDataset
 uv run python src/main.py --config-path cfg --config-name base
+```
+
+Inference with an explicitly isolated Observable result location can use the
+same Hydra config while keeping prediction data separate from training data:
+
+```bash
+uv run python src/infer.py --config-path cfg --config-name base --weights weights.pt \
+  --output predictions.json \
+  --interpretability-root ./runs/interpretability \
+  --interpretability-run-id predict-001
 ```
 
 ### Autoencoder
@@ -157,16 +215,19 @@ Loads trained model, runs test set, optionally saves predictions as JSON (classi
 uv run pytest src/tests/ -v
 ```
 
-109 tests across 6 files:
+| File | Coverage |
+|------|----------|
+| `test_convert.py` | `parse_params`, `build_layer_config`, subflow config, YAML generation with real JSONs |
+| `test_ops.py` | All custom ops: forward pass, shapes, edge cases, input ordering |
+| `test_base.py` | `Net` dispatch, BFS forward, in-degrees, join/subflow execution |
+| `test_integration.py` | Full pipeline: JSON → convert → `Net.forward` using real fixtures |
+| `test_main.py` | Training smoke tests (autoencoder + MNIST classifier) |
+| `test_infer.py` | Inference validation (autoencoder + MNIST classifier) |
+| `test_interpretability.py` | Separate Hydra group, source binding, lifecycle/mode gating, local/W&B fallback, run isolation, serialization cleanup |
 
-| File | Tests | Coverage |
-|------|-------|----------|
-| `test_convert.py` | 35 | parse_params, build_layer_config, subflow config, YAML generation with real JSONs |
-| `test_ops.py` | 36 | All 11 ops: forward pass, shapes, edge cases, input ordering |
-| `test_base.py` | 21 | Net.__init__ dispatch, BFS forward, in_degrees, join/subflow execution |
-| `test_integration.py` | 11 | Full pipeline: JSON → convert → Net.forward using real fixtures |
-| `test_main.py` | 2 | Training smoke tests (autoencoder + MNIST classifier) |
-| `test_infer.py` | 4 | Inference validation (autoencoder + MNIST classifier) |
+The exact number of tests changes as the backend evolves; use pytest output as
+the authoritative count. The interpretability tests exercise the passive
+runtime without making W&B an external test dependency.
 
 ## Project Structure
 
@@ -177,6 +238,13 @@ converted/
 │   ├── main.py                   # Training entry point (Hydra + Lightning)
 │   ├── infer.py                  # Inference: load model, run test set, save predictions/images
 │   ├── net/base.py               # Dynamic DAG LightningModule (BFS topo sort)
+│   ├── interpretability/         # ObservableManager, passive analyses, and publishers
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── manager.py
+│   │   ├── publishers.py
+│   │   ├── recorder.py            # ActivationRecorder
+│   │   └── statistics.py          # ActivationStatistics
 │   ├── ops/                      # 11 custom nn.Module operations
 │   │   ├── addition.py
 │   │   ├── concat.py
@@ -196,10 +264,12 @@ converted/
 │   │   └── enron_spam.py          # Text classification (spam/ham)
 │   └── tests/
 │       ├── conftest.py            # JSON fixture loaders
-│       ├── test_convert.py        # 35 tests
-│       ├── test_ops.py            # 36 tests
-│       ├── test_base.py           # 21 tests
-│       └── test_integration.py    # 11 tests
+│       ├── test_convert.py        # Conversion and YAML tests
+│       ├── test_ops.py            # Custom operation tests
+│       ├── test_base.py           # Dynamic network tests
+│       ├── test_integration.py    # End-to-end forward tests
+│       ├── test_infer.py          # Inference validation
+│       └── test_interpretability.py # Observable runtime and conversion tests
 ├── pyproject.toml                 # Dependencies
 └── README.md
 ```

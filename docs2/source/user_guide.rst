@@ -138,6 +138,16 @@ shape mismatch is reported on the node where it originates; nodes whose input
 depends on that failure are marked as blocked rather than producing duplicate
 errors.
 
+Observable nodes
+~~~~~~~~~~~~~~~~
+
+Observables provide passive interpretability without changing the model. Add
+``ActivationRecorder`` or ``ActivationStatistics`` from the Observable category
+and connect a module's public ``out`` handle to its fixed target handle. They
+have no output handle, cannot feed the computational graph, and are compiled
+into a separate observation graph. See :doc:`observables` for the lifecycle,
+storage, validation, and runtime details.
+
 Save and Load
 -------------
 
@@ -222,6 +232,8 @@ YAML config files:
    │   └── trainer.yaml     # Lightning trainer settings
    ├── dataset/
    │   └── dataset.yaml     # Dataset configuration
+   ├── interpretability/
+   │   └── observables.yaml # Passive Observable definitions
    └── wandb/
        └── wandb.yaml       # Weights & Biases logging
 
@@ -240,7 +252,7 @@ Step 3: Train the Model
 
 .. code-block:: bash
 
-   uv run python src/main.py --config-dir <output_dir>
+   uv run python src/main.py --config-path <output_dir> --config-name base
 
 This uses Hydra to load the config and train the model via PyTorch Lightning.
 Key features:
@@ -254,7 +266,7 @@ Override Hydra configs from the command line:
 
 .. code-block:: bash
 
-   uv run python src/main.py --config-dir ./configs \
+   uv run python src/main.py --config-path ./configs --config-name base \
        trainer.max_epochs=10 \
        optimizer.lr=0.001
 
@@ -264,7 +276,8 @@ Step 4: Run Inference
 .. code-block:: bash
 
    uv run python src/infer.py \
-       --config-dir <output_dir> \
+       --config-path <output_dir> \
+       --config-name base \
        --weights <checkpoint.ckpt> \
        --output predictions.json
 
@@ -273,7 +286,8 @@ For visual tasks (autoencoders, image classification):
 .. code-block:: bash
 
    uv run python src/infer.py \
-       --config-dir ./configs \
+       --config-path ./configs \
+       --config-name base \
        --weights ./checkpoints/best.ckpt \
        --output predictions.json \
        --image-dir ./inference_images
@@ -428,9 +442,13 @@ Here is the complete workflow from design to trained model:
 2. **Save** — Save the diagram as JSON (or load an existing example)
 3. **Convert** — Click Convert to generate the NNTree JSON
 4. **Generate Configs** — Run ``convert.py`` to produce Hydra YAML configs
-5. **Train** — Run ``main.py`` to train the model
-6. **Evaluate** — Run ``infer.py`` to run predictions and inspect results
-7. **Iterate** — Adjust the diagram and repeat
+5. **Configure observations** — Optionally attach passive Observables for
+   activation recording or statistics; their definitions are emitted under
+   ``interpretability/``
+6. **Train** — Run ``main.py`` to train the model and publish observations
+7. **Evaluate** — Run ``infer.py`` to run predictions and inspect model and
+   observation results
+8. **Iterate** — Adjust the diagram and repeat
 
 This workflow means your neural network design is **version-controllable**
 (the diagram JSON), **reviewable** (visual graph), and **reproducible**
