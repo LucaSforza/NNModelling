@@ -1,0 +1,63 @@
+{
+  "root": "input",
+  "nodes": {
+    "input": {
+      "data": {
+        "type": "sequential",
+        "stereotype": "Input",
+        "layers": [
+          {
+            "moduleId": "input-visual",
+            "stereotype": "Input",
+            "pythonClassName": "nn.Input"
+          },
+          {
+            "moduleId": "linear-visual",
+            "stereotype": "Linear",
+            "pythonClassName": "nn.Linear",
+            "params": {
+              "in_features": {"value": "3"},
+              "out_features": {"value": "2"},
+              "bias": {"value": "False"}
+            }
+          }
+        ]
+      },
+      "children": []
+    }
+  },
+  "interpretability": {
+    "enabled": true,
+    "observables": {
+      "obs-rec": {
+        "id": "obs-rec",
+        "name": "Linear activation",
+        "stereotype": "ActivationRecorder",
+        "pythonClassName": "interpretability.ActivationRecorder",
+        "enabled": true,
+        "captureKind": "FORWARD_VALUE",
+        "supportedModes": ["TRAIN", "EVAL", "PREDICT"],
+        "executionModes": ["EVAL"],
+        "finalizePhase": "POST_RUN",
+        "retentionScope": "RUN",
+        "storageStrategy": "SAMPLED",
+        "inputs": [{"targetHandle": "in-0", "sourceNodeId": "linear-visual", "sourcePoint": "out"}],
+        "params": {"max_samples": {"value": "2"}}
+      },
+      "obs-stats": {
+        "id": "obs-stats",
+        "name": "Linear statistics",
+        "stereotype": "ActivationStatistics",
+        "pythonClassName": "interpretability.ActivationStatistics",
+        "enabled": true,
+        "captureKind": "FORWARD_VALUE",
+        "supportedModes": ["TRAIN", "EVAL"],
+        "executionModes": ["EVAL"],
+        "finalizePhase": "POST_EPOCH",
+        "retentionScope": "EPOCH",
+        "storageStrategy": "STREAMING",
+        "inputs": [{"targetHandle": "in-0", "sourceNodeId": "linear-visual", "sourcePoint": "out"}]
+      }
+    }
+  }
+}

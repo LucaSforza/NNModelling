@@ -23,6 +23,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # converted/
 FIXTURES_DIR = PROJECT_ROOT.parent / "examples" / "nntrees"
 
 
+@pytest.fixture(autouse=True)
+def clean_training_artifacts():
+    """Keep subprocess checkpoints out of the repository after every test."""
+    yield
+    for filename in ("weights.pt", "weights.safetensors"):
+        artifact = PROJECT_ROOT / filename
+        if artifact.exists():
+            artifact.unlink()
+
+
 def test_autoencoder_training(tmp_path):
     """main.py trains autoencoder for 1 epoch without errors."""
     json_path = FIXTURES_DIR / "auto_encoder.json"
@@ -73,8 +83,6 @@ def test_autoencoder_training(tmp_path):
         f"  STDOUT (last 2000 chars):\n{result.stdout[-2000:]}"
     )
 
-    # Clean up weights.pt so subsequent tests start fresh
-    weights_path.unlink()
 
 
 def test_mnist_classifier_training(tmp_path):
@@ -122,6 +130,3 @@ def test_mnist_classifier_training(tmp_path):
         f"No weights.pt found at {weights_path} (expected in subprocess CWD)\n"
         f"  STDOUT (last 2000 chars):\n{result.stdout[-2000:]}"
     )
-
-    # Clean up weights.pt so subsequent tests start fresh
-    weights_path.unlink()

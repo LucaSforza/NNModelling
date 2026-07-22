@@ -32,6 +32,7 @@ class Subflow(nn.Module):
         self.internal_nodes = internal_nodes
         self.module_dict = nn.ModuleDict()
         self.input_order: dict[str, list[str]] = {}
+        self._observer = None
 
         for node_id, cfg in internal_nodes.items():
             if isinstance(cfg, DictConfig):
@@ -42,6 +43,7 @@ class Subflow(nn.Module):
             layer_dict.pop("taskType", None)
             layer_dict.pop("children", None)
             layer_dict.pop("type", None)
+            layer_dict.pop("moduleId", None)
             inputs_list = layer_dict.pop("inputs", None)
             if inputs_list:
                 self.input_order[node_id] = inputs_list
@@ -87,6 +89,9 @@ class Subflow(nn.Module):
                 inp = next(iter(inputs.values()))
                 out = self.module_dict[curr](inp) if curr in self.module_dict else inp
 
+            if curr not in self.module_dict and self._observer is not None:
+                self._observer(curr, out)
+
             final = out
 
             for child_id in children:
@@ -98,3 +103,12 @@ class Subflow(nn.Module):
                     queue.append(child_id)
 
         return final
+
+    def set_observer(self, callback) -> None:
+        """Install a transient passive sink for internal Input/Fork outputs."""
+        self._observer = callback
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_observer"] = None
+        return state

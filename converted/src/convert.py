@@ -48,6 +48,10 @@ def build_layer_config(layer_data: dict[str, Any]) -> dict[str, Any]:
     """Costruisce il dizionario compatibile con Hydra per l'instanziazione."""
     stereotype = layer_data.get("stereotype", "")
     config = {"stereotype": stereotype}
+    # Visual identity is required for binding compacted sequential layers to
+    # observation edges.  It is metadata, not a Hydra constructor argument.
+    if layer_data.get("moduleId") is not None:
+        config["moduleId"] = layer_data["moduleId"]
 
     if stereotype.lower() not in ("input", "fork"):
         python_class_name = layer_data.get("pythonClassName", stereotype)
@@ -66,6 +70,34 @@ def build_layer_config(layer_data: dict[str, Any]) -> dict[str, Any]:
 
     config.update(parse_params(layer_data.get("params", {})))
     return config
+
+
+def build_interpretability_config(nntree: dict[str, Any]) -> dict[str, Any]:
+    """Translate the additive NNTree interpretability section for Hydra.
+
+    Observable definitions intentionally remain outside ``net.nodes``.  The
+    compiler does not invent defaults for a missing section: an absent section
+    becomes an explicitly disabled runtime group.
+    """
+    section = nntree.get("interpretability") or {}
+    observables: dict[str, Any] = {}
+    for observable_id, raw in (section.get("observables") or {}).items():
+        cfg = dict(raw)
+        cfg["id"] = cfg.get("id", observable_id)
+        cfg["name"] = cfg.get("name", cfg["id"])
+        cfg["pythonClassName"] = cfg.get("pythonClassName", "")
+        cfg["enabled"] = bool(cfg.get("enabled", True))
+        cfg["executionModes"] = cfg.get("executionModes", ["TRAIN", "EVAL", "PREDICT"])
+        cfg["finalizePhase"] = cfg.get("finalizePhase", "POST_RUN")
+        cfg["retentionScope"] = cfg.get("retentionScope", "RUN")
+        cfg["storageStrategy"] = cfg.get("storageStrategy", "SAMPLED")
+        cfg["inputs"] = sorted(cfg.get("inputs", []), key=lambda item: int(str(item.get("targetHandle", "in-0")).split("-")[-1]))
+        # Params are the source-diagram representation in the NNTree.  Merge
+        # parsed values without changing the public compiled field names.
+        params = cfg.pop("params", {})
+        cfg.update(parse_params(params) if isinstance(params, dict) else {})
+        observables[observable_id] = cfg
+    return {"enabled": bool(section.get("enabled", False)) and bool(observables), "observables": observables}
 
 
 def _build_nested_subflow_config(data: dict[str, Any]) -> dict[str, Any]:
@@ -132,7 +164,7 @@ def build_hydra_configs(json_path: str | dict[str, Any], output_dir: str = "cfg"
         {"patience": early_stop_patience, "min_delta": early_stop_min_delta},
     )
 
-    for d in ["net", "optimizer", "trainer", "wandb", "dataset", "early_stopping"]:
+    for d in ["net", "optimizer", "trainer", "wandb", "dataset", "early_stopping", "interpretability"]:
         os.makedirs(os.path.join(output_dir, d), exist_ok=True)
 
     nntree = diagram.get("NNTree", diagram)
@@ -204,6 +236,11 @@ def build_hydra_configs(json_path: str | dict[str, Any], output_dir: str = "cfg"
     OmegaConf.save(
         config=net_config, f=os.path.join(output_dir, "net", "custom_sequence.yaml")
     )
+    interpretability_config = build_interpretability_config(nntree)
+    OmegaConf.save(
+        config=OmegaConf.create(interpretability_config),
+        f=os.path.join(output_dir, "interpretability", "observables.yaml"),
+    )
 
     OmegaConf.save(config=OmegaConf.create(optimizer_config), f=os.path.join(output_dir, "optimizer", "adam.yaml"))
     OmegaConf.save(config=OmegaConf.create(trainer_config), f=os.path.join(output_dir, "trainer", "default.yaml"))
@@ -218,6 +255,7 @@ def build_hydra_configs(json_path: str | dict[str, Any], output_dir: str = "cfg"
         {
             "defaults": [
                 {"net": "custom_sequence"},
+                {"interpretability": "observables"},
                 {"optimizer": "adam"},
                 {"trainer": "default"},
                 {"wandb": "wandb"},

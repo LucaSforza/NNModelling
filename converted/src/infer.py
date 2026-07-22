@@ -48,12 +48,40 @@ def to_image_tensor(t: torch.Tensor) -> torch.Tensor:
     return t
 
 
+def iter_predict_batches(model: torch.nn.Module, loader, device: str, observe: bool = True):
+    """Run direct prediction batches with the complete Observable lifecycle."""
+    manager = getattr(model, "interpretability", None)
+    previous_enabled = manager.global_enabled if manager is not None else False
+    if manager is not None and not observe:
+        manager.global_enabled = False
+    try:
+        with torch.no_grad():
+            for batch_index, batch in enumerate(loader):
+                x, y = batch
+                x = x.to(device)
+                if manager is not None and observe:
+                    manager.set_context(
+                        "PREDICT", getattr(model, "current_epoch", None),
+                        getattr(model, "global_step", None), batch_index,
+                    )
+                y_hat = model(x)
+                if manager is not None and observe:
+                    manager.finalize("POST_BATCH")
+                yield x, y, y_hat
+    finally:
+        if manager is not None and observe:
+            manager.finalize("POST_EPOCH")
+        if manager is not None and not observe:
+            manager.global_enabled = previous_enabled
+
+
 def save_samples(
     model: torch.nn.Module,
     test_loader,
     image_dir: str,
     device: str,
     max_samples: int = 64,
+    observe: bool = True,
 ):
     """Save image visualizations: per-sample strips + montage grid."""
     os.makedirs(image_dir, exist_ok=True)
@@ -61,11 +89,9 @@ def save_samples(
     sample_count = 0
     output_is_image = None
 
-    with torch.no_grad():
-        for batch in test_loader:
-            x, y = batch
-            x = x.to(device)
-            y_hat = model(x)
+    batches = iter_predict_batches(model, test_loader, device, observe=observe)
+    try:
+        for x, y, y_hat in batches:
             if output_is_image is None:
                 output_is_image = is_image_tensor(y_hat)
 
@@ -95,8 +121,12 @@ def save_samples(
                 strips.append(strip)
                 sample_count += 1
 
+                if sample_count >= max_samples:
+                    break
             if sample_count >= max_samples:
                 break
+    finally:
+        batches.close()
 
     if not strips:
         print("  No image data to save.")
@@ -123,6 +153,16 @@ def main():
     parser.add_argument("--output", default=None, help="Save predictions to JSON file")
     parser.add_argument("--image-dir", default=None, help="Save image visualizations to directory")
     parser.add_argument("--device", default="cpu", help="Device (default: cpu)")
+    parser.add_argument(
+        "--interpretability-root",
+        default=None,
+        help="Stable parent directory for this run's Observable results",
+    )
+    parser.add_argument(
+        "--interpretability-run-id",
+        default=None,
+        help="Optional externally assigned ID for this inference run",
+    )
     args = parser.parse_args()
 
     # Resolve paths relative to converted/ (parent of src/)
@@ -147,6 +187,15 @@ def main():
     print(f"Loading model from {weights_path} ...")
     model = torch.load(weights_path, map_location=args.device, weights_only=False)
     model.eval()
+    if hasattr(model, "interpretability"):
+        # Hooks are intentionally removed before pickle serialization; bind
+        # them again only for this prediction process.
+        model.interpretability.configure_run(args.interpretability_root, args.interpretability_run_id)
+        print(f"Observable results: {model.interpretability.publisher.run_dir}", flush=True)
+        model.interpretability.attach()
+        if model.interpretability.observables:
+            model._bind_subflow_observers()
+        model.interpretability.begin_scope("predict", "PREDICT")
 
     # Load dataset
     print("Loading dataset ...")
@@ -165,25 +214,29 @@ def main():
         print(f"  Metrics unavailable (loss function mismatch): {e}")
 
     # Save predictions if requested
+    prediction_scope = bool(args.output or args.image_dir)
+    if prediction_scope and hasattr(model, "interpretability"):
+        # Trainer.test owns a separate EVAL scope.  Prediction must reopen a
+        # fresh scope so POST_RUN idempotency does not suppress captures.
+        model.interpretability.begin_scope("predict", "PREDICT")
+
     if args.output:
         print("\nCollecting predictions ...")
+        if hasattr(model, "interpretability"):
+            model.interpretability.set_context("PREDICT")
         predictions = []
-        with torch.no_grad():
-            for batch in test_loader:
-                x, y = batch
-                x = x.to(args.device)
-                y_hat = model(x)
-                # Argmax for classification, raw output for regression
-                if y_hat.dim() > 1 and y_hat.size(1) > 1:
-                    preds = y_hat.argmax(dim=1)
-                else:
-                    preds = y_hat
-                for i in range(len(x)):
-                    predictions.append({
-                        "input": x[i].cpu().tolist(),
-                        "target": y[i].cpu().tolist() if torch.is_tensor(y) else y[i],
-                        "prediction": preds[i].cpu().tolist() if torch.is_tensor(preds) else preds[i],
-                    })
+        for x, y, y_hat in iter_predict_batches(model, test_loader, args.device):
+            # Argmax for classification, raw output for regression
+            if y_hat.dim() > 1 and y_hat.size(1) > 1:
+                preds = y_hat.argmax(dim=1)
+            else:
+                preds = y_hat
+            for i in range(len(x)):
+                predictions.append({
+                    "input": x[i].cpu().tolist(),
+                    "target": y[i].cpu().tolist() if torch.is_tensor(y) else y[i],
+                    "prediction": preds[i].cpu().tolist() if torch.is_tensor(preds) else preds[i],
+                })
 
         output_path = os.path.join(project_root, args.output) if not os.path.isabs(args.output) else args.output
         with open(output_path, "w") as f:
@@ -192,8 +245,15 @@ def main():
 
     # Save image visualizations if requested
     if args.image_dir:
+        if hasattr(model, "interpretability"):
+            model.interpretability.set_context("PREDICT")
         image_path = os.path.join(project_root, args.image_dir) if not os.path.isabs(args.image_dir) else args.image_dir
-        save_samples(model, test_loader, image_path, args.device)
+        save_samples(model, test_loader, image_path, args.device, observe=not bool(args.output))
+
+    if hasattr(model, "interpretability"):
+        if prediction_scope:
+            model.interpretability.end_scope()
+        model.cleanup_interpretability()
 
 
 if __name__ == "__main__":

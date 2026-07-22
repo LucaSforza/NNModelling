@@ -80,7 +80,9 @@ class LocalExecutor:
             f"hydra.run.dir={artifact_dir}",
             "hydra.job.chdir=true",
             f"+trainer.default_root_dir={artifact_dir}",
-            "+trainer.enable_progress_bar=false",
+            # ``trainer`` may already define this key in the submitted Hydra
+            # config.  ``++`` supports both overriding and adding it.
+            "++trainer.enable_progress_bar=false",
         ]
 
     def submit(

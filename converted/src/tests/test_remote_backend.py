@@ -15,6 +15,7 @@ from backend.auth import AuthService, InMemoryAuthStore
 from backend.config_service import build_job_hydra_configs, normalize_training_config
 from backend.dataset_registry import discover_datasets
 from backend.executors import SlurmExecutor
+from backend.executors.local import LocalExecutor
 from backend.manager import JobManager
 from backend.models import JobSubmission, ResourceRequest
 from backend.store import InMemoryJobStore, ValkeyJobStore
@@ -79,6 +80,12 @@ class ImmediateExecutor:
 def test_normalize_training_config_accepts_dataset_target_string():
     normalized = normalize_training_config({"dataset": "dataset.mnist.MNISTDataset"})
     assert normalized["dataset"] == {"_target_": "dataset.mnist.MNISTDataset"}
+
+
+def test_local_executor_progress_override_supports_existing_trainer_key(tmp_path):
+    command = LocalExecutor(tmp_path)._command({}, tmp_path)
+
+    assert "++trainer.enable_progress_bar=false" in command
 
 
 def test_job_submission_requires_an_nnm_prefixed_package_name():

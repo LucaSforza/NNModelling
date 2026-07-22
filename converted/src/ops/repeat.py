@@ -29,3 +29,8 @@ class Repeat(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+    def set_observer(self, callback) -> None:
+        """Propagate the passive source sink to every repeated execution."""
+        for subflow in self.net:
+            subflow.set_observer(callback)

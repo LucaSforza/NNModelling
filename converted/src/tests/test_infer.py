@@ -27,6 +27,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # converted/
 FIXTURES_DIR = PROJECT_ROOT.parent / "examples" / "nntrees"
 
 
+@pytest.fixture(autouse=True)
+def clean_inference_artifacts():
+    """Keep subprocess checkpoints out of the repository after every test."""
+    yield
+    for filename in ("weights.pt", "weights.safetensors"):
+        artifact = PROJECT_ROOT / filename
+        if artifact.exists():
+            artifact.unlink()
+
+
 def test_autoencoder_inference(tmp_path):
     """Full pipeline: convert -> train 1 epoch -> infer -> validate output."""
     json_path = FIXTURES_DIR / "auto_encoder.json"
@@ -88,7 +98,8 @@ def test_autoencoder_inference(tmp_path):
         assert "target" in first, "Missing 'target' key in prediction entry"
         assert "prediction" in first, "Missing 'prediction' key in prediction entry"
     finally:
-        # Clean up weights.pt
+        # The autouse fixture also removes the safetensors artifact emitted by
+        # main.py, including when inference itself fails.
         if weights_path.exists():
             weights_path.unlink()
 
@@ -154,6 +165,5 @@ def test_mnist_classifier_inference(tmp_path):
         assert "target" in first, "Missing 'target' key in prediction entry"
         assert "prediction" in first, "Missing 'prediction' key in prediction entry"
     finally:
-        # Clean up weights.pt
         if weights_path.exists():
             weights_path.unlink()

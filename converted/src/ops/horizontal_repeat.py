@@ -44,10 +44,18 @@ class HorizontalRepeat(nn.Module):
         _base = Subflow(entry_node=entry_node, internal_nodes=internal_nodes)
         _base.to("meta")
         object.__setattr__(self, "base", _base)
+        self._observer = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.n == 1:
             return self.heads[0](x)
+
+        if self._observer is not None:
+            # torch.func's functional_call/vmap path does not run hooks on the
+            # real heads.  Use the same independent heads only while an
+            # observer is attached so every public/internal source remains
+            # observable without changing the disabled fast path.
+            return torch.cat([head(x) for head in self.heads], dim=-1)
 
         params, buffers = stack_module_state(list(self.heads))
 
@@ -60,3 +68,9 @@ class HorizontalRepeat(nn.Module):
         out = out.moveaxis(0, -2)
         out = out.reshape(*out.shape[:-2], -1)
         return out
+
+    def set_observer(self, callback) -> None:
+        """Enable passive explicit-head execution and propagate callbacks."""
+        self._observer = callback
+        for head in self.heads:
+            head.set_observer(callback)

@@ -57,6 +57,11 @@ def main(cfg: DictConfig):
         pass
 
     model = Net(cfg)
+    # Publication is optional; the manager itself remains independent of the
+    # Lightning logger and always has a local publisher.
+    model.interpretability.publisher.experiment = getattr(wandb_logger, "experiment", None)
+    model.interpretability.publisher.wandb = wandb
+    print(f"Observable results: {model.interpretability.publisher.run_dir}", flush=True)
 
     dataset = instantiate(cfg.dataset)
     train_loader, val_loader, test_loader = dataset.division()
@@ -86,6 +91,8 @@ def main(cfg: DictConfig):
         "num_params": get_num_params(model),
     }
 
+    model.interpretability.finalize("POST_RUN")
+    model.cleanup_interpretability()
     torch.save(model, "weights.pt")
     from safetensors.torch import save_file
 
