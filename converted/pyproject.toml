@@ -31,6 +31,7 @@ torchvision = { index = "pytorch-cuda" }
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
+pythonpath = ["src"]
 markers = [
     "fast: quick unit and integration tests without real services or training",
     "service: integration tests against real infrastructure (Valkey)",

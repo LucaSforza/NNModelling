@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Install NNModelling — local workspace</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f7f8fa;
+        --fg: #1f2430;
+        --muted: #5b6472;
+        --accent: #2563eb;
+        --code-bg: #0f172a;
+        --code-fg: #e2e8f0;
+        --border: #d8dde5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #10141c;
+          --fg: #e6e9ef;
+          --muted: #9aa4b2;
+          --border: #2a3140;
+          --code-bg: #0b0f17;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.6;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 3rem 1.5rem 5rem;
+      }
+      h1 { font-size: 1.9rem; margin: 0 0 0.4rem; }
+      h2 { font-size: 1.2rem; margin: 2.2rem 0 0.6rem; }
+      .lede { color: var(--muted); margin: 0 0 2rem; }
+      code, pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      pre {
+        background: var(--code-bg);
+        color: var(--code-fg);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+      pre .cmd { color: #7dd3fc; font-weight: 600; }
+      ul { padding-left: 1.2rem; }
+      li { margin: 0.3rem 0; }
+      .note {
+        border-left: 3px solid var(--accent);
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+        border-radius: 0 6px 6px 0;
+        padding: 0.7rem 1rem;
+        margin: 1.4rem 0;
+      }
+      a { color: var(--accent); }
+      footer {
+        margin-top: 3rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Install NNModelling</h1>
+      <p class="lede">
+        NNModelling is a visual editor and DSL for designing neural networks,
+        compiled to PyTorch/Lightning training pipelines. One command fetches,
+        builds, and starts the editor together with a local training backend —
+        the editor is served from your own machine, not from this site.
+      </p>
+
+      <h2>One command</h2>
+      <pre><span class="cmd">$</span> curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | bash</pre>
+      <p>The installer:</p>
+      <ol>
+        <li>clones the NNModelling repository (or updates an existing checkout) into <code>$HOME/.local/share/nnmodelling</code>,</li>
+        <li>installs the pnpm dependencies and builds the editor,</li>
+        <li>ensures a local Valkey is running — it reuses a healthy instance, or starts a repository-local process when the <code>valkey-server</code> binary is available,</li>
+        <li>starts the companion: the editor and training backend on the same origin at <code>http://127.0.0.1:8000</code>.</li>
+      </ol>
+      <p>
+        Open <code>http://127.0.0.1:8000</code>, pair the Training Sidebar with
+        the default <code>http://127.0.0.1:8000</code> URL, and train locally.
+        On the first start the companion provisions the local administrator
+        token automatically (mode <code>0600</code>), so no separate setup step
+        is needed. When the companion exits, the installer stops only the Valkey
+        process it started.
+      </p>
+
+      <h2>Prerequisites (checked, not installed)</h2>
+      <p>The script checks for these tools and fails with instructions when one is missing — it never installs them for you:</p>
+      <ul>
+        <li><strong>Git</strong> — to clone the repository.</li>
+        <li>
+          <strong>Python 3.12+ and <code>uv</code></strong> — the companion runs
+          on <code>uv</code>; the environment is created automatically.
+        </li>
+        <li>
+          <strong>Node.js 18+ and <code>pnpm</code> 10+</strong> — to install
+          dependencies and build the editor.
+        </li>
+        <li>
+          <strong>Valkey 8</strong> — either an already running instance, or the
+          <code>valkey-server</code> binary for the installer to start a
+          repository-local process. Alternatively run the bundled Docker
+          deployment (<code>just --justfile converted/backend/justfile valkey</code>
+          or <code>docker-up</code>) before the command.
+        </li>
+      </ul>
+
+      <h2>Options</h2>
+      <p>Set these environment variables before the command:</p>
+      <ul>
+        <li><code>NNM_DEST_DIR</code> — checkout destination (default <code>$HOME/.local/share/nnmodelling</code>).</li>
+        <li><code>NNM_REMOTE_REPO</code> — repository URL to clone/update.</li>
+        <li><code>NNM_BRANCH</code> — branch to check out (default <code>master</code>).</li>
+        <li><code>NNM_VALKEY_URL</code> / <code>NNM_VALKEY_PORT</code> — Valkey connection (default <code>valkey://127.0.0.1:6379/0</code> / <code>6379</code>).</li>
+        <li><code>NNM_BACKEND_HOST</code> / <code>NNM_BACKEND_PORT</code> — companion bind settings (default <code>127.0.0.1:8000</code>).</li>
+      </ul>
+      <p>For example:</p>
+      <pre><span class="cmd">$</span> curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | NNM_DEST_DIR=~/nnmodelling bash</pre>
+
+      <div class="note">
+        The installer never overwrites a destination it does not own (a non-empty
+        directory that is not an NNModelling checkout), never prints secrets, and
+        the companion never proxies or routes remote jobs. The Training Sidebar
+        keeps its URL and pairing workflow, so you may equally connect it to an
+        independently managed remote backend instead of the localhost one.
+      </div>
+
+      <h2>Next steps</h2>
+      <ul>
+        <li>Create a project from the editor and design your network.</li>
+        <li>
+          Project workspaces, training, and the local/remote connection model
+          are documented in the
+          <a href="https://github.com/LucaSforza/NNModelling">repository docs</a>
+          (Sphinx: <code>docs2/source/project_workspace.rst</code>).
+        </li>
+        <li>
+          Report issues at
+          <a href="https://github.com/LucaSforza/NNModelling/issues">github.com/LucaSforza/NNModelling/issues</a>.
+        </li>
+      </ul>
+
+      <footer>
+        This site publishes installation instructions and the installer script
+        only; it never hosts the editor itself. The editor runs locally from
+        your clone.
+      </footer>
+    </main>
+  </body>
+</html>

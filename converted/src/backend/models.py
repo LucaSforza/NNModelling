@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 GPU_TYPE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 NODE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-,\[\]]*")
 PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
+PROJECT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
 class NetworkPayload(BaseModel):
@@ -64,6 +65,7 @@ class JobSubmission(BaseModel):
     resources: ResourceRequest = Field(default_factory=ResourceRequest)
     priority: int = Field(default=0, ge=0, le=1_000_000)
     package_name: str | None = Field(default=None, max_length=100)
+    project_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("schema_version")
     @classmethod
@@ -75,6 +77,21 @@ class JobSubmission(BaseModel):
         """
         if value != 1:
             raise ValueError("schema_version must be 1; other versions are not supported")
+        return value
+
+    @field_validator("project_id")
+    @classmethod
+    def project_id_is_a_simple_identifier(cls, value: str | None) -> str | None:
+        """Accept only registry-style project identifiers.
+
+        The project manager resolves the identifier against its own recent
+        registry; an identifier with path characters must fail loudly instead
+        of being interpreted as a filesystem path anywhere downstream.
+        """
+        if value is None:
+            return None
+        if not PROJECT_ID.fullmatch(value):
+            raise ValueError("project_id must use letters, digits, underscores, or hyphens")
         return value
 
     @field_validator("package_name")
@@ -106,6 +123,7 @@ class DatasetInfo(BaseModel):
     doc: str = ""
     parameters: list[DatasetParameter] = Field(default_factory=list)
     num_classes: int | None = Field(default=None, ge=1)
+    source: Literal["builtin", "project"] = "builtin"
 
 
 class ComputeUnitInfo(BaseModel):

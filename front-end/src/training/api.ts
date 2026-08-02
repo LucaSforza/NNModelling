@@ -11,6 +11,7 @@ export interface DatasetInfo {
   doc: string;
   parameters: DatasetParameter[];
   num_classes: number | null;
+  source?: "builtin" | "project";
 }
 
 export interface TrainingJobStatus {
@@ -62,6 +63,83 @@ export interface TrainingJobRequest {
   resources: Record<string, unknown>;
   priority: number;
   package_name?: string;
+  project_id?: string;
+}
+
+/**
+ * Non-secret W&B job overrides. Project settings are merged as defaults by
+ * the job manager; these explicit values win. ``name`` maps the project's
+ * ``run_name_template`` to the WandbLogger run-name keyword.
+ */
+export interface WandbJobSettings {
+  project: string;
+  mode: string;
+  entity?: string;
+  tags?: string[];
+  name?: string;
+}
+
+/** Fully-coerced inputs for building a training request (extracted for tests). */
+export interface TrainingRequestBuildInput {
+  nntree: Record<string, unknown>;
+  datasetTarget: string;
+  datasetParams: Record<string, unknown>;
+  numClasses: number | null;
+  batchSize: number;
+  numWorkers: number;
+  trainSize: number;
+  optimizerTarget: string;
+  learningRate: number;
+  maxEpochs: number;
+  accelerator: string;
+  seed: number;
+  wandb: WandbJobSettings;
+  earlyStopping: { patience: number; min_delta: number };
+  overrides: string[];
+  resources: Record<string, unknown>;
+  priority: number;
+  packageName: string | null;
+  projectId: string | null;
+}
+
+/** Build the W&B job section, emitting optional fields only when configured. */
+export function wandbPayload(settings: WandbJobSettings): Record<string, unknown> {
+  const payload: Record<string, unknown> = { project: settings.project, mode: settings.mode };
+  if (settings.entity) payload.entity = settings.entity;
+  if (settings.tags && settings.tags.length > 0) payload.tags = [...settings.tags];
+  if (settings.name) payload.name = settings.name;
+  return payload;
+}
+
+/**
+ * Build a complete training job request from coerced UI values. ``projectId``
+ * is sent only when the job targets the active local project context.
+ */
+export function buildTrainingRequest(input: TrainingRequestBuildInput): TrainingJobRequest {
+  return {
+    schema_version: 1,
+    network: { format: "nntree", value: input.nntree },
+    training: {
+      seed: input.seed,
+      ...(input.numClasses === null ? {} : { num_classes: input.numClasses }),
+      dataset: {
+        _target_: input.datasetTarget,
+        ...input.datasetParams,
+        batch_size: input.batchSize,
+        num_workers: input.numWorkers,
+        train_size: input.trainSize,
+      },
+      optimizer: { _target_: input.optimizerTarget, lr: input.learningRate },
+      trainer: { max_epochs: input.maxEpochs, accelerator: input.accelerator },
+      wandb: wandbPayload(input.wandb),
+      early_stopping: { patience: input.earlyStopping.patience, min_delta: input.earlyStopping.min_delta },
+      overrides: input.overrides,
+    },
+    resources: input.resources,
+    priority: input.priority,
+    ...(input.packageName ? { package_name: input.packageName } : {}),
+    ...(input.projectId ? { project_id: input.projectId } : {}),
+  };
 }
 
 export interface PairingGrant {
@@ -206,7 +284,7 @@ export class TrainingApiClient {
     const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package`, {
       headers: this.authHeaders(),
     });
-    if (!response.ok) throw await responseError(response);
+    if (!response.ok) throw await apiErrorFromResponse(response);
 
     const header = response.headers.get("x-nnm-sha256");
     if (header === null) {
@@ -243,7 +321,7 @@ export class TrainingApiClient {
         headers,
         signal,
       });
-      if (!response.ok) throw await responseError(response);
+    if (!response.ok) throw await apiErrorFromResponse(response);
       if (!response.body) throw new Error("Il backend non ha restituito uno stream eventi");
       const parser = new SseParser();
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -267,7 +345,7 @@ export class TrainingApiClient {
       for (const [name, value] of this.authHeaders()) headers.set(name, value);
     }
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
-    if (!response.ok) throw await responseError(response);
+    if (!response.ok) throw await apiErrorFromResponse(response);
     return await response.json() as T;
   }
 
@@ -315,7 +393,12 @@ export function canCancelTrainingJob(status: TrainingJobStatus["status"]): boole
   return status === "queued" || status === "running";
 }
 
-async function responseError(response: Response): Promise<BackendApiError> {
+/**
+ * Map a non-OK HTTP response to a typed {@link BackendApiError}. Shared by the
+ * training and project clients so both surfaces expose the same machine
+ * readable ``code`` from the backend ``{detail: {code, message}}`` payloads.
+ */
+export async function apiErrorFromResponse(response: Response): Promise<BackendApiError> {
   const body = await response.json().catch(() => undefined) as ApiErrorBody | undefined;
   const detail = body?.detail;
   const code = typeof detail === "object" && detail?.code ? detail.code : `http_${response.status}`;

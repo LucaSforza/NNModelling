@@ -34,6 +34,7 @@ Prerequisites:
 
 * **Node.js** 18+ and **pnpm** 10+
 * **Python** 3.10+ with **uv** (for running Python scripts)
+* **Valkey 8** (for the local training backend)
 * A modern browser (Chrome/Firefox)
 
 Clone and install:
@@ -46,17 +47,35 @@ Clone and install:
 
 This installs dependencies for both ``front-end/`` and ``mcp-server/``.
 
+Start the editor locally
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The editor is served locally by the **companion** (the FastAPI training
+backend), which also exposes the project workspace APIs on the same origin.
+First build the editor once and start Valkey, then run the single start
+command:
+
+.. code-block:: bash
+
+   pnpm --dir front-end build
+   just --justfile converted/backend/justfile valkey
+   PYTHONPATH=converted/src uv run --project converted python -m backend.cli
+
+Open ``http://127.0.0.1:8000``. See :doc:`project_workspace` for the project
+layout and the local/remote training connection model.
+
 Visual Editor
 -------------
 
-Start the development server:
+Alternatively, run the Vite development server:
 
 .. code-block:: bash
 
    cd front-end
    pnpm run dev
 
-Open the URL printed by Vite (typically ``http://localhost:5173``).
+Open the URL printed by Vite (typically ``http://localhost:5173``). Vite
+proxies ``/api`` to the companion at ``http://127.0.0.1:8000``.
 
 The Canvas
 ~~~~~~~~~~
@@ -141,14 +160,19 @@ errors.
 Save and Load
 -------------
 
+When the editor runs through the companion (local start or the Vite dev
+server), diagram persistence is **project-oriented**: the project chooser
+creates or opens a project, and **Save** writes the current diagram to the
+active project's ``model/graph.json`` through the companion API. Opening a
+project or restoring the last active project loads its diagram automatically.
+
 Save a Diagram
 ~~~~~~~~~~~~~~~~
 
-The toolbar includes **Save** and **Load** buttons:
-
-* **Save**: downloads the current diagram as a ``.json`` file (Svelte Flow
-  format with all nodes, edges, positions, and parameters)
-* **Load**: opens a file picker to import a previously saved diagram
+* **Save**: persists the current diagram to the active project via the
+  companion. A browser download remains available only as an explicit export
+  fallback, not as the project save operation.
+* **Load**: opens a file picker to import a previously saved diagram.
 
 Diagrams are plain JSON — they can be version-controlled with Git, shared,
 and edited programmatically.

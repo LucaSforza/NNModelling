@@ -30,6 +30,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,8 @@ from backend.auth import AuthService, ValkeyAuthStore
 from backend.executors import LocalExecutor
 from backend.manager import JobManager
 from backend.models import JobStatus
+from backend.project_env import project_python
+from backend.projects import ProjectManager
 from backend.store import ValkeyJobStore
 from model_package.runtime import GraphNet
 from tests.backend_helpers import (
@@ -272,3 +276,66 @@ def test_e2e_real_job_failure_records_coherent_terminal_state(
                 assert [job.id for job in manager.admin_list_status()] == [job_id]
 
     asyncio.run(exercise())
+
+
+def test_e2e_project_scoped_job_runs_inside_the_project_runs_dir(
+    tmp_path, clean_valkey, retain_e2e_artifacts_on_failure
+):
+    """A project-scoped job resolves through the companion registry, stores every
+    artifact under ``<project>/runs/<job-id>``, and trains with the project
+    interpreter and import roots through the real queue/executor pipeline."""
+    projects = ProjectManager(tmp_path / "state", sync_enabled=False)
+    project = projects.create_project("e2e-proj", str(tmp_path / "proj"))
+    root = Path(project.root)
+    # Materialize the project interpreter without uv/network: a real venv whose
+    # site-packages inherit the companion venv's heavy dependencies through a
+    # ``.pth`` file, exactly like ``install_and_predict`` does for the wheel.
+    subprocess.run(
+        [sys.executable, "-m", "venv", str(root / ".venv")],
+        check=True,
+        capture_output=True,
+    )
+    venv_python = project_python(root)
+    parent_site = subprocess.check_output(
+        [sys.executable, "-c", "import site; print(site.getsitepackages()[0])"],
+        text=True,
+    ).strip()
+    venv_site = subprocess.check_output(
+        [str(venv_python), "-c", "import site; print(site.getsitepackages()[0])"],
+        text=True,
+    ).strip()
+    Path(venv_site, "nnm-e2e-parent-site.pth").write_text(f"{parent_site}\n", encoding="utf-8")
+    manager = JobManager(
+        ValkeyJobStore(get_test_valkey_url()),
+        tmp_path / "jobs",
+        [LocalExecutor(CONVERTED_DIR)],
+        poll_interval=0.1,
+        project_manager=projects,
+    )
+    auth = AuthService(ValkeyAuthStore(get_test_valkey_url()))
+    app = create_app(
+        manager,
+        auth_service=auth,
+        admin_token=ADMIN_TOKEN,
+        project_manager=projects,
+    )
+    work_dir = tmp_path / "project-work"
+    work_dir.mkdir()
+
+    status, _result = _run_real_job(
+        app,
+        manager,
+        auth,
+        classification_submission().model_copy(update={"project_id": project.id}),
+        work_dir,
+        expected_output_shape=(2, 10),
+    )
+
+    artifact = Path(status.artifact_dir).resolve()
+    runs_dir = (root / "runs").resolve()
+    assert artifact.parent == runs_dir
+    assert artifact.name == status.id
+    assert (artifact / "requested_config.json").is_file()
+    assert (artifact / "resolved_config.yaml").is_file()
+    assert status.executor == "local"
+    assert status.model_package is not None

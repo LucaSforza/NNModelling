@@ -26,6 +26,7 @@ export const DIAGRAM_CONTEXT_KEY = Symbol("diagram-context");
 export class Diagram extends DiagramCore {
   public nodes: Node[] = $state.raw<Node[]>([]);
   public edges: Edge[] = $state.raw<Edge[]>([]);
+  public stereotypes = $state.raw<StereotypeCore[]>([]);
   public typeResult: TypeResult | null = $state.raw(null);
 
   constructor() {
@@ -58,5 +59,15 @@ export class Diagram extends DiagramCore {
     const result = TypeEngine.infer(this);
     this.typeResult = result;
     return result;
+  }
+
+  /**
+   * Replace the active stereotype catalog at runtime (built-in plus project
+   * stereotypes) and refresh type inference. Used by project restore after
+   * the catalog has been validated atomically.
+   */
+  public setStereotypes(stereotypes: StereotypeCore[]): void {
+    this.initStereotypes(stereotypes);
+    this.refreshTypes();
   }
 }

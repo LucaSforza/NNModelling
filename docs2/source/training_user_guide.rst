@@ -2,9 +2,40 @@ Connect the frontend to a training backend
 ==========================================
 
 The Training sidebar can send the diagram to an NNModelling backend running
-on another machine. Connections use administrator-approved browser pairing:
-there are no usernames or passwords, and an unapproved browser cannot inspect
-datasets, compute units, jobs, logs, or events.
+either on the same computer or on another machine. The backend URL and pairing
+workflow are unchanged: enter the backend URL, request a connection, and compare
+the verification code with the administrator.
+
+Local backend (same computer)
+-----------------------------
+
+Start the local companion — it serves the editor and starts the training
+backend on localhost:
+
+.. code-block:: bash
+
+   pnpm --dir front-end build
+   just --justfile converted/backend/justfile valkey
+   PYTHONPATH=converted/src uv run --project converted python -m backend.cli
+
+Open ``http://127.0.0.1:8000``. The Training Sidebar already defaults to the
+``http://127.0.0.1:8000`` URL, so pairing with this process is a single
+approval. No separate ``admin-init`` command is needed: the companion
+provisions the local administrator token automatically on first start. No
+remote server or cluster is involved.
+
+Remote backend
+--------------
+
+To train on a server or Slurm cluster instead, leave the local companion
+running (or not) and connect the sidebar to the remote backend URL as
+described below. The companion never proxies, routes, or duplicates remote
+jobs — selecting local versus remote training is simply which backend URL the
+sidebar is connected to.
+
+Connections use administrator-approved browser pairing: there are no
+usernames or passwords, and an unapproved browser cannot inspect datasets,
+compute units, jobs, logs, or events.
 
 .. warning::
 

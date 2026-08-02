@@ -1,15 +1,44 @@
 # NNModelling
 
 [![CI](https://github.com/LucaSforza/NNModelling/actions/workflows/ci.yml/badge.svg)](https://github.com/LucaSforza/NNModelling/actions/workflows/ci.yml)
-[![GitHub Pages](https://img.shields.io/badge/demo-GitHub%20Pages-2ea44f?logo=github)](https://lucasforza.github.io/NNModelling/)
+[![Install](https://img.shields.io/badge/install-GitHub%20Pages-2ea44f?logo=github)](https://lucasforza.github.io/NNModelling/)
 
 A visual editor and DSL for designing neural networks. Create diagrams in the browser, compile them to NNTree, and generate PyTorch/Lightning training pipelines.
 
-## Try the editor
+## Install and start locally
 
-**[Open NNModelling in your browser](https://lucasforza.github.io/NNModelling/)**
+The editor is served locally by the companion together with a local training
+backend — it is no longer hosted on GitHub Pages (the Pages site now publishes
+only installation instructions and the installer script). The installer checks
+for, but does not install, these prerequisites: Git, Python 3.12+ with
+[`uv`](https://docs.astral.sh/uv/), Node.js 18+ with pnpm 10+, and Valkey 8
+(either a running instance or the `valkey-server` binary).
 
-The GitHub Pages demo contains the visual editor and runs entirely in the browser. Remote training, conversion, and MCP/browser integration require a local or separately deployed backend.
+```bash
+# One command — fetches, builds, and starts:
+curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | bash
+```
+
+The installer clones the repository (or updates an existing checkout) into
+`$HOME/.local/share/nnmodelling`, installs the pnpm dependencies, builds the
+editor, reuses a healthy Valkey instance or starts a repository-local
+`valkey-server` process, and then starts the companion at
+<http://127.0.0.1:8000>. It fails with instructions when a prerequisite is
+missing or the destination is not an NNModelling checkout, never prints
+secrets, and stops only the Valkey process it started when the companion
+exits. Configure with `NNM_DEST_DIR`, `NNM_REMOTE_REPO`, `NNM_BRANCH`,
+`NNM_VALKEY_URL`/`NNM_VALKEY_PORT`, or `NNM_BACKEND_HOST`/`NNM_BACKEND_PORT` —
+in a pipeline the overrides go on the `bash` side, not on `curl`:
+
+```bash
+curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | NNM_DEST_DIR=~/nnmodelling bash
+```
+
+Open <http://127.0.0.1:8000>. The Training Sidebar keeps its URL/pairing
+workflow, so you may connect it either to this localhost backend or to an
+independently managed remote backend URL. The companion never proxies or
+routes remote jobs. Developers can skip the installer and run the same steps
+by hand instead (see the next section).
 
 ```
 Stereotypes/ (JSON) → Svelte Flow Editor → NNTree (JSON) → convert.py → Hydra YAML → main.py → Training
@@ -35,6 +64,9 @@ cd converted
 uv sync
 uv run python src/convert.py <nn_tree_json> <output_dir>
 uv run python src/main.py --config-dir <dir>
+
+# Local companion (serves the editor + training backend on localhost)
+PYTHONPATH=src uv run python -m backend.cli
 ```
 
 ### MCP Server
@@ -80,6 +112,8 @@ cd docs2 && uv run make html
 The Sphinx docs cover:
 
 - **User Guide** — how to use the visual editor
+- **Project Workspace** — project layout, local environments, training runs
+- **Training guides** — pairing, localhost vs remote backends, administration
 - **Architecture** — system design, data flow, components
 - **Stereotypes Reference** — JSON format, categories, all parameters
 - **Python API Reference** — convert.py, main.py, infer.py, Net, ops

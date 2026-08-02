@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +18,12 @@ from backend.app import create_app
 from backend.auth import AuthService, InMemoryAuthStore, PairingGrant
 from backend.config_service import build_job_hydra_configs, normalize_training_config
 from backend.dataset_registry import discover_datasets
-from backend.executors import SlurmExecutor
+from backend.executors import LocalExecutor, SlurmExecutor
 from backend.manager import JobManager
 from backend.models import JobStatus, JobSubmission, ResourceRequest
+from backend.project_env import project_python
+from backend.project_schema import EnvironmentState, ProjectSummary, WandbSettings
+from backend.projects import ProjectError
 from backend.store import InMemoryJobStore, ValkeyJobStore
 
 
@@ -68,7 +72,8 @@ class ImmediateExecutor:
             "enabled": True,
         }
 
-    def submit(self, job, artifact_dir, on_heartbeat, on_finished):
+    def submit(self, job, artifact_dir, on_heartbeat, on_finished, project=None):
+        del project
         Path(artifact_dir, "stdout.log").write_text("ok\n", encoding="utf-8")
         Path(artifact_dir, "stderr.log").write_text("", encoding="utf-8")
         on_heartbeat({"worker": "test"})
@@ -1300,3 +1305,440 @@ def test_admin_api_approves_sessions_and_manages_all_jobs(tmp_path):
 def test_job_submission_rejects_missing_dataset():
     with pytest.raises(ValueError, match="training.dataset"):
         normalize_training_config({"trainer": {"max_epochs": 1}})
+
+
+# ---------------------------------------------------------------------------
+# Project-aware training execution (S2)
+# ---------------------------------------------------------------------------
+
+
+class FakeProjectResolver:
+    """Stand-in for the S1 ProjectManager consumed by the job manager."""
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        environment_status: str = "ready",
+        wandb: WandbSettings | None = None,
+        api_key: str | None = "project-secret-api-key",
+        registered: bool = True,
+    ) -> None:
+        self.root = Path(root)
+        self.environment_status = environment_status
+        self.wandb = wandb or WandbSettings()
+        self.api_key = api_key
+        self.registered = registered
+
+    def get_project(self, project_id: str) -> ProjectSummary:
+        self._require(project_id)
+        return ProjectSummary(
+            id=project_id,
+            name="proj",
+            root=str(self.root),
+            model="model/graph.json",
+            environment=EnvironmentState(
+                status=self.environment_status,  # type: ignore[arg-type]
+                python=str(project_python(self.root)),
+            ),
+            wandb=self.wandb,
+            last_opened="2026-01-01T00:00:00+00:00",
+        )
+
+    def resolve_root(self, project_id: str) -> Path:
+        self._require(project_id)
+        return self.root
+
+    def wandb_api_key(self, project_id: str) -> str | None:
+        self._require(project_id)
+        return self.api_key
+
+    def _require(self, project_id: str) -> None:
+        if not self.registered:
+            raise ProjectError("unknown_project", f"unknown project {project_id}")
+
+
+def project_submission(project_id: str, *, wandb: dict[str, Any] | None = None) -> JobSubmission:
+    """Build a legacy submission carrying an optional project id and wandb doc."""
+    base = submission()
+    training = json.loads(json.dumps(base.training))
+    if wandb is not None:
+        training["wandb"] = wandb
+    return base.model_copy(update={"project_id": project_id, "training": training})
+
+
+def project_submission_without_wandb(project_id: str) -> JobSubmission:
+    """Build a project submission that leaves every W&B field to the project."""
+    base = submission()
+    training = json.loads(json.dumps(base.training))
+    training.pop("wandb", None)
+    return base.model_copy(update={"project_id": project_id, "training": training})
+
+
+def _project_manager(
+    tmp_path: Path,
+    resolver: FakeProjectResolver,
+    *,
+    executors: list[Any] | None = None,
+) -> JobManager:
+    return JobManager(
+        InMemoryJobStore(),
+        tmp_path / "jobs",
+        executors or [ImmediateExecutor()],
+        project_manager=resolver,
+    )
+
+
+def test_project_job_with_unknown_project_id_fails_before_creating_artifacts(tmp_path):
+    manager = _project_manager(tmp_path, FakeProjectResolver(tmp_path / "proj", registered=False))
+
+    with pytest.raises(ValueError, match="unknown project"):
+        manager.submit(project_submission("does-not-exist"), owner_connection_id=OWNER)
+
+    # An unresolved project must never create an artifact or queue a record.
+    assert list(manager.artifact_root.iterdir()) == []
+    assert manager.store.list_jobs() == []
+    assert manager.store.claim_next() is None
+
+
+def test_project_job_stores_artifacts_under_project_runs_dir(tmp_path, packaged_export):
+    resolver = FakeProjectResolver(tmp_path / "proj")
+    manager = _project_manager(tmp_path, resolver)
+    queued = manager.submit(project_submission("proj-id"), owner_connection_id=OWNER)
+
+    assert queued.status == "queued"
+    artifact = Path(queued.artifact_dir)
+    assert artifact.parent == (resolver.root / "runs").resolve()
+    assert artifact.name == queued.id
+    assert (artifact / "requested_config.json").is_file()
+    assert (artifact / "cfg" / "base.yaml").is_file()
+    # The legacy artifact root is never used for a project-scoped job.
+    assert not (manager.artifact_root / queued.id).exists()
+
+
+def test_project_job_merges_wandb_defaults_under_explicit_job_settings(tmp_path, packaged_export):
+    settings = WandbSettings(
+        entity="team",
+        project="proj-runs",
+        tags=["proj"],
+        run_name_template="proj-run",
+        mode="online",
+    )
+    manager = _project_manager(tmp_path, FakeProjectResolver(tmp_path / "proj", wandb=settings))
+    queued = manager.submit(
+        project_submission("proj-id", wandb={"project": "tests", "mode": "disabled"}),
+        owner_connection_id=OWNER,
+    )
+
+    record = manager.store.get_job(queued.id)
+    assert record is not None
+    merged = record["submission"]["training"]["wandb"]
+    # Explicit job fields win; omitted project fields inherit.
+    assert merged["project"] == "tests"
+    assert merged["mode"] == "disabled"
+    assert merged["entity"] == "team"
+    assert merged["tags"] == ["proj"]
+    assert merged["name"] == "proj-run"
+    # The raw client request is preserved verbatim in requested_config.json.
+    requested = json.loads((Path(queued.artifact_dir) / "requested_config.json").read_text(encoding="utf-8"))
+    assert requested["training"]["wandb"] == {"project": "tests", "mode": "disabled"}
+    # The merged settings drive the generated Hydra wandb config.
+    wandb_yaml = (Path(queued.artifact_dir) / "cfg" / "wandb" / "wandb.yaml").read_text(encoding="utf-8")
+    assert "project: tests" in wandb_yaml
+    assert "entity: team" in wandb_yaml
+    assert "mode: disabled" in wandb_yaml
+
+
+def test_project_job_omitted_wandb_fields_inherit_project_defaults(tmp_path, packaged_export):
+    settings = WandbSettings(entity="team", tags=["a", "b"], run_name_template="proj-run")
+    manager = _project_manager(tmp_path, FakeProjectResolver(tmp_path / "proj", wandb=settings))
+    queued = manager.submit(project_submission_without_wandb("proj-id"), owner_connection_id=OWNER)
+
+    record = manager.store.get_job(queued.id)
+    assert record is not None
+    merged = record["submission"]["training"]["wandb"]
+    assert merged == {
+        "project": "NeuralNetworks",
+        "mode": "online",
+        "entity": "team",
+        "tags": ["a", "b"],
+        "name": "proj-run",
+    }
+
+
+class CapturingExecutor(ImmediateExecutor):
+    """Immediate executor that records the project context handed to it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.project_contexts: list[dict[str, Any] | None] = []
+
+    def submit(self, job, artifact_dir, on_heartbeat, on_finished, project=None):
+        self.project_contexts.append(project)
+        return super().submit(job, artifact_dir, on_heartbeat, on_finished)
+
+
+def test_project_job_injects_api_key_only_into_the_child_environment(tmp_path, packaged_export):
+    resolver = FakeProjectResolver(tmp_path / "proj", api_key="super-secret-key")
+    executor = CapturingExecutor()
+    manager = JobManager(InMemoryJobStore(), tmp_path / "jobs", [executor], project_manager=resolver)
+    parent_key_before = os.environ.get("WANDB_API_KEY")
+    queued = manager.submit(project_submission("proj-id"), owner_connection_id=OWNER)
+    Path(queued.artifact_dir, "weights.safetensors").write_bytes(b"safe-weights")
+
+    assert manager.run_once() is True
+
+    project_ctx = executor.project_contexts[-1]
+    assert project_ctx is not None
+    # The key exists only inside the child environment snapshot.
+    assert project_ctx["env"]["WANDB_API_KEY"] == "super-secret-key"
+    assert os.environ.get("WANDB_API_KEY") == parent_key_before
+    # PYTHONPATH exposes project src/ and datasets/ ahead of any inherited path.
+    pythonpath = project_ctx["env"]["PYTHONPATH"].split(os.pathsep)
+    assert pythonpath[0] == str((resolver.root / "src").resolve())
+    assert pythonpath[1] == str((resolver.root / "datasets").resolve())
+
+    # The key never lands in the persisted record, configs, or log files.
+    record = manager.store.get_job(queued.id)
+    assert record is not None
+    assert "super-secret-key" not in json.dumps(record)
+    for path in Path(queued.artifact_dir).rglob("*"):
+        if path.is_file():
+            content = path.read_text(encoding="utf-8", errors="replace")
+            assert "super-secret-key" not in content, f"secret leaked into {path}"
+
+
+def test_project_job_with_missing_environment_fails_clearly(tmp_path):
+    manager = _project_manager(
+        tmp_path,
+        FakeProjectResolver(tmp_path / "proj", environment_status="missing"),
+    )
+
+    with pytest.raises(ValueError, match="environment is missing"):
+        manager.submit(project_submission("proj-id"), owner_connection_id=OWNER)
+    assert manager.store.list_jobs() == []
+
+
+def test_project_job_requires_a_local_executor(tmp_path):
+    class SlurmLikeExecutor(ImmediateExecutor):
+        kind = "slurm"
+        name = "slurm-fake"
+
+    manager = JobManager(
+        InMemoryJobStore(),
+        tmp_path / "jobs",
+        [SlurmLikeExecutor()],
+        project_manager=FakeProjectResolver(tmp_path / "proj"),
+    )
+
+    with pytest.raises(ValueError, match="local executor"):
+        manager.submit(project_submission("proj-id"), owner_connection_id=OWNER)
+    assert manager.store.list_jobs() == []
+    assert list(manager.artifact_root.iterdir()) == []
+
+
+def test_project_job_is_never_routed_to_a_slurm_executor(tmp_path, packaged_export):
+    class SlurmLikeExecutor(ImmediateExecutor):
+        kind = "slurm"
+        name = "slurm-fake"
+
+    manager = JobManager(
+        InMemoryJobStore(),
+        tmp_path / "jobs",
+        [SlurmLikeExecutor(), ImmediateExecutor()],
+        project_manager=FakeProjectResolver(tmp_path / "proj"),
+    )
+    queued = manager.submit(project_submission("proj-id"), owner_connection_id=OWNER)
+    Path(queued.artifact_dir, "weights.safetensors").write_bytes(b"safe-weights")
+
+    assert manager.run_once() is True
+    finished = manager.status(queued.id, owner_connection_id=OWNER)
+    assert finished.status == "succeeded"
+    assert finished.executor == "local"
+
+
+def test_project_runs_dir_cannot_escape_the_project_root_via_symlink(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "runs").symlink_to(outside, target_is_directory=True)
+    manager = _project_manager(tmp_path, FakeProjectResolver(root))
+
+    with pytest.raises(ValueError, match="outside the project root"):
+        manager.submit(project_submission("proj-id"), owner_connection_id=OWNER)
+    # The symlink target must not receive any artifacts.
+    assert list(outside.iterdir()) == []
+    assert manager.store.list_jobs() == []
+
+
+def test_legacy_job_without_project_id_keeps_the_artifact_root_layout(tmp_path, packaged_export):
+    manager = JobManager(InMemoryJobStore(), tmp_path / "jobs", [ImmediateExecutor()])
+    queued = manager.submit(submission(), owner_connection_id=OWNER)
+
+    assert Path(queued.artifact_dir) == manager.artifact_root / queued.id
+    requested = json.loads((Path(queued.artifact_dir) / "requested_config.json").read_text(encoding="utf-8"))
+    assert requested == submission().model_dump(mode="json")
+
+
+def test_project_job_builds_hydra_configs_for_project_dataset_targets(tmp_path, packaged_export):
+    root = tmp_path / "proj"
+    datasets_dir = root / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "my_ds.py").write_text(
+        "from dataset.ds import Dataset\n"
+        "class MyDS(Dataset):\n"
+        "    @classmethod\n"
+        "    def num_classes(cls, config):\n"
+        "        return 7\n"
+        "    def division(self):\n"
+        "        raise NotImplementedError\n",
+        encoding="utf-8",
+    )
+    manager = _project_manager(tmp_path, FakeProjectResolver(root))
+    base = project_submission("proj-id")
+    training = json.loads(json.dumps(base.training))
+    training["dataset"] = {"_target_": "my_ds.MyDS", "batch_size": 8}
+    queued = manager.submit(base.model_copy(update={"training": training}), owner_connection_id=OWNER)
+
+    net = (Path(queued.artifact_dir) / "cfg" / "net" / "custom_sequence.yaml").read_text(encoding="utf-8")
+    assert "num_classes: 7" in net
+
+
+def test_build_job_hydra_configs_imports_project_datasets_without_leaking_state(tmp_path):
+    root = tmp_path / "proj"
+    datasets_dir = root / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "my_ds.py").write_text(
+        "from dataset.ds import Dataset\n"
+        "class MyDS(Dataset):\n"
+        "    @classmethod\n"
+        "    def num_classes(cls, config):\n"
+        "        return 7\n"
+        "    def division(self):\n"
+        "        raise NotImplementedError\n",
+        encoding="utf-8",
+    )
+    job = submission().model_dump(mode="json")
+    job["training"]["dataset"] = {"_target_": "my_ds.MyDS", "batch_size": 8}
+    path_before = list(sys.path)
+
+    config_dir = build_job_hydra_configs(job, tmp_path / "out", import_roots=(datasets_dir,))
+
+    net = (config_dir / "net" / "custom_sequence.yaml").read_text(encoding="utf-8")
+    assert "num_classes: 7" in net
+    # Project modules never leak into global interpreter state.
+    assert "my_ds" not in sys.modules
+    assert str(datasets_dir) not in sys.path
+    assert sys.path == path_before
+
+
+def test_build_job_hydra_configs_import_roots_do_not_cross_contaminate_projects(tmp_path):
+    """Two projects sharing a module name must each resolve their own file."""
+    first = tmp_path / "one" / "datasets"
+    second = tmp_path / "two" / "datasets"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    for datasets_dir, count in ((first, 3), (second, 9)):
+        (datasets_dir / "my_ds.py").write_text(
+            "from dataset.ds import Dataset\n"
+            f"class MyDS(Dataset):\n"
+            f"    @classmethod\n"
+            f"    def num_classes(cls, config):\n"
+            f"        return {count}\n"
+            "    def division(self):\n"
+            "        raise NotImplementedError\n",
+            encoding="utf-8",
+        )
+    job = submission().model_dump(mode="json")
+    job["training"]["dataset"] = {"_target_": "my_ds.MyDS", "batch_size": 8}
+
+    first_cfg = build_job_hydra_configs(job, tmp_path / "out-a", import_roots=(first,))
+    second_cfg = build_job_hydra_configs(job, tmp_path / "out-b", import_roots=(second,))
+
+    assert "num_classes: 3" in (first_cfg / "net" / "custom_sequence.yaml").read_text(encoding="utf-8")
+    assert "num_classes: 9" in (second_cfg / "net" / "custom_sequence.yaml").read_text(encoding="utf-8")
+    assert "my_ds" not in sys.modules
+    assert str(first) not in sys.path
+    assert str(second) not in sys.path
+
+
+def test_local_executor_command_uses_sys_executable_without_project_context(tmp_path):
+    executor = LocalExecutor(tmp_path)
+    command = executor._command({"id": "j1"}, tmp_path / "artifact")
+    assert command[0] == sys.executable
+
+
+def test_local_executor_command_uses_the_project_interpreter_with_project_context(tmp_path):
+    executor = LocalExecutor(tmp_path)
+    project = {"python": "/proj/.venv/bin/python", "env": {}, "root": "/proj", "project_id": "p"}
+    command = executor._command({"id": "j1"}, tmp_path / "artifact", project)
+    assert command[0] == "/proj/.venv/bin/python"
+    assert str(tmp_path / "artifact" / "cfg") in command
+
+
+class _FakeProcess:
+    """Process double whose poll reports completion immediately."""
+
+    def __init__(self, returncode: int = 1) -> None:
+        self.pid = 4242
+        self.returncode = returncode
+
+    def poll(self) -> int:
+        return self.returncode
+
+
+def _capture_popen(monkeypatch, captured: dict[str, Any]) -> None:
+    monkeypatch.setattr(
+        "backend.executors.local.subprocess.Popen",
+        lambda command, **kwargs: captured.update(command=command, kwargs=kwargs) or _FakeProcess(),
+    )
+
+
+def test_local_executor_forwards_the_project_environment_to_the_child(tmp_path, monkeypatch):
+    captured: dict[str, Any] = {}
+    _capture_popen(monkeypatch, captured)
+    executor = LocalExecutor(tmp_path)
+    project = {
+        "python": "/proj/.venv/bin/python",
+        "env": {"WANDB_API_KEY": "secret", "PYTHONPATH": "/proj/src:/proj/datasets"},
+    }
+    artifact = tmp_path / "artifact"
+
+    executor.submit({"id": "j1"}, str(artifact), lambda details: None, lambda rc, details: None, project=project)
+
+    assert captured["kwargs"]["env"] == project["env"]
+    assert captured["command"][0] == "/proj/.venv/bin/python"
+
+
+def test_local_executor_legacy_jobs_inherit_the_parent_environment(tmp_path, monkeypatch):
+    captured: dict[str, Any] = {}
+    _capture_popen(monkeypatch, captured)
+    executor = LocalExecutor(tmp_path)
+    artifact = tmp_path / "artifact"
+
+    executor.submit({"id": "j2"}, str(artifact), lambda details: None, lambda rc, details: None)
+
+    assert captured["kwargs"].get("env") is None
+    assert captured["command"][0] == sys.executable
+
+
+def test_api_rejects_project_jobs_with_unknown_project_before_writing_artifacts(tmp_path):
+    manager = _project_manager(tmp_path, FakeProjectResolver(tmp_path / "proj", registered=False))
+    auth = AuthService(InMemoryAuthStore())
+    pairing = auth.create_pairing("Browser", client_host="127.0.0.1")
+    auth.approve(pairing.request_id)
+    app = create_app(manager, auth_service=auth, admin_token="admin-secret")
+
+    async def exercise_api() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                headers = {"authorization": f"Bearer {pairing.token}"}
+                payload = project_submission("unknown-id").model_dump(mode="json")
+                response = await client.post("/jobs", headers=headers, json=payload)
+                assert response.status_code == 422
+                assert "project" in response.json()["detail"].lower()
+                assert list(manager.artifact_root.iterdir()) == []
+
+    asyncio.run(exercise_api())

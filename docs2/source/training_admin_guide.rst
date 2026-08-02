@@ -53,6 +53,44 @@ install the Python environment:
 All following examples run from the repository root and explicitly select the
 backend justfile.
 
+Local companion: editor + backend in one command
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a single-user workstation, the bundled installer fetches, builds, and
+starts the companion in one command:
+
+.. code-block:: bash
+
+   curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | bash
+
+It checks for (never installs) Git, Python 3.12+ with ``uv``, Node.js 18+ with
+pnpm, and Valkey 8; it reuses a healthy Valkey instance or starts a
+repository-local ``valkey-server`` process (stopping only that process when the
+companion exits), refuses to overwrite a destination that is not an NNModelling
+checkout, and never prints secrets. Set ``NNM_DEST_DIR``/``NNM_BRANCH``/
+``NNM_REMOTE_REPO`` to control the checkout.
+
+On an existing checkout, run the same steps by hand:
+
+.. code-block:: bash
+
+   pnpm --dir front-end build
+   PYTHONPATH=converted/src uv run --project converted python -m backend.cli
+
+Open ``http://127.0.0.1:8000``. The command fails actionably when
+``front-end/dist`` is missing (with a build instruction) or Valkey is
+unreachable; it never serves an empty UI. On first start it provisions the
+local administrator token automatically (mode ``0600``, honoring
+``NNM_ADMIN_TOKEN_FILE``), so the ``backend`` recipe's separate ``admin-init``
+step is not needed when using the companion command. The editor's project
+calls resolve under the ``/api`` prefix on the same origin, while the root
+training routes (``/health``, ``/pairing``, ``/jobs``) remain available to the
+Training Sidebar. For LAN clients, bind with ``--host 0.0.0.0`` and set
+``NNM_ALLOWED_ORIGINS`` exactly as described under *Start FastAPI* below.
+
+The companion does not proxy remote jobs: remote/Slurm training still connects
+the Training Sidebar directly to this or another backend URL.
+
 Start Valkey
 ~~~~~~~~~~~~
 

@@ -66,12 +66,17 @@ class LocalExecutor:
             return False
         return not request.node
 
-    def _command(self, job: dict[str, Any], artifact_dir: Path) -> list[str]:
-        """Build the fixed Python command for a submitted job."""
+    def _command(self, job: dict[str, Any], artifact_dir: Path, project: dict[str, Any] | None = None) -> list[str]:
+        """Build the fixed training command for a submitted job.
+
+        Project-scoped jobs run with the project's own venv interpreter;
+        legacy jobs keep the companion interpreter.
+        """
 
         cfg_dir = artifact_dir / "cfg"
+        python = project["python"] if project else sys.executable
         return [
-            sys.executable,
+            python,
             str(self.converted_dir / "src" / "main.py"),
             "--config-path",
             str(cfg_dir),
@@ -89,8 +94,15 @@ class LocalExecutor:
         artifact_dir: str,
         on_heartbeat: HeartbeatCallback,
         on_finished: FinishedCallback,
+        project: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start a local process and monitor it until completion."""
+        """Start a local process and monitor it until completion.
+
+        The optional ``project`` context carries the resolved project root,
+        interpreter, and the complete child environment (project ``src/`` and
+        ``datasets/`` import roots plus the W&B API key). Legacy jobs inherit
+        the parent environment exactly as before.
+        """
 
         job_id = str(job["id"])
         artifact_path = Path(artifact_dir)
@@ -101,10 +113,11 @@ class LocalExecutor:
         stderr = stderr_file.open("ab")
         try:
             process = subprocess.Popen(
-                self._command(job, artifact_path),
+                self._command(job, artifact_path, project),
                 cwd=self.converted_dir,
                 stdout=stdout,
                 stderr=stderr,
+                env=project["env"] if project else None,
                 start_new_session=True,
             )
         except Exception:

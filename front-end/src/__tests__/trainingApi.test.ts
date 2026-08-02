@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob } from "../training/api";
+import {
+  BackendApiError,
+  SseParser,
+  TrainingApiClient,
+  buildTrainingRequest,
+  canCancelTrainingJob,
+  type TrainingRequestBuildInput,
+} from "../training/api";
 import { trainingLogWindowUrl } from "../training/windows";
 
 afterEach(() => {
@@ -237,6 +244,74 @@ describe("training companion windows", () => {
     expect(trainingLogWindowUrl("http://editor.lan:5174/?diagram=mnist", "job-1")).toBe(
       "http://editor.lan:5174/?diagram=mnist&training-log=job-1",
     );
+  });
+});
+
+function buildInput(overrides: Partial<TrainingRequestBuildInput> = {}): TrainingRequestBuildInput {
+  return {
+    nntree: { nodes: [], edges: [] },
+    datasetTarget: "dataset.mnist.MNISTDataset",
+    datasetParams: {},
+    numClasses: 10,
+    batchSize: 32,
+    numWorkers: 4,
+    trainSize: 0.8,
+    optimizerTarget: "torch.optim.Adam",
+    learningRate: 0.001,
+    maxEpochs: 20,
+    accelerator: "auto",
+    seed: 42,
+    wandb: { project: "NeuralNetworks", mode: "online" },
+    earlyStopping: { patience: 3, min_delta: 0.0 },
+    overrides: [],
+    resources: { cpu: 4, memory_gb: 8, gpu: 0 },
+    priority: 0,
+    packageName: null,
+    projectId: null,
+    ...overrides,
+  };
+}
+
+describe("project-aware training requests", () => {
+  it("includes project_id in the payload only for an active local project", () => {
+    const request = buildTrainingRequest(buildInput({ projectId: "proj-123" }));
+    expect(request.project_id).toBe("proj-123");
+  });
+
+  it("omits project_id when no project context exists", () => {
+    const request = buildTrainingRequest(buildInput({ projectId: null }));
+    expect(request.project_id).toBeUndefined();
+  });
+
+  it("submits project_id through the authenticated client without leaking it in the URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "job-1" }), { status: 202, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await api.submitTrainingJob(buildTrainingRequest(buildInput({ projectId: "proj-123" })));
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/jobs");
+    expect(url).not.toContain("proj-123");
+    expect(JSON.parse(String(init.body))).toMatchObject({ project_id: "proj-123" });
+  });
+
+  it("sends W&B entity/tags/name only when configured", () => {
+    const full = buildTrainingRequest(
+      buildInput({ wandb: { project: "NeuralNetworks", mode: "online", entity: "team", tags: ["prod"], name: "run-{epoch}" } }),
+    );
+    expect(full.training.wandb).toMatchObject({
+      entity: "team",
+      tags: ["prod"],
+      name: "run-{epoch}",
+      project: "NeuralNetworks",
+      mode: "online",
+    });
+
+    const bare = buildTrainingRequest(buildInput({ wandb: { project: "NeuralNetworks", mode: "offline" } }));
+    expect(bare.training.wandb).toEqual({ project: "NeuralNetworks", mode: "offline" });
   });
 });
 

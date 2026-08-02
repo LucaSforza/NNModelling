@@ -17,6 +17,7 @@ The project consists of three main packages:
    :caption: User Guide
 
    user_guide
+   project_workspace
    training_user_guide
 
 .. toctree::

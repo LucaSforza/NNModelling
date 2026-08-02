@@ -25,6 +25,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   import Sidebar from "./components/Sidebar.svelte";
   import TrainingSidebar from "./components/TrainingSidebar.svelte";
+  import { onMount } from "svelte";
+  import { projectState } from "./projects/state.svelte";
 
   const { getInternalNode, getIntersectingNodes, screenToFlowPosition, fitView, setCenter } =
     useSvelteFlow();
@@ -59,9 +61,37 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // Grazie a Svelte 5, le sue proprietà interne $state saranno reattive qui dentro!
   const diagram = new Diagram();
 
+  interface Props {
+    onOpenProjectChooser?: () => void;
+  }
+
+  let { onOpenProjectChooser }: Props = $props();
+
   // Context per SubflowNode — gli permette di chiamare diagram.toggleSubflow
   // senza bisogno di callback nel node data
   setContext(DIAGRAM_CONTEXT_KEY, diagram);
+
+  // Ripristino del progetto attivo all'avvio: il diagramma e il catalogo
+  // stereotipi vengono sostituiti solo dopo la validazione atomica.
+  onMount(() => {
+    projectState.attachDiagram(diagram);
+    void projectState.restore();
+  });
+
+  let hasActiveProject = $derived(projectState.active !== null);
+  // Save is only meaningful once the active project has actually been applied
+  // (diagram + catalog). A failed restore leaves the project visible but
+  // unapplied; saving must stay disabled so the browser diagram cannot
+  // overwrite the project graph.
+  let canSaveProject = $derived(projectState.active !== null && projectState.status === "ready");
+
+  async function handleProjectSave() {
+    await projectState.saveGraph();
+  }
+
+  function handleOpenProjectChooser() {
+    onOpenProjectChooser?.();
+  }
 
   // --- SVELTE 5: Stato derivato per abilitare/disabilitare i pulsanti ---
   // Ora peschiamo direttamente dall'istanza diagram
@@ -249,8 +279,15 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       <Background />
       <Controls />
       <Panel position="top-left" class="toolbar">
-        <button onclick={() => handleSaveModel(diagram)} class="toolbar-btn"
+        <button
+          onclick={() => void handleProjectSave()}
+          disabled={!canSaveProject}
+          title={canSaveProject ? "Salva nel progetto attivo" : hasActiveProject ? "Il progetto non è stato applicato: riaprilo prima di salvare" : "Apri o crea un progetto per salvare"}
+          class="toolbar-btn"
           >💾 Salva</button
+        >
+        <button onclick={() => handleSaveModel(diagram)} class="toolbar-btn"
+          >⬇️ Esporta JSON</button
         >
         <button
           onclick={() => {
@@ -263,6 +300,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
             isSidebarOpen = false;
           }}
           class="toolbar-btn">📂 Carica</button
+        >
+        <button onclick={handleOpenProjectChooser} class="toolbar-btn"
+          >📁 Progetto</button
         >
         {#if loadError}
           <div class="load-error" role="alert">{loadError}</div>

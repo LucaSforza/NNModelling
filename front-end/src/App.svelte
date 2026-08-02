@@ -14,10 +14,40 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 <script lang="ts">
   import { SvelteFlowProvider } from "@xyflow/svelte";
   import FlowCanvas from "./FlowCanvas.svelte";
+  import ProjectChooser from "./components/ProjectChooser.svelte";
+  import ProjectStatus from "./components/ProjectStatus.svelte";
   import TrainingLogWindow from "./components/TrainingLogWindow.svelte";
+  import { projectState } from "./projects/state.svelte";
   import "@xyflow/svelte/dist/style.css";
+  import "./styles/project.css";
 
   const trainingLogJobId = new URL(window.location.href).searchParams.get("training-log");
+
+  // The chooser precedes the canvas while no project is active, but stays
+  // dismissible so the user can reach the Training sidebar (pairing is the
+  // prerequisite for project APIs). Once dismissed it only reappears when
+  // reopened explicitly.
+  let chooserOpen = $state(false);
+  let chooserDismissed = $state(false);
+  let showChooser = $derived(
+    projectState.status === "ready" &&
+      projectState.active === null &&
+      !projectState.busy &&
+      !chooserDismissed,
+  );
+  let effectiveChooser = $derived(showChooser || chooserOpen);
+
+  function handleOpenChooser() {
+    chooserDismissed = false;
+    chooserOpen = true;
+  }
+
+  function handleCloseChooser() {
+    chooserOpen = false;
+    if (projectState.active === null && projectState.status === "ready") {
+      chooserDismissed = true;
+    }
+  }
 </script>
 
 {#if trainingLogJobId}
@@ -27,7 +57,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     style="height: 100vh; width: 100vw; overflow: hidden; background: #f8f8f8;"
   >
     <SvelteFlowProvider>
-      <FlowCanvas />
+      <FlowCanvas onOpenProjectChooser={handleOpenChooser} />
+      {#if effectiveChooser}
+        <ProjectChooser onClose={handleCloseChooser} />
+      {/if}
+      <ProjectStatus onOpenChooser={handleOpenChooser} />
     </SvelteFlowProvider>
   </div>
 {/if}

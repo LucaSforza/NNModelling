@@ -5,6 +5,7 @@
   import {
     BackendApiError,
     TrainingApiClient,
+    buildTrainingRequest,
     canCancelTrainingJob,
     type DatasetInfo,
     type DatasetParameter,
@@ -21,6 +22,7 @@
     saveBackendConnection,
     type SavedBackendConnection,
   } from "../training/connection";
+  import { projectState, isLocalCompanionBackend } from "../projects/state.svelte";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
 
@@ -41,6 +43,7 @@
   let { diagram, onClose }: Props = $props();
 
   let datasets = $state.raw<DatasetInfo[]>([]);
+  let datasetCatalogErrors = $state.raw<{ path: string; error: string }[]>([]);
   let jobs = $state.raw<TrainingJobStatus[]>([]);
   let selectedJobLogs = $state.raw<TrainingJobLogs | null>(null);
   let backendUrl = $state(
@@ -64,6 +67,12 @@
   let seed = $state("42");
   let wandbProject = $state("NeuralNetworks");
   let wandbMode = $state("online");
+  let wandbEntity = $state("");
+  let wandbTags = $state("");
+  let wandbRunName = $state("");
+  let wandbApiKey = $state("");
+  let wandbKeyConfigured = $state(false);
+  let loadedWandbProjectId = $state<string | null>(null);
   let overridesText = $state("");
   let cpu = $state("4");
   let memoryGb = $state("8");
@@ -85,10 +94,44 @@
   let pairingTimer: ReturnType<typeof setInterval> | undefined;
   let eventAbort: AbortController | null = null;
   let refreshGate = new RefreshGate();
+  let datasetLoadSeq = 0;
 
   let selectedDatasetInfo = $derived(
     datasets.find((dataset) => dataset.target === selectedDataset) ?? null,
   );
+
+  // Project-aware training: the job carries project_id only when the connected
+  // backend is the local companion (project registry owner). A remote backend
+  // keeps the unchanged non-project contract.
+  let localCompanion = $derived(isLocalCompanionBackend(backendUrl));
+  let activeProject = $derived(projectState.active);
+  let projectJob = $derived(activeProject !== null && localCompanion);
+  let projectEnv = $derived(projectJob ? activeProject!.environment : null);
+  let projectEnvReady = $derived(!projectJob || projectEnv?.status === "ready");
+  let projectEnvMessage = $derived(
+    projectEnv?.status === "error" && projectEnv.message
+      ? projectEnv.message
+      : projectEnv?.status === "missing"
+        ? "L'ambiente del progetto non è ancora sincronizzato (manca il venv)."
+        : "",
+  );
+
+  // W&B non-secret fields reload whenever the active project changes.
+  $effect(() => {
+    const project = projectState.active;
+    if (!project) {
+      loadedWandbProjectId = null;
+      return;
+    }
+    if (project.id === loadedWandbProjectId) return;
+    loadedWandbProjectId = project.id;
+    wandbProject = project.wandb.project;
+    wandbMode = project.wandb.mode;
+    wandbEntity = project.wandb.entity;
+    wandbTags = project.wandb.tags.join(", ");
+    wandbRunName = project.wandb.run_name_template;
+    wandbKeyConfigured = project.api_key_configured;
+  });
 
   onMount(() => {
     void restoreConnection();
@@ -205,9 +248,13 @@
     connectionState = "active";
     session = currentSession;
     errorMessage = "";
-    await Promise.all([loadDatasets(), refreshJobs()]);
+    await Promise.all([refreshJobs()]);
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(() => void refreshJobs(), 3000);
+    // Pairing is the prerequisite for the project workspace APIs: refresh the
+    // recent/active project state now that a backend connection exists. The
+    // dataset catalog effect reloads once the active project is resolved.
+    void projectState.restore();
   }
 
   function forget() {
@@ -236,13 +283,55 @@
   }
 
   async function loadDatasets() {
+    // A sequence guard keeps the freshest catalog: the installed-only fetch
+    // issued at activate time must never overwrite the project catalog that
+    // resolves after restore() completes.
+    const seq = ++datasetLoadSeq;
     try {
-      datasets = await requireApi().listDatasets();
-      if (!selectedDataset && datasets.length > 0) selectDataset(datasets[0]);
+      if (projectJob) {
+        // Local companion + active project: the project catalog already
+        // includes installed classes, so it fully replaces the plain list.
+        const catalog = await projectState.loadProjectDatasets();
+        if (catalog) {
+          if (seq !== datasetLoadSeq) return;
+          datasets = catalog.datasets;
+          datasetCatalogErrors = catalog.errors;
+          settleDatasetSelection();
+          return;
+        }
+        // Project catalog unavailable (restore in flight or failure): keep the
+        // actionable workspace error and fall through to installed classes.
+        if (seq !== datasetLoadSeq) return;
+        if (projectState.error) errorMessage = projectState.error;
+      }
+      const installed = await requireApi().listDatasets();
+      if (seq !== datasetLoadSeq) return;
+      datasetCatalogErrors = [];
+      datasets = installed;
+      settleDatasetSelection();
     } catch (error) {
-      handleConnectionError(error);
+      if (seq === datasetLoadSeq) handleConnectionError(error);
     }
   }
+
+  // After a catalog swap, keep a still-valid selection and fall back to the
+  // first dataset when the previous target no longer exists (project switch).
+  function settleDatasetSelection() {
+    if (!selectedDataset || !datasets.some((dataset) => dataset.target === selectedDataset)) {
+      if (datasets.length > 0) selectDataset(datasets[0]);
+    }
+  }
+
+  // Reload the dataset catalog whenever the project context changes so
+  // project-local classes become selectable without a re-pair: restore()
+  // resolves asynchronously after activate(), and open/close changes the
+  // active project id. Only the sync reads (projectJob, connectionState)
+  // are tracked, so the reload never loops on its own writes.
+  $effect(() => {
+    if (connectionState === "active") {
+      void loadDatasets();
+    }
+  });
 
   async function refreshJobs() {
     if (connectionState !== "active") return;
@@ -283,33 +372,38 @@
     if (normalizedPackageSuffix && !/^[A-Za-z][A-Za-z0-9_]*$/.test(normalizedPackageSuffix)) {
       throw new Error("Il nome del pacchetto può contenere solo lettere, numeri e _ e deve iniziare con una lettera");
     }
-    const datasetConfig: Record<string, unknown> = { _target_: selectedDataset };
+    const coercedDatasetParams: Record<string, unknown> = {};
     for (const parameter of selectedDatasetInfo.parameters) {
       const value = datasetParams[parameter.name];
-      if (value !== undefined && value !== "") datasetConfig[parameter.name] = coerce(value, parameter.type);
+      if (value !== undefined && value !== "") coercedDatasetParams[parameter.name] = coerce(value, parameter.type);
     }
+    const tags = wandbTags.split(",").map((tag) => tag.trim()).filter(Boolean);
     const nntree = JSON.parse(new NNTree(diagram).toJson()) as Record<string, unknown>;
-    return {
-      schema_version: 1,
-      network: { format: "nntree", value: nntree },
-      training: {
-        seed: Number.parseInt(seed, 10),
-        ...(selectedDatasetInfo.num_classes === null ? {} : { num_classes: selectedDatasetInfo.num_classes }),
-        dataset: {
-          ...datasetConfig,
-          batch_size: Number.parseInt(batchSize, 10),
-          num_workers: Number.parseInt(numWorkers, 10),
-          train_size: Number.parseFloat(trainSize),
-        },
-        optimizer: { _target_: optimizerTarget, lr: Number.parseFloat(learningRate) },
-        trainer: { max_epochs: Number.parseInt(maxEpochs, 10), accelerator },
-        wandb: { project: wandbProject, mode: wandbMode },
-        early_stopping: {
-          patience: Number.parseInt(patience, 10),
-          min_delta: Number.parseFloat(minDelta),
-        },
-        overrides: overridesText.split("\n").map((line) => line.trim()).filter(Boolean),
+    return buildTrainingRequest({
+      nntree,
+      datasetTarget: selectedDataset,
+      datasetParams: coercedDatasetParams,
+      numClasses: selectedDatasetInfo.num_classes,
+      batchSize: Number.parseInt(batchSize, 10),
+      numWorkers: Number.parseInt(numWorkers, 10),
+      trainSize: Number.parseFloat(trainSize),
+      optimizerTarget,
+      learningRate: Number.parseFloat(learningRate),
+      maxEpochs: Number.parseInt(maxEpochs, 10),
+      accelerator,
+      seed: Number.parseInt(seed, 10),
+      wandb: {
+        project: wandbProject,
+        mode: wandbMode,
+        ...(wandbEntity.trim() ? { entity: wandbEntity.trim() } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
+        ...(wandbRunName.trim() ? { name: wandbRunName.trim() } : {}),
       },
+      earlyStopping: {
+        patience: Number.parseInt(patience, 10),
+        min_delta: Number.parseFloat(minDelta),
+      },
+      overrides: overridesText.split("\n").map((line) => line.trim()).filter(Boolean),
       resources: {
         cpu: Number.parseInt(cpu, 10),
         memory_gb: Number.parseFloat(memoryGb),
@@ -319,11 +413,41 @@
         ...(node ? { node } : {}),
       },
       priority: Number.parseInt(priority, 10),
-      ...(normalizedPackageSuffix ? { package_name: `nnm_${normalizedPackageSuffix}` } : {}),
-    };
+      packageName: normalizedPackageSuffix ? `nnm_${normalizedPackageSuffix}` : null,
+      projectId: projectJob ? activeProject!.id : null,
+    });
+  }
+
+  async function handleStoreWandbKey() {
+    const key = wandbApiKey.trim();
+    if (!key) return;
+    const stored = await projectState.setWandbKey(key);
+    if (stored) {
+      wandbApiKey = ""; // write-only: never retain the secret in the UI
+      wandbKeyConfigured = true;
+    }
+  }
+
+  async function handleRemoveWandbKey() {
+    const removed = await projectState.deleteWandbKey();
+    if (removed) wandbKeyConfigured = false;
+  }
+
+  async function handleSaveWandbSettings() {
+    await projectState.updateWandb({
+      entity: wandbEntity.trim(),
+      project: wandbProject.trim() || undefined,
+      tags: wandbTags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      run_name_template: wandbRunName.trim(),
+      mode: wandbMode as "online" | "offline" | "disabled",
+    });
   }
 
   async function submit() {
+    if (projectJob && !projectEnvReady) {
+      errorMessage = projectEnvMessage || "L'ambiente del progetto non è pronto: sincronizza il progetto prima del training";
+      return;
+    }
     loading = true;
     errorMessage = "";
     successMessage = "";
@@ -527,6 +651,35 @@
   </section>
 
   {#if connectionState === "active"}
+    {#if activeProject}
+      <section>
+        <h3>Progetto</h3>
+        {#if projectJob}
+          <div class="connection-summary">
+            <strong>{activeProject.name}</strong>
+            <small>{activeProject.root}</small>
+            {#if projectEnv?.status === "ready"}
+              <small class="env-ready">Ambiente pronto</small>
+            {:else}
+              <small class="env-warn">Ambiente: {projectEnv?.status === "missing" ? "da sincronizzare" : "errore"}</small>
+              <button onclick={() => void projectState.syncActive()} disabled={projectState.busy}>
+                Sincronizza ambiente
+              </button>
+            {/if}
+          </div>
+          {#if projectEnvMessage}
+            <p class="env-message" role="status">{projectEnvMessage}</p>
+          {/if}
+          <small>Il job verrà eseguito nel progetto (runs/ e ambiente di progetto).</small>
+        {:else}
+          <p>
+            È attivo il progetto <strong>{activeProject.name}</strong> ma il backend collegato
+            non è il companion locale: il job viene inviato senza contesto di progetto.
+          </p>
+        {/if}
+      </section>
+    {/if}
+
     <section>
       <h3>Dataset</h3>
       <label>Classe Python
@@ -548,6 +701,16 @@
             <input value={datasetParams[parameter.name] ?? ""} oninput={(event) => setDatasetParameter(parameter, event)} />
           </label>
         {/each}
+      {/if}
+      {#if datasetCatalogErrors.length > 0}
+        <details class="env-message">
+          <summary>Diagnostica dataset ({datasetCatalogErrors.length})</summary>
+          <ul>
+            {#each datasetCatalogErrors as entry (entry.path)}
+              <li><strong>{entry.path}</strong>: {entry.error}</li>
+            {/each}
+          </ul>
+        </details>
       {/if}
       <div class="grid">
         <label>Batch size<input type="number" bind:value={batchSize} /></label>
@@ -573,11 +736,48 @@
     </section>
 
     <section>
-      <h3>W&B</h3>
+      <h3>W&amp;B</h3>
       <div class="grid">
+        <label>Entity<input bind:value={wandbEntity} placeholder="team" /></label>
         <label>Project<input bind:value={wandbProject} /></label>
-        <label>Mode<input bind:value={wandbMode} /></label>
       </div>
+      <label>Tag (separati da virgola)
+        <input bind:value={wandbTags} placeholder="prod, experiments" />
+      </label>
+      <label>Template nome run
+        <input bind:value={wandbRunName} placeholder={'run-{epoch}'} />
+      </label>
+      <label>Mode
+        <select bind:value={wandbMode}>
+          <option value="online">online</option>
+          <option value="offline">offline</option>
+          <option value="disabled">disabled</option>
+        </select>
+      </label>
+      <div class="grid">
+        <label>API key
+          <input type="password" autocomplete="new-password" bind:value={wandbApiKey} placeholder={wandbKeyConfigured ? "Chiave configurata ✓" : "…"} />
+        </label>
+      </div>
+      <div class="actions">
+        <button onclick={() => void handleStoreWandbKey()} disabled={projectState.wandbKeyBusy || !wandbApiKey.trim()}>
+          {wandbKeyConfigured ? "Aggiorna chiave" : "Salva chiave"}
+        </button>
+        {#if wandbKeyConfigured}
+          <button class="danger" onclick={() => void handleRemoveWandbKey()} disabled={projectState.wandbKeyBusy}>
+            Rimuovi chiave
+          </button>
+        {/if}
+      </div>
+      {#if projectState.wandbKeyError}
+        <p class="env-message" role="alert">{projectState.wandbKeyError}</p>
+      {/if}
+      <small>La chiave non viene mai salvata nel browser: è conservata solo dal companion.</small>
+      {#if projectJob}
+        <button onclick={() => void handleSaveWandbSettings()} disabled={projectState.busy}>
+          Salva impostazioni W&amp;B nel progetto
+        </button>
+      {/if}
     </section>
 
     <section>
@@ -595,7 +795,12 @@
         <input bind:value={packageSuffix} placeholder="mnist_classifier" pattern="[A-Za-z][A-Za-z0-9_]*" />
         <small>La wheel e l'import avranno il prefisso <code>nnm_</code>.</small>
       </label>
-      <button class="submit" onclick={submit} disabled={loading}>{loading ? "Invio..." : "Invia training"}</button>
+      <button class="submit" onclick={submit} disabled={loading || (projectJob && !projectEnvReady)}>
+        {loading ? "Invio..." : "Invia training"}
+      </button>
+      {#if projectJob && !projectEnvReady}
+        <p class="env-message" role="alert">{projectEnvMessage || "Sincronizza l'ambiente del progetto prima del training."}</p>
+      {/if}
     </section>
 
     <section class="jobs">
@@ -653,6 +858,9 @@
   .message { padding: 8px; border-radius: 4px; margin-bottom: 8px; font-size: .82rem; } .error { color: #991b1b; background: #fee2e2; } .success { color: #166534; background: #dcfce7; }
   .connection-summary { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
   .connection-summary strong { color: #166534; }
+  .env-ready { color: #166534; }
+  .env-warn { color: #92400e; }
+  .env-message { margin: 6px 0 0; padding: 6px 8px; border-radius: 4px; background: #fffbeb; color: #854d0e; font-size: .78rem; }
   .actions { display: flex; gap: 6px; margin-top: 9px; } .actions button { flex: 1; }
   .verification-code { margin: 10px 0; padding: 12px; border: 2px dashed #2563eb; border-radius: 6px; text-align: center; font: 700 1.8rem monospace; letter-spacing: .25rem; }
   code { font-size: .75rem; }

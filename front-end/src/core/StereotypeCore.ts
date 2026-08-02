@@ -109,6 +109,51 @@ export class StereotypeCore {
     return loaded.sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // ── Runtime catalog compilation ──────────────────────────────────
+
+  /**
+   * Wire form of one catalog entry served by the companion: catalog-relative
+   * path plus the complete JSON definition. Built-ins keep the
+   * ``Stereotypes/...`` layout so path conventions survive runtime loading.
+   */
+  public static compileCatalog(
+    entries: StereotypeCatalogEntryWire[],
+  ): StereotypeCatalogCompileResult {
+    const errors: { path: string; error: string }[] = [];
+    const compiled: StereotypeCore[] = [];
+    const seenNames = new Set<string>();
+
+    for (const entry of entries) {
+      if (entry.data === null || typeof entry.data !== "object" || Array.isArray(entry.data)) {
+        errors.push({ path: entry.id, error: "malformed stereotype definition (expected a JSON object)" });
+        continue;
+      }
+      let stereotype: StereotypeCore;
+      try {
+        stereotype = new StereotypeCore(entry.id, entry.data as unknown as StereotypeJson);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push({ path: entry.id, error: `cannot load stereotype: ${message}` });
+        continue;
+      }
+      if (seenNames.has(stereotype.name)) {
+        errors.push({
+          path: entry.id,
+          error: `duplicate stereotype name ${stereotype.name!} was rejected`,
+        });
+        continue;
+      }
+      seenNames.add(stereotype.name);
+      compiled.push(stereotype);
+    }
+
+    // Atomicity contract: a malformed definition or a name collision rejects
+    // the whole catalog (null) so callers never apply a partial replacement.
+    if (errors.length > 0) return { stereotypes: null, errors };
+    compiled.sort((a, b) => a.name.localeCompare(b.name));
+    return { stereotypes: compiled, errors };
+  }
+
   // ── Type signature parsing ────────────────────────
 
   /**
@@ -141,4 +186,41 @@ export class StereotypeCore {
     // symbolic name but tokenizer syntax ($H, $*, ...) and is left untouched.
     return dim;
   }
+}
+
+/**
+ * Wire form of one catalog entry served by the companion: catalog-relative
+ * path plus the complete JSON definition. Built-ins keep the
+ * ``Stereotypes/...`` layout so path conventions survive runtime loading.
+ */
+export interface StereotypeCatalogEntryWire {
+  id: string;
+  name: string;
+  source: "builtin" | "project";
+  data: Record<string, unknown>;
+}
+
+export interface StereotypeCatalogCompileResult {
+  /**
+   * Compiled stereotypes, or ``null`` when any entry is malformed or a name
+   * collides — callers must then keep their previous catalog intact (atomic,
+   * no partial replacement).
+   */
+  stereotypes: StereotypeCore[] | null;
+  errors: { path: string; error: string }[];
+}
+
+/**
+ * Compile the companion's runtime catalog (built-ins plus validated project
+ * stereotypes) into {@link StereotypeCore} instances.
+ *
+ * Atomicity contract: a malformed definition or a name collision rejects the
+ * whole catalog with actionable diagnostics instead of applying a partial
+ * replacement. Collisions with built-in names are rejected explicitly so
+ * opening a project can never silently change the meaning of a built-in layer.
+ */
+export function compileStereotypeCatalog(
+  entries: StereotypeCatalogEntryWire[],
+): StereotypeCatalogCompileResult {
+  return StereotypeCore.compileCatalog(entries);
 }

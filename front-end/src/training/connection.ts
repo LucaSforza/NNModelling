@@ -47,6 +47,54 @@ export function loadBackendConnection(storage: ConnectionStorage = browserStorag
   return state.connections[state.activeUrl] ?? null;
 }
 
+/**
+ * Return the saved backend connection whose origin matches ``origin``,
+ * regardless of which connection is currently active.
+ *
+ * The Training Sidebar stores every paired backend keyed by its base URL, so
+ * the project workspace can reuse the established companion pairing without
+ * creating a second token store. Callers must never fall back to the active
+ * (possibly remote) connection when no connection matches: sending a remote
+ * training bearer token to the local companion would leak credentials.
+ */
+export function loadBackendConnectionByOrigin(
+  origin: string,
+  storage: ConnectionStorage = browserStorage(),
+): SavedBackendConnection | null {
+  const state = readState(storage);
+  const expected = normalizeOriginForComparison(origin);
+  for (const connection of Object.values(state.connections)) {
+    try {
+      if (normalizeOriginForComparison(connection.baseUrl) === expected) {
+        return connection;
+      }
+    } catch {
+      // Malformed baseUrl entries are skipped; the storage parser already
+      // requires a string, but an unparseable URL must not abort the lookup.
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Normalize an origin for comparison: lowercase, trailing slashes stripped,
+ * and loopback host aliases (``localhost``, ``127.0.0.1``, ``[::1]``) mapped
+ * to ``127.0.0.1`` so a local companion is recognized regardless of how the
+ * user typed its URL in the Training Sidebar.
+ */
+export function normalizeOriginForComparison(origin: string): string {
+  try {
+    const url = new URL(origin);
+    if (url.hostname === "localhost" || url.hostname === "::1" || url.hostname === "[::1]") {
+      url.hostname = "127.0.0.1";
+    }
+    return `${url.protocol}//${url.host}`.replace(/\/+$/, "").toLowerCase();
+  } catch {
+    return origin.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
 export function saveBackendConnection(
   connection: SavedBackendConnection,
   storage: ConnectionStorage = browserStorage(),

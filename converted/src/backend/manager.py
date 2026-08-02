@@ -11,17 +11,54 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from backend.config_service import build_job_hydra_configs
 from backend.executors import Executor, LocalExecutor, SlurmExecutor
 from backend.models import JobStatus, JobSubmission, ResourceRequest
+from backend.project_env import project_python
+from backend.project_schema import ProjectSummary, WandbSettings
 from backend.store import JobStore, ValkeyJobStore, utc_now
 from model_package.exporter import build_model_wheel
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+
+
+class ProjectResolver(Protocol):
+    """Narrow project service contract consumed for project-scoped jobs.
+
+    The S1 ``ProjectManager`` satisfies this protocol: project ids resolve
+    only through its companion-owned recent-project registry, never through
+    client-supplied filesystem paths.
+    """
+
+    def get_project(self, project_id: str) -> ProjectSummary:
+        """Return the public summary for one registered project."""
+        ...
+
+    def resolve_root(self, project_id: str) -> Path:
+        """Resolve a registered project's root for job execution."""
+        ...
+
+    def wandb_api_key(self, project_id: str) -> str | None:
+        """Return the stored W&B API key for a child process, if any."""
+        ...
+
+
+@dataclass(frozen=True)
+class _ProjectJob:
+    """Non-secret project context resolved for one job submission.
+
+    The W&B API key is deliberately absent: it is resolved only at execution
+    time and injected solely into the child process environment.
+    """
+
+    project_id: str
+    root: Path
+    settings: WandbSettings
 
 # The failed transition is persisted atomically by the store (record update +
 # queue removal in one operation). A bounded retry heals transient store
@@ -61,6 +98,7 @@ class JobManager:
         poll_interval: float = 0.25,
         *,
         package_snapshot_dir: str | Path | None = None,
+        project_manager: ProjectResolver | None = None,
     ) -> None:
         if not executors:
             raise ValueError("At least one executor is required")
@@ -70,6 +108,9 @@ class JobManager:
         self.executors = executors
         self.max_running_jobs = max_running_jobs
         self.poll_interval = poll_interval
+        # Resolver for optional project-scoped jobs; project ids are resolved
+        # only through this injected service (never a client filesystem path).
+        self.project_manager = project_manager
         # Private directory for immutable download snapshots. When unset the
         # OS temporary directory is used (mkstemp files are created ``0600``);
         # the directory is never exposed through any API path.
@@ -83,8 +124,12 @@ class JobManager:
         self._thread: threading.Thread | None = None
 
     @classmethod
-    def from_environment(cls) -> "JobManager":
-        """Build a production manager from backend environment variables."""
+    def from_environment(cls, *, project_manager: ProjectResolver | None = None) -> "JobManager":
+        """Build a production manager from backend environment variables.
+
+        The optional ``project_manager`` wires the companion project service
+        so ``project_id`` submissions can resolve registered project workspaces.
+        """
 
         converted_dir = Path(
             os.getenv("NNM_CONVERTED_DIR", Path(__file__).resolve().parents[2])
@@ -113,7 +158,7 @@ class JobManager:
                     ),
                 )
             )
-        return cls(store, artifact_root, executors)
+        return cls(store, artifact_root, executors, project_manager=project_manager)
 
     def start(self) -> None:
         """Start the scheduler thread and recover persisted queue metadata."""
@@ -175,19 +220,41 @@ class JobManager:
                 self._event(job["id"], "failed", {"error": error})
 
     def submit(self, submission: JobSubmission, *, owner_connection_id: str) -> JobStatus:
-        """Validate, materialize and enqueue a complete job document."""
+        """Validate, materialize and enqueue a complete job document.
+
+        When the submission names a project, the project is resolved through
+        the injected project service before any artifact exists: unknown
+        projects, unavailable environments, and backends without a local
+        executor are rejected up front. Project artifacts are stored under
+        ``<project>/runs/<job-id>`` and the project's non-secret W&B settings
+        act as defaults that explicit job settings override.
+        """
 
         job_id = str(uuid.uuid4())
         created_at = utc_now()
-        artifact_dir = self.artifact_root / job_id
+        project = (
+            self._resolve_project_job(submission.project_id)
+            if submission.project_id is not None
+            else None
+        )
+        artifact_dir = self._artifact_dir_for(job_id, project)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         payload = submission.model_dump(mode="json")
         payload["id"] = job_id
         payload["created_at"] = created_at
         payload["artifact_dir"] = str(artifact_dir)
+        if project is not None:
+            payload["training"]["wandb"] = _merge_wandb_defaults(
+                project.settings,
+                payload["training"].get("wandb", {}),
+            )
         requested_path = artifact_dir / "requested_config.json"
         requested_path.write_text(json.dumps(submission.model_dump(mode="json"), indent=2), encoding="utf-8")
-        build_job_hydra_configs(payload, artifact_dir)
+        build_job_hydra_configs(
+            payload,
+            artifact_dir,
+            import_roots=((project.root / "datasets",) if project is not None else ()),
+        )
         record = {
             "id": job_id,
             "status": "queued",
@@ -254,7 +321,7 @@ class JobManager:
                     job = self.store.get_job(job_id)
                     if job is None or job.get("status") != "queued":
                         continue
-                    executor = self._select_executor(job["resources"])
+                    executor = self._select_executor(job["resources"], job=job)
                     if executor is None:
                         deferred_job_ids.append(job_id)
                         continue
@@ -272,12 +339,19 @@ class JobManager:
                     # after its terminal events.
                     self._event(job_id, "running", {"executor": executor.name})
                     try:
-                        handle = executor.submit(
-                            job,
-                            job["artifact_dir"],
-                            lambda details: self._heartbeat(job_id, details),
-                            lambda return_code, details: self._finished(job_id, return_code, details),
-                        )
+                        project_ctx = self._project_execution_context(job)
+                        heartbeat = lambda details: self._heartbeat(job_id, details)
+                        finished = lambda return_code, details: self._finished(job_id, return_code, details)
+                        if project_ctx is None:
+                            handle = executor.submit(job, job["artifact_dir"], heartbeat, finished)
+                        else:
+                            handle = executor.submit(
+                                job,
+                                job["artifact_dir"],
+                                heartbeat,
+                                finished,
+                                project=project_ctx,
+                            )
                     except Exception as exc:
                         self._set_status(job_id, "failed", finished_at=utc_now(), error=str(exc))
                         self._event(job_id, "failed", {"error": str(exc)})
@@ -304,17 +378,86 @@ class JobManager:
                             deferred_job["created_at"],
                         )
 
-    def _select_executor(self, resources: dict[str, Any]) -> Executor | None:
-        """Select a compatible executor with a round-robin cursor."""
+    def _select_executor(self, resources: dict[str, Any], *, job: dict[str, Any] | None = None) -> Executor | None:
+        """Select a compatible executor with a round-robin cursor.
 
+        Project-scoped jobs run only on local executors: a remote/Slurm
+        execution must never assume access to a locally resolved project path.
+        """
+
+        project_job = bool((job or {}).get("submission", {}).get("project_id"))
         count = len(self.executors)
         for offset in range(count):
             index = (self._round_robin_cursor + offset) % count
             candidate = self.executors[index]
+            if project_job and candidate.kind != "local":
+                continue
             if candidate.can_run(resources):
                 self._round_robin_cursor = (index + 1) % count
                 return candidate
         return None
+
+    def _artifact_dir_for(self, job_id: str, project: _ProjectJob | None) -> Path:
+        """Return where a job's artifacts live: the legacy root or project runs."""
+        if project is None:
+            return self.artifact_root / job_id
+        return _project_runs_dir(project.root) / job_id
+
+    def _resolve_project_job(self, project_id: str) -> _ProjectJob:
+        """Resolve a project id through the injected service before artifacts exist.
+
+        Raises:
+            ValueError: The backend has no project service, the project is
+                unknown, its environment is not ready, or no local executor is
+                configured for project-scoped jobs.
+        """
+        if self.project_manager is None:
+            raise ValueError(
+                f"project {project_id} cannot run: this backend has no project service"
+            )
+        try:
+            summary = self.project_manager.get_project(project_id)
+        except Exception as exc:
+            raise ValueError(f"cannot resolve project {project_id}: {exc}") from exc
+        if summary.environment.status != "ready":
+            raise ValueError(
+                f"project {project_id} environment is {summary.environment.status}; "
+                "synchronize the project environment before submitting a training job"
+            )
+        if not any(executor.kind == "local" for executor in self.executors):
+            raise ValueError(
+                "project-scoped training jobs require a local executor; none is configured"
+            )
+        return _ProjectJob(
+            project_id=project_id,
+            root=Path(summary.root),
+            settings=summary.wandb,
+        )
+
+    def _project_execution_context(self, job: dict[str, Any]) -> dict[str, Any] | None:
+        """Build the non-persisted execution context for a project-scoped job.
+
+        The W&B API key is resolved from the project service at claim time and
+        returned only in memory for the child process environment; it is never
+        written to the job record, Hydra configs, or logs. Legacy jobs return
+        None and keep their exact prior behavior.
+        """
+        submission = job.get("submission") or {}
+        project_id = submission.get("project_id")
+        if project_id is None:
+            return None
+        if self.project_manager is None:
+            raise ValueError(
+                f"project {project_id} cannot run: this backend has no project service"
+            )
+        root = Path(self.project_manager.resolve_root(project_id)).resolve()
+        api_key = self.project_manager.wandb_api_key(project_id)
+        return {
+            "project_id": project_id,
+            "root": str(root),
+            "python": str(project_python(root)),
+            "env": _project_child_env(root, api_key),
+        }
 
     def _heartbeat(self, job_id: str, details: dict[str, Any]) -> None:
         job = self.store.get_job(job_id)
@@ -712,3 +855,66 @@ def _find_wandb_url(job: dict[str, Any]) -> str | None:
     )
     match = re.search(r"https?://wandb\.ai/[A-Za-z0-9._/-]+", content)
     return match.group(0).rstrip(".,)") if match else None
+
+
+def _merge_wandb_defaults(settings: WandbSettings, job_wandb: dict[str, Any]) -> dict[str, Any]:
+    """Merge project W&B defaults under the job's explicit non-secret settings.
+
+    Explicit job fields win; omitted fields inherit the project values. The
+    API key is never part of this merge — it lives in the companion secrets
+    store and is injected only into the child process environment. The
+    project's ``run_name_template`` maps to the run ``name`` because that is
+    the WandbLogger keyword carrying a run name.
+
+    Raises:
+        ValueError: If ``job_wandb`` is not a JSON object.
+    """
+    if not isinstance(job_wandb, dict):
+        raise ValueError("training.wandb must be a JSON object")
+    defaults: dict[str, Any] = {"project": settings.project, "mode": settings.mode}
+    if settings.entity:
+        defaults["entity"] = settings.entity
+    if settings.tags:
+        defaults["tags"] = list(settings.tags)
+    if settings.run_name_template:
+        defaults["name"] = settings.run_name_template
+    return {**defaults, **job_wandb}
+
+
+def _project_runs_dir(root: Path) -> Path:
+    """Resolve ``<root>/runs`` while refusing symlink escape outside the root.
+
+    Returns:
+        The resolved runs directory, guaranteed to stay below the resolved
+        project root.
+
+    Raises:
+        ValueError: If the resolved runs path lies outside the resolved root
+            (for example a ``runs`` symlink pointing elsewhere).
+    """
+    resolved_root = root.resolve()
+    runs = (resolved_root / "runs").resolve()
+    if runs != resolved_root and resolved_root not in runs.parents:
+        raise ValueError(
+            f"project runs directory {runs} resolves outside the project root; "
+            "refusing to store job artifacts there"
+        )
+    return runs
+
+
+def _project_child_env(root: Path, api_key: str | None) -> dict[str, str]:
+    """Build the complete child environment without mutating the parent.
+
+    Project ``src/`` and ``datasets/`` are prepended to any inherited
+    ``PYTHONPATH`` (never clobbered), and the W&B API key is injected only
+    when the project stores one.
+    """
+    env = os.environ.copy()
+    parts = [str(root / "src"), str(root / "datasets")]
+    inherited = env.get("PYTHONPATH")
+    if inherited:
+        parts.append(inherited)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    if api_key:
+        env["WANDB_API_KEY"] = api_key
+    return env

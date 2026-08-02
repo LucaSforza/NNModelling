@@ -276,6 +276,53 @@ The Python package takes the NNTree JSON and produces executable PyTorch code.
       reconstruction data for autoencoders
     * Per-sample image strips and a montage (``--image-dir``)
 
+``backend/cli.py`` (local companion)
+    The single local start command. It serves the built editor from
+    ``front-end/dist`` on the same origin as the training API and starts the
+    existing FastAPI app on localhost:
+
+    .. code-block:: bash
+
+       PYTHONPATH=converted/src uv run --project converted python -m backend.cli
+
+    The command fails actionably when the frontend assets are missing or Valkey
+    is unreachable. It never proxies or routes remote jobs.
+
+``backend/static.py``
+    Safe static serving of the built editor. Built assets are served with
+    correct content types, non-API paths fall back to ``index.html`` (SPA
+    behavior), traversal attempts are rejected, and ``/api`` paths are never
+    rewritten to the editor — unknown API calls surface an API 404 instead.
+
+    The same app exposes the project workspace endpoints both at the root
+    (established contract) and under the ``/api`` prefix, which is how the
+    built editor's same-origin ``ProjectApiClient`` reaches the companion in
+    production. Root training endpoints (``/health``, ``/pairing``, ``/jobs``,
+    ...) remain unchanged for the Training Sidebar.
+
+Companion boundary and authority
+--------------------------------
+
+The companion is an extension of the existing FastAPI process — there is no
+fourth proxy service. It adds project lifecycle, environment synchronization,
+run storage, and static editor serving, while the browser remains the **live
+diagram source of truth** and the MCP server stays a thin browser RPC proxy:
+
+.. code-block:: text
+
+   Browser (DiagramCore)  <-- WebSocket RPC -->  MCP server (thin proxy)
+        |
+        |  same origin: /api (project calls) + root /pairing,/jobs (training)
+        v
+   FastAPI companion (backend.app) -- local executor / Slurm --> runs/
+        |
+        v
+   Valkey (sessions, queue, jobs)     front-end/dist (static editor)
+
+The Training Sidebar keeps its explicit backend URL and pairing flow: it may
+connect to the localhost companion or to an independently managed remote
+backend. The companion does not route or duplicate training jobs.
+
 Stereotype System
 -----------------
 

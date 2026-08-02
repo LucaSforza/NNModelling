@@ -1,4 +1,4 @@
-name: Deploy frontend to GitHub Pages
+name: Deploy installation page to GitHub Pages
 
 on:
   push:
@@ -24,30 +24,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build frontend
-        run: pnpm --dir front-end build
-        env:
-          VITE_BASE_PATH: /${{ github.event.repository.name }}/
-
-      - name: Upload static site
+      # The editor is served locally by the companion, never from Pages.
+      # Only the installation page (with the one start command) is published;
+      # front-end/dist is intentionally never uploaded.
+      - name: Upload installation site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: front-end/dist
+          path: install
 
       - name: Deploy to GitHub Pages
         id: deployment
