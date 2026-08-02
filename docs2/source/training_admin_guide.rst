@@ -91,6 +91,37 @@ Training Sidebar. For LAN clients, bind with ``--host 0.0.0.0`` and set
 The companion does not proxy remote jobs: remote/Slurm training still connects
 the Training Sidebar directly to this or another backend URL.
 
+Update or remove the local companion
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stop the companion with :kbd:`Ctrl+C` and rerun the one-command installer to
+update its checkout with ``git pull --ff-only``, refresh dependencies, rebuild
+the editor, and restart the local backend:
+
+.. code-block:: bash
+
+   curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | bash
+
+Use the same ``NNM_DEST_DIR`` and ``NNM_BRANCH`` values used for installation
+when they differ from the defaults. The installer refuses a checkout with an
+unexpected origin and stops on local Git conflicts rather than overwriting
+administrator changes.
+
+There is no dedicated uninstall command in this release. After stopping the
+companion, remove the default checkout with
+``rm -rf "$HOME/.local/share/nnmodelling"``. This also removes repository-local
+Valkey data and the local administrator token, but it does not stop or erase a
+Valkey instance that NNModelling did not start. The separate companion state
+directory may optionally be removed to forget recent projects and stored W&B
+credentials. On Linux it is
+``${XDG_STATE_HOME:-$HOME/.local/state}/nnmodelling``; on macOS it is
+``~/Library/Application Support/nnmodelling``; ``NNM_STATE_DIR`` overrides it.
+
+Project directories are never automatically uninstalled. Preserve them unless
+their graphs, project ``.venv``, source, datasets, and ``runs/`` artifacts are
+also intentionally being deleted. See :doc:`project_workspace` for the full
+update, uninstall, and data-retention procedure.
+
 Start Valkey
 ~~~~~~~~~~~~
 
