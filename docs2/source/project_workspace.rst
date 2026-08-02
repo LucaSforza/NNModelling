@@ -126,6 +126,72 @@ needs no separate ``admin-init`` step. The editor calls project APIs on the
 same origin under the ``/api`` prefix, and the Training Sidebar pairs with the
 same process at its default ``http://127.0.0.1:8000`` URL.
 
+Update NNModelling
+------------------
+
+Stop the running companion with :kbd:`Ctrl+C`, then run the installer command
+again:
+
+.. code-block:: bash
+
+   curl -fsSL https://lucasforza.github.io/NNModelling/install.sh | bash
+
+The installer recognizes the existing checkout, verifies that its ``origin``
+is the expected NNModelling repository, checks out the configured branch, and
+performs a fast-forward-only update. It then refreshes the pnpm dependencies,
+rebuilds the editor, and starts NNModelling. Existing projects and companion
+state are not deleted.
+
+An update stops safely instead of overwriting local work when the checkout has
+incompatible local changes or cannot be fast-forwarded. Resolve those Git
+changes in the checkout before trying again. When the original installation
+used a custom destination or branch, pass the same values to the installer on
+the ``bash`` side of the pipeline:
+
+.. code-block:: bash
+
+   curl -fsSL https://lucasforza.github.io/NNModelling/install.sh \
+     | NNM_DEST_DIR="$HOME/nnmodelling" NNM_BRANCH=master bash
+
+Uninstall NNModelling
+---------------------
+
+There is currently no dedicated ``uninstall`` argument. Stop the companion
+with :kbd:`Ctrl+C` first. If the installer started Valkey, its cleanup handler
+also stops that Valkey process. A Valkey instance that was already running is
+never stopped or removed by NNModelling.
+
+Before deleting anything, check where your projects are stored. Projects are
+independent user-selected directories and are intentionally preserved. If a
+project was created *inside* the installation checkout, move or back it up
+before removing the checkout.
+
+For the default Linux installation, remove the application checkout and, only
+if the recent-project list and stored W&B credentials should also be erased,
+the companion state directory:
+
+.. code-block:: bash
+
+   rm -rf "$HOME/.local/share/nnmodelling"       # application, build, local Valkey data
+   rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/nnmodelling"  # optional state and secrets
+
+On macOS the default companion state directory is
+``~/Library/Application Support/nnmodelling``. A custom ``NNM_DEST_DIR`` or
+``NNM_STATE_DIR`` replaces the corresponding default above. The companion
+state contains the recent/active project registry and project W&B API keys; it
+does not contain the project directories themselves.
+
+Removing only the checkout preserves projects but also removes repository-local
+Valkey data and the local administrator token under ``converted/valkey-data``.
+Removing the state directory forgets recent projects and deletes its stored W&B
+credentials. Delete individual project directories separately only when their
+graphs, ``.venv`` environments, source, datasets, and ``runs/`` artifacts are
+no longer needed.
+
+The installer only checks system prerequisites; it does not install Git,
+``uv``, Node.js, pnpm, or Valkey system-wide. Uninstalling NNModelling therefore
+does not remove those tools, nor shared pnpm/uv caches.
+
 Localhost or a remote backend
 -----------------------------
 
