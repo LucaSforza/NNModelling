@@ -5,6 +5,7 @@ model: openai/gpt-5.6-sol
 permission:
   edit:
     "*": deny
+    "docs2/**": allow
     "docs/designs/**": allow
   bash:
     "*": deny
@@ -95,6 +96,8 @@ Dependencies: <completed subtask IDs, artifacts, or "none">
 Validation: <exact targeted and integration commands>
 Commit requested: yes
 ```
+
+Each task must be implemented using a TDD (Test Driven Development) approach.
 
 After the contract, include relevant symbols, acceptance criteria, known edge cases, current worktree considerations, and the required result report. Never send vague instructions such as "implement the plan."
 Use non-overlapping file ownership for concurrent assignments. Do not delegate a subtask until its dependencies are satisfied. Never request an amend, force-push, or inclusion of files outside the assignment's ownership.

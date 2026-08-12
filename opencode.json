@@ -3,7 +3,7 @@
   "default_agent": "architect",
   "permission": {
     "skill": {
-      "*": "deny",
+      "*": "allow",
       "chrome-direct": "allow",
       "code-reviewer": "allow",
       "nnmodelling-mcp": "allow",
@@ -16,23 +16,5 @@
       "vitest": "allow"
     }
   },
-  "mcp": {
-    "nnmodelling-mcp": {
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "tsx",
-        "mcp-server/src/index.ts"
-      ]
-    },
-    "glimpse-mcp": {
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "glimpse-mcp"
-      ]
-    }
-  }
+  "mcp": {}
 }
