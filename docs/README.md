@@ -49,8 +49,9 @@ docs/
   operators. Internal agent notes do not belong there, and user-facing product
   documentation does not belong in `docs/`.
 
-Legacy directories may exist while the migration is in progress. Do not add new
-documents to `docs/design/`, `docs/designs/`, `docs/report/`, or `docs/reviews/`.
+Do not recreate the retired `docs/design/`, `docs/designs/`, `docs/report/`, or
+`docs/reviews/` directories. Classify new material using the directory map
+above.
 
 ## Authority and duplication
 
