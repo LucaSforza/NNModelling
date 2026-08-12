@@ -50,5 +50,7 @@ pnpm --dir front-end test
 
 If the stereotype changes generated Python configuration or runtime operations,
 run the matching conversion/forward integration tier and focused Python tests.
-Use `docs2/source/stereotypes.rst`, `docs2/source/type_system.rst`, and designs
-under `docs/designs/tensor-type-system/` as the detailed references.
+Use `docs2/source/stereotypes.rst`, `docs2/source/type_system.rst`, and
+`docs/knowledge/contracts/tensor-types.md` as current references. Historical
+type-system plans are preserved under
+`docs/archive/completed-plans/tensor-type-system/`.

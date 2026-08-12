@@ -47,6 +47,7 @@ method names or payloads also require corresponding frontend
 `BrowserRPCHandler` tests. Changes to conversion subprocess behavior require the
 relevant integration tier in `front-end/`.
 
-Detailed history and removed pre-simplification architecture are preserved in
-`../docs/agent-reference.md`; do not treat historical Phase 9/10 components as
+Current ownership and protocol constraints are documented in
+`../docs/knowledge/architecture/browser-mcp.md`. Removed pre-simplification
+architecture is preserved under `../docs/archive/superseded/` and is not
 current design.

@@ -780,5 +780,6 @@ Further Reading
   (269 passing, 5 skipped) covering all phases
 * Tests: ``front-end/src/__tests__/expr.test.ts`` — 54 unit tests for
   expression parsing and evaluation
-* Design docs: ``docs/designs/tensor-type-system/`` — full architectural
-  design documents
+* Historical design docs:
+  ``docs/archive/completed-plans/tensor-type-system/`` — archived
+  implementation designs; current contracts live under ``docs/knowledge/``

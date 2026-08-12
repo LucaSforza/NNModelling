@@ -77,5 +77,8 @@ through parser/evaluator tests, not through module-specific branches.
 - Add regression coverage for graph mutations, connection validation, type
   inference, RPC serialization, and undo/redo at the narrowest applicable level.
 
-For detailed architecture and historical phases, consult
-`../docs/agent-reference.md` and the designs under `../docs/designs/`.
+Current cross-package contracts are documented in
+`../docs/knowledge/architecture/browser-mcp.md`,
+`../docs/knowledge/contracts/nntree.md`, and
+`../docs/knowledge/contracts/tensor-types.md`. Historical implementation plans
+are preserved under `../docs/archive/completed-plans/`.

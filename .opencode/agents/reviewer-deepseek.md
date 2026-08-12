@@ -1,7 +1,7 @@
 ---
 description: Reviews NNModelling changes with DeepSeek V4 Pro as a read-only quality gate.
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: deepseek/deepseek-v4-pro
 permission:
   edit: allow
   task: allow

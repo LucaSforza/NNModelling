@@ -7,9 +7,9 @@ This file contains repository-wide rules. More specific instructions live in:
 - `mcp-server/AGENTS.md` — MCP thin proxy and browser WebSocket client.
 - `Stereotypes/AGENTS.md` — stereotype schemas and tensor type contracts.
 
-Codex combines this file with the nearest package-local file. Detailed project
-history and the former monolithic instructions are preserved in
-`docs/agent-reference.md`.
+Codex combines this file with the nearest package-local file. Current internal
+architecture and contracts are indexed by `docs/README.md`; historical guidance
+is preserved under `docs/archive/`.
 
 ## Repository rules
 
@@ -24,9 +24,9 @@ history and the former monolithic instructions are preserved in
   command and report its current result.
 
 OpenCode-specific model routing, agent roster, and execution loops are defined
-in `docs/opencode.md`. When acting as an OpenCode architect, use the OpenAI or
-DeepSeek implementer explicitly requested by the user; do not select one on the
-user's behalf. These routing rules do not select Codex models.
+in `docs/orchestrators/opencode.md`. When acting as an OpenCode architect, use
+the OpenAI or DeepSeek implementer explicitly requested by the user; do not
+select one on the user's behalf. These routing rules do not select Codex models.
 
 ## Project overview
 
@@ -43,7 +43,8 @@ Shared inputs and fixtures:
 - `examples/diagrams/` contains editable Svelte Flow diagrams.
 - `examples/nntrees/` contains compiled NNTree fixtures.
 - `examples/manifest.json` drives cross-language integration tests.
-- `docs2/` contains Sphinx documentation; `docs/` contains designs and reports.
+- `docs2/` contains public Sphinx documentation. `docs/` contains tool-neutral
+  agent plans and internal project knowledge; see `docs/README.md`.
 
 The principal flow is:
 

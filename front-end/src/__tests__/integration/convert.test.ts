@@ -123,7 +123,7 @@ if (shouldRun) {
       () => {
         // Characterization of CURRENT behavior — do not fix, see bug table.
         //
-        // Intended contract (docs/designs/code-elision/plan.md §T5): a
+        // Intended contract (docs/archive/completed-plans/code-elision/plan.md §T5): a
         // structurally invalid NNTree must not silently produce an
         // apparently-valid configuration. Current convert.py returns exit 0
         // and emits config files for `{"not": "valid nntree"}`. This test pins

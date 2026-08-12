@@ -71,4 +71,8 @@ reference or the `nnmodelling-mcp` skill rather than improvising port cleanup.
   external boundaries; mock them in unit tests and run real tiers only when the
   requested behavior requires it.
 
-Detailed history and architecture remain in `../docs/agent-reference.md`.
+Current contracts are documented in
+`../docs/knowledge/architecture/remote-training.md`,
+`../docs/knowledge/contracts/nntree.md`, and
+`../docs/knowledge/contracts/model-package.md`. Historical implementation
+evidence is preserved under `../docs/archive/`.

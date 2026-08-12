@@ -67,9 +67,10 @@ The official Sphinx documentation contains two dedicated pages:
 - `docs2/source/training_admin_guide.rst` — workstation, Docker, and Slurm
   installation, configuration, pairing, revocation, and job operations.
 
-The remaining work required to complete issue #14 is tracked in
-`docs/designs/remote-training-backend/issue-14-remaining-work.md`.
+Historical remaining-work notes from the closed issue #14 are archived under
+`docs/archive/reports/remote-training-backend/`. Current architecture and
+reassessment guidance live in `docs/knowledge/architecture/remote-training.md`.
 
 The MCP browser/diagram server remains usable, but its remote-training HTTP
-client does not yet supply pairing credentials and must not be pointed at this
-protected backend.
+client does not perform pairing or token renewal. Supply an operator-managed
+bearer token with `NNM_BACKEND_TOKEN` when pointing it at the protected backend.
