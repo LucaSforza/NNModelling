@@ -11,8 +11,9 @@ pnpm --dir mcp-server start
 npx tsx mcp-server/src/index.ts
 ```
 
-Use the `nnmodelling-mcp` skill when the user explicitly requests browser-backed
-MCP operation or connection diagnosis. Reuse its stack helper and startup order.
+Use the `nnmodelling-mcp` skill for live NNModelling browser operation or
+connection diagnosis. Reuse its host-aware browser routing, stack helper and
+startup order.
 
 ## Architecture contract
 

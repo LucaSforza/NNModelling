@@ -59,13 +59,16 @@ Load the applicable repository skill before opening or manipulating the editor,
 inspecting tensor types, taking screenshots, converting, training, running
 inference, or diagnosing browser connectivity:
 
+- `.agents/skills/nnmodelling-mcp/SKILL.md` for all live NNModelling editor,
+  diagram, type, conversion, training, inference and browser-connectivity work.
+  It selects the Codex in-app Browser when available and preserves external
+  Chromium/CDP as the OpenCode and unsupported-host fallback.
 - `.agents/skills/chrome-direct/SKILL.md` for direct Chrome/Chromium CDP work,
   especially when the user asks to use Chrome directly or not to use MCP.
-- `.agents/skills/nnmodelling-mcp/SKILL.md` only when the user explicitly asks
-  for MCP or the browser-backed MCP server.
 
-Reuse `.agents/skills/nnmodelling-mcp/scripts/nnm-stack.sh`; do not reconstruct
-the frontend/browser/MCP startup lifecycle manually.
+Reuse `.agents/skills/nnmodelling-mcp/scripts/nnm-stack.sh` for the shared
+frontend/MCP lifecycle and external-browser fallback; do not reconstruct those
+commands manually.
 
 ## Cross-package invariants
 

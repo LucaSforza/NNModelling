@@ -2,7 +2,8 @@
 
 NNModelling provides a project-local OpenCode team under `.opencode/agents/`.
 Agents share the repository guidance in `AGENTS.md`; project skills live under
-`.agents/skills/` and are allowlisted in `opencode.json`.
+`.agents/skills/`, are registered through `skills.paths`, and are allowlisted
+in `opencode.json`.
 
 Canonical scope, dependencies, acceptance criteria, and validation live under
 `docs/plans/`. This adapter maps their neutral roles to OpenCode agents without
@@ -111,6 +112,10 @@ Explicitly requested issue creation remains architect-owned.
 ## Skills
 
 OpenCode discovers repository skills from `.agents/skills/`; no copy under
-`.opencode/skills/` is required. `opencode.json` controls their availability.
-Agents load a skill when its description matches the task, and browser-backed
-work follows the routing rules in `AGENTS.md`.
+`.opencode/skills/` is required. `opencode.json` registers that path and
+controls skill availability. Agents load a skill when its description matches
+the task, and browser-backed work follows the routing rules in `AGENTS.md`.
+
+The `nnmodelling-mcp` skill is host-aware. In an OpenCode session without the
+Codex in-app Browser, it keeps using the external Chromium/CDP branch and the
+same `nnm-stack.sh` helper.

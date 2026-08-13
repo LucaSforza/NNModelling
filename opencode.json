@@ -1,6 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "architect",
+  "skills": {
+    "paths": [
+      ".agents/skills"
+    ]
+  },
   "permission": {
     "skill": {
       "*": "allow",
