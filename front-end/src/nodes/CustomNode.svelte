@@ -25,6 +25,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let { data, selected, isConnectable, id }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
   let isNodeHovered = $state(false);
+  let targetPosition = $derived(
+    diagram.layoutDirection === "horizontal" ? Position.Left : Position.Top,
+  );
+  let sourcePosition = $derived(
+    diagram.layoutDirection === "horizontal" ? Position.Right : Position.Bottom,
+  );
 
   // Svelte 5: Filtriamo dinamicamente i parametri per posizione
   let topParams = $derived(
@@ -66,7 +72,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 />
 
 {#if !data.isInput}
-  <Handle type="target" id="in" position={Position.Top} {isConnectable} />
+  <Handle type="target" id="in" position={targetPosition} {isConnectable} />
 {/if}
 
 {#if data.isInput}
@@ -117,7 +123,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
      rank-1 output expose the conceptual result in the visual type system. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="output-handle-wrapper" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
-  <Handle type="source" id="out" position={Position.Bottom} {isConnectable} />
+  <Handle type="source" id="out" position={sourcePosition} {isConnectable} />
   {#if isNodeHovered && outputShape}
     <div class="shape-tooltip">[{outputShape}]</div>
   {/if}

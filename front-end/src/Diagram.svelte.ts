@@ -27,8 +27,16 @@ export const DIAGRAM_CONTEXT_KEY = Symbol("diagram-context");
 export class Diagram extends DiagramCore {
   public nodes: Node[] = $state.raw<Node[]>([]);
   public edges: Edge[] = $state.raw<Edge[]>([]);
-  public layoutDirection: LayoutDirection = $state("vertical");
+  private reactiveLayoutDirection: LayoutDirection = $state("vertical");
   public typeResult: TypeResult | null = $state.raw(null);
+
+  public override get layoutDirection(): LayoutDirection {
+    return this.reactiveLayoutDirection;
+  }
+
+  public override set layoutDirection(value: LayoutDirection) {
+    this.reactiveLayoutDirection = value;
+  }
 
   constructor() {
     super();

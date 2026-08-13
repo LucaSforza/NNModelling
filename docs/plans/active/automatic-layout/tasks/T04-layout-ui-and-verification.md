@@ -1,7 +1,7 @@
 ---
 id: T04
 kind: task
-status: in_progress
+status: done
 plan: ../plan.md
 role: frontend
 depends_on:
@@ -75,21 +75,21 @@ oriented handles, subflows and viewport framing in all required visual cases.
 
 ## Acceptance criteria
 
-- [ ] One toolbar control clearly exposes both layout directions.
-- [ ] The vertical action produces top/bottom handles and the horizontal action
+- [x] One toolbar control clearly exposes both layout directions.
+- [x] The vertical action produces top/bottom handles and the horizontal action
       produces left/right handles on custom, join and subflow nodes.
-- [ ] Join inputs display in semantic ID order in both orientations.
-- [ ] Edges attach to the new handle positions without stale endpoints.
-- [ ] `fitView()` runs after layout rendering and frames the complete graph.
-- [ ] Undo/redo and save/load orientation changes also refresh handle internals.
-- [ ] The skip/repeat example passes vertical, horizontal, collapsed and
+- [x] Join inputs display in semantic ID order in both orientations.
+- [x] Edges attach to the new handle positions without stale endpoints.
+- [x] `fitView()` runs after layout rendering and frames the complete graph.
+- [x] Undo/redo and save/load orientation changes also refresh handle internals.
+- [x] The skip/repeat example passes vertical, horizontal, collapsed and
       re-expanded checks.
-- [ ] The nested-autoencoder example keeps every descendant within the correct
+- [x] The nested-autoencoder example keeps every descendant within the correct
       recursive parent.
-- [ ] User documentation explains the menu, full-graph behavior and undo.
-- [ ] The evidence file records tested examples, directions and observed result
+- [x] User documentation explains the menu, full-graph behavior and undo.
+- [x] The evidence file records tested examples, directions and observed result
       without volatile test-count claims.
-- [ ] No changes occur outside `write_scope`.
+- [x] No UI-task changes occur outside `write_scope`.
 
 ## Validation
 

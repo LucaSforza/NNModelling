@@ -81,18 +81,18 @@ export class DiagramCore {
   // before use (by the Diagram constructor chain calling initStereotypes).
   declare public nodes: Node[];
   declare public edges: Edge[];
-  declare public layoutDirection: LayoutDirection;
+  private _layoutDirection: LayoutDirection = "vertical";
+
+  public get layoutDirection(): LayoutDirection {
+    return this._layoutDirection;
+  }
+
+  public set layoutDirection(value: LayoutDirection) {
+    this._layoutDirection = value;
+  }
 
   private graphChangeHandlers = new Set<() => void>();
   private _notifying = false;
-
-  constructor() {
-    // NOTE: nodes and edges are NOT initialized here.
-    // The Diagram subclass initializes them with $state.raw.
-    // When used standalone (MCP server), call initStereotypes() then
-    // manually set nodes/edges before any operations.
-    this.layoutDirection = "vertical";
-  }
 
   // ── Reentrancy guard ────────────────────────────────────────────
 

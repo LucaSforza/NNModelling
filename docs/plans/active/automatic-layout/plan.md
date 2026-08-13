@@ -1,7 +1,7 @@
 ---
 id: automatic-compound-layout
 kind: plan
-status: in_progress
+status: done
 updated: 2026-08-13
 areas:
   - frontend
@@ -162,24 +162,24 @@ both touch `DiagramCore`.
 
 ## Acceptance criteria
 
-- [ ] The toolbar exposes one layout menu with vertical and horizontal actions.
-- [ ] Vertical layout orders flow from top to bottom with inputs above losses.
-- [ ] Horizontal layout orders flow left to right and moves handles to the
+- [x] The toolbar exposes one layout menu with vertical and horizontal actions.
+- [x] Vertical layout orders flow from top to bottom with inputs above losses.
+- [x] Horizontal layout orders flow left to right and moves handles to the
       corresponding sides.
-- [ ] Every nested child lies within its expanded parent bounds with header and
+- [x] Every nested child lies within its expanded parent bounds with header and
       parameter clearance.
-- [ ] Expanded subflows grow or shrink to the calculated content bounds.
-- [ ] Collapsed descendants are laid out and display correctly after expansion.
-- [ ] Join input handle ordering follows the chosen visual convention without
+- [x] Expanded subflows grow or shrink to the calculated content bounds.
+- [x] Collapsed descendants are laid out and display correctly after expansion.
+- [x] Join input handle ordering follows the chosen visual convention without
       changing semantic handle IDs.
-- [ ] One layout is one undoable mutation; undo/redo restores direction,
+- [x] One layout is one undoable mutation; undo/redo restores direction,
       dimensions and positions together.
-- [ ] Save/load preserves horizontal direction; old files default vertically.
-- [ ] Direct child-to-outside edges cannot be created, reconnected, introduced
+- [x] Save/load preserves horizontal direction; old files default vertically.
+- [x] Direct child-to-outside edges cannot be created, reconnected, introduced
       by reparenting or loaded from a file.
-- [ ] Repeating the same layout is stable and creates no overlaps or extra undo
+- [x] Repeating the same layout is stable and creates no overlaps or extra undo
       entries.
-- [ ] NNTree JSON produced before and after layout is semantically identical.
+- [x] NNTree JSON produced before and after layout is semantically identical.
 
 ## Final verification
 

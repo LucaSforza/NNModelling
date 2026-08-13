@@ -38,7 +38,7 @@
   align-items: center;
   border: 1px solid #ddd;
   font-family: sans-serif;
-  max-width: calc(100vw - 210px);
+  max-width: calc(100vw - 300px);
 }
 
 button {
@@ -125,4 +125,39 @@ button.danger {
 .toolbar-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.layout-control {
+  position: relative;
+}
+
+.layout-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1000;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid #ccd2d8;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+}
+
+.layout-menu button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.layout-menu button[aria-checked="true"] {
+  background: #e6f2ff;
+  color: #0056b3;
+  font-weight: 700;
+}
+
+.layout-menu button:focus-visible {
+  outline: 2px solid #007bff;
+  outline-offset: -2px;
 }
