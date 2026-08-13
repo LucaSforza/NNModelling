@@ -19,6 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     Background,
     Panel,
     useSvelteFlow,
+    useUpdateNodeInternals,
     type Connection,
     type Edge,
   } from "@xyflow/svelte";
@@ -28,6 +29,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   const { getInternalNode, getIntersectingNodes, screenToFlowPosition, fitView, setCenter } =
     useSvelteFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
 
   import CustomNode from "./nodes/CustomNode.svelte";
   import SubflowNode from "./nodes/SubflowNode.svelte";
@@ -43,7 +45,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   // 1. Importiamo la classe Diagram
   import { Diagram, DIAGRAM_CONTEXT_KEY } from "./Diagram.svelte";
-  import { setContext } from "svelte";
+  import { setContext, tick } from "svelte";
+  import type { LayoutDirection } from "./layout/autoLayout";
   import { toPng } from "html-to-image";
 
   // RPC handler — receives MCP server requests and dispatches to Diagram
@@ -79,7 +82,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let isSidebarOpen = $state(false);
   let activeMode = $state<"nodes" | "training">("nodes");
   let loadError = $state<string | null>(null);
+  let layoutError = $state<string | null>(null);
+  let isLayoutMenuOpen = $state(false);
   let canvasRef: HTMLDivElement;
+  let layoutControlRef: HTMLDivElement;
+  let layoutButtonRef: HTMLButtonElement;
+  let layoutMenuRef = $state<HTMLDivElement>();
+  let canvasSyncGeneration = 0;
 
   // Auto-apertura quando si seleziona un nodo
   $effect(() => {
@@ -97,17 +106,91 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     return () => syncClient.disconnect();
   });
 
-  // Forziamo il ricalcolo della vista su ogni cambiamento strutturale
+  async function synchronizeCanvasAfterGraphChange(): Promise<void> {
+    const generation = ++canvasSyncGeneration;
+    await tick();
+    if (generation !== canvasSyncGeneration) return;
+
+    updateNodeInternals(diagram.nodes.map((node) => node.id));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (generation !== canvasSyncGeneration) return;
+
+    await fitView({ maxZoom: 1, padding: 0.2 });
+  }
+
+  // Graph mutations notify synchronously. Defer Svelte Flow cache and viewport
+  // work until the new node markup and directional handles are in the DOM.
   $effect(() => {
     const unsubscribe = diagram.onGraphChanged(() => {
-      fitView({ maxZoom: 1, padding: 0.2 });
+      void synchronizeCanvasAfterGraphChange();
     });
-    return unsubscribe;
+    return () => {
+      canvasSyncGeneration += 1;
+      unsubscribe();
+    };
   });
+
+  function handleAutoLayout(direction: LayoutDirection): void {
+    layoutError = null;
+    isLayoutMenuOpen = false;
+    try {
+      diagram.autoLayout(direction);
+    } catch (error) {
+      layoutError = error instanceof Error
+        ? error.message
+        : "Impossibile disporre automaticamente il diagramma.";
+    }
+  }
+
+  async function openLayoutMenuAndFocusFirst(): Promise<void> {
+    isLayoutMenuOpen = true;
+    await tick();
+    layoutMenuRef?.querySelector<HTMLButtonElement>('[role="menuitemradio"]')?.focus();
+  }
+
+  function handleLayoutButtonKeyDown(event: KeyboardEvent): void {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      void openLayoutMenuAndFocusFirst();
+    }
+  }
+
+  function handleLayoutMenuKeyDown(event: KeyboardEvent): void {
+    const items = Array.from(
+      layoutMenuRef?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [],
+    );
+    if (items.length === 0) return;
+    const currentIndex = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowDown") nextIndex = (currentIndex + 1) % items.length;
+    if (event.key === "ArrowUp") nextIndex = (currentIndex - 1 + items.length) % items.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = items.length - 1;
+    if (nextIndex !== undefined) {
+      event.preventDefault();
+      items[nextIndex].focus();
+    }
+  }
+
+  function handleDocumentClick(event: MouseEvent): void {
+    if (
+      isLayoutMenuOpen &&
+      event.target instanceof Node &&
+      !layoutControlRef?.contains(event.target)
+    ) {
+      isLayoutMenuOpen = false;
+    }
+  }
 
   function handleKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      return;
+    }
+    if (e.key === "Escape" && isLayoutMenuOpen) {
+      e.preventDefault();
+      isLayoutMenuOpen = false;
+      layoutButtonRef?.focus();
       return;
     }
     // Ctrl+Alt+Z = Redo (check BEFORE Ctrl+Z)
@@ -215,6 +298,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 </script>
 
 <svelte:window onkeydown={handleKeyDown} />
+<svelte:document onclick={handleDocumentClick} />
 
 <div class="editor-layout">
   <div class="canvas-container" bind:this={canvasRef}>
@@ -233,6 +317,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           diagram.nodes,
           getIntersectingNodes,
           getInternalNode,
+          diagram.edges,
         );
         if (newNodes !== undefined) diagram.nodes = newNodes;
         diagram.refreshTypes();
@@ -276,6 +361,47 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         <button onclick={handleAddSubGraph} class="toolbar-btn"
           >📦 Aggiungi SubGraph</button
         >
+        <div class="layout-control" bind:this={layoutControlRef}>
+          <button
+            bind:this={layoutButtonRef}
+            type="button"
+            class="toolbar-btn"
+            aria-haspopup="menu"
+            aria-expanded={isLayoutMenuOpen}
+            aria-controls="layout-direction-menu"
+            onclick={() => (isLayoutMenuOpen = !isLayoutMenuOpen)}
+            onkeydown={handleLayoutButtonKeyDown}
+          >
+            ↔️ Disponi
+          </button>
+          {#if isLayoutMenuOpen}
+            <div
+              bind:this={layoutMenuRef}
+              id="layout-direction-menu"
+              class="layout-menu"
+              role="menu"
+              tabindex="-1"
+              aria-label="Direzione disposizione automatica"
+              onkeydown={handleLayoutMenuKeyDown}
+            >
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={diagram.layoutDirection === "vertical"}
+                onclick={() => handleAutoLayout("vertical")}
+              >Verticale</button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={diagram.layoutDirection === "horizontal"}
+                onclick={() => handleAutoLayout("horizontal")}
+              >Orizzontale</button>
+            </div>
+          {/if}
+        </div>
+        {#if layoutError}
+          <div class="layout-error" role="alert">{layoutError}</div>
+        {/if}
         <button
           onclick={deleteSelectedElements}
           disabled={!hasSelection}
@@ -330,6 +456,17 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   .load-error {
     max-width: 360px;
     margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid #d33;
+    border-radius: 4px;
+    background: #fff1f1;
+    color: #a00;
+    font-size: 0.85rem;
+    white-space: normal;
+  }
+
+  .layout-error {
+    max-width: 360px;
     padding: 8px 10px;
     border: 1px solid #d33;
     border-radius: 4px;

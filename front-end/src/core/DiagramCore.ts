@@ -23,6 +23,8 @@
 import { type Node, type Edge } from "@xyflow/svelte";
 import { StereotypeCore } from "./StereotypeCore";
 import { checkValidConnection as coreCheckValidConnection } from "./validation";
+import { validateContainmentGraph } from "./containment";
+import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
 import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig } from "./types";
 
 /**
@@ -46,6 +48,30 @@ function sameParams(a: unknown, b: unknown): boolean {
   return true;
 }
 
+function normalizedLayoutDirection(value: unknown): LayoutDirection {
+  return value === "horizontal" ? "horizontal" : "vertical";
+}
+
+/**
+ * Compare only the state automatic layout is allowed to change. The pure
+ * engine preserves every other node field, so identity ordering, position,
+ * visible dimensions and stored expanded subflow dimensions completely
+ * describe whether applying its result would be observable.
+ */
+function sameLayoutGeometry(current: readonly Node[], next: readonly Node[]): boolean {
+  if (current.length !== next.length) return false;
+  return current.every((node, index) => {
+    const candidate = next[index];
+    return candidate?.id === node.id &&
+      candidate.position.x === node.position.x &&
+      candidate.position.y === node.position.y &&
+      candidate.width === node.width &&
+      candidate.height === node.height &&
+      candidate.data?.oldWidth === node.data?.oldWidth &&
+      candidate.data?.oldHeight === node.data?.oldHeight;
+  });
+}
+
 export class DiagramCore {
   public stereotypes!: StereotypeCore[];
 
@@ -55,16 +81,18 @@ export class DiagramCore {
   // before use (by the Diagram constructor chain calling initStereotypes).
   declare public nodes: Node[];
   declare public edges: Edge[];
+  private _layoutDirection: LayoutDirection = "vertical";
+
+  public get layoutDirection(): LayoutDirection {
+    return this._layoutDirection;
+  }
+
+  public set layoutDirection(value: LayoutDirection) {
+    this._layoutDirection = value;
+  }
 
   private graphChangeHandlers = new Set<() => void>();
   private _notifying = false;
-
-  constructor() {
-    // NOTE: nodes and edges are NOT initialized here.
-    // The Diagram subclass initializes them with $state.raw.
-    // When used standalone (MCP server), call initStereotypes() then
-    // manually set nodes/edges before any operations.
-  }
 
   // ── Reentrancy guard ────────────────────────────────────────────
 
@@ -539,7 +567,14 @@ export class DiagramCore {
     targetHandle: string = "in"
   ): Edge {
     // Validate before capturing undo state — don't waste an undo slot on a rejected connection
-    const validation = coreCheckValidConnection(this.edges, source, target, sourceHandle, targetHandle);
+    const validation = coreCheckValidConnection(
+      this.edges,
+      source,
+      target,
+      sourceHandle,
+      targetHandle,
+      this.nodes,
+    );
     if (!validation.valid) {
       throw new Error(validation.reason);
     }
@@ -590,6 +625,19 @@ export class DiagramCore {
     if (source === edge.source && target === edge.target &&
         sourceHandle === edge.sourceHandle && targetHandle === edge.targetHandle) {
       return;
+    }
+    // Validate against the replacement graph, excluding the edge being
+    // reconnected so its own target handle does not count as occupied.
+    const validation = coreCheckValidConnection(
+      this.edges.filter((candidate) => candidate.id !== edgeId),
+      source,
+      target,
+      sourceHandle ?? undefined,
+      targetHandle ?? undefined,
+      this.nodes,
+    );
+    if (!validation.valid) {
+      throw new Error(validation.reason);
     }
     this._captureUndoState();
     this.edges = this.edges.map(e => {
@@ -758,16 +806,51 @@ export class DiagramCore {
     this.notifyGraphChanged();
   }
 
+  /**
+   * Arrange the complete compound diagram as one atomic graph mutation.
+   * Validation and pure layout computation finish before undo capture, so a
+   * rejected graph cannot change state or history. Returns whether state was
+   * changed; an already-identical layout is a no-op.
+   */
+  public autoLayout(direction: LayoutDirection): boolean {
+    if (direction !== "vertical" && direction !== "horizontal") {
+      throw new Error(`Unsupported layout direction '${String(direction)}'`);
+    }
+
+    const containment = validateContainmentGraph(this.nodes, this.edges);
+    if (!containment.valid) {
+      throw new Error(containment.reason);
+    }
+
+    const nextNodes = computeAutoLayout(this.nodes, this.edges, direction);
+    if (direction === this.layoutDirection && sameLayoutGeometry(this.nodes, nextNodes)) {
+      return false;
+    }
+
+    this._captureUndoState();
+    this.nodes = nextNodes;
+    this.layoutDirection = direction;
+    this.notifyGraphChanged();
+    return true;
+  }
+
   // ── Snapshots ─────────────────────────────────────────────────
 
   public getSnapshot(): DiagramCoreSnapshot {
-    return { nodes: [...this.nodes], edges: [...this.edges] };
+    return {
+      nodes: [...this.nodes],
+      edges: [...this.edges],
+      layoutDirection: this.layoutDirection,
+    };
   }
 
   public restoreSnapshot(snapshot: DiagramCoreSnapshot): void {
     this._assertNotNotifying();
     this.nodes = [...snapshot.nodes];
     this.edges = [...snapshot.edges];
+    this.layoutDirection = normalizedLayoutDirection(
+      (snapshot as DiagramCoreSnapshot & { layoutDirection?: unknown }).layoutDirection,
+    );
     this.notifyGraphChanged();
   }
 
@@ -799,7 +882,8 @@ export class DiagramCore {
       source,
       target,
       sourceHandle,
-      targetHandle
+      targetHandle,
+      this.nodes,
     );
     return result.valid;
   }
@@ -854,33 +938,51 @@ export class DiagramCore {
     const exportData = {
       nodes: this.nodes,
       edges: this.edges,
+      layoutDirection: this.layoutDirection,
     };
     return JSON.stringify(exportData, null, 2);
   }
 
   public importFromJson(jsonString: string): boolean {
     try {
-      const parsedData = JSON.parse(jsonString);
-
-      if (Array.isArray(parsedData.nodes) && Array.isArray(parsedData.edges)) {
-        this._captureUndoState();
-
-        // No callbacks needed — SubflowNode uses getContext to access diagram.
-        this.nodes = parsedData.nodes;
-        this.edges = parsedData.edges;
-
-        // Normalize edge handle IDs for backward compatibility.
-        // Old diagrams (pre-Phase 14) were saved without sourceHandle/targetHandle
-        // because CustomNode.svelte had no Handle id attribute back then.
-        // SvelteFlow now requires these fields to match Handle id="in"/"out".
-        this.edges = this.edges.map((edge: any) => {
-          if (!edge.sourceHandle) edge.sourceHandle = "out";
-          if (!edge.targetHandle) edge.targetHandle = "in";
-          return edge;
-        });
-      } else {
+      const parsedData: unknown = JSON.parse(jsonString);
+      if (
+        !parsedData ||
+        typeof parsedData !== "object" ||
+        !Array.isArray((parsedData as { nodes?: unknown }).nodes) ||
+        !Array.isArray((parsedData as { edges?: unknown }).edges)
+      ) {
         throw new Error("Il file JSON non contiene un formato valido (nodi o edges mancanti).");
       }
+
+      const imported = parsedData as {
+        nodes: unknown[];
+        edges: unknown[];
+        layoutDirection?: unknown;
+      };
+      // Normalize edge handle IDs before validation, but keep the imported
+      // graph entirely off-state until containment validation succeeds.
+      const normalizedEdges = imported.edges.map((candidate) => {
+        if (!candidate || typeof candidate !== "object") return candidate;
+        const edge = candidate as Edge;
+        return {
+          ...edge,
+          sourceHandle: edge.sourceHandle || "out",
+          targetHandle: edge.targetHandle || "in",
+        };
+      });
+      const containment = validateContainmentGraph(imported.nodes, normalizedEdges);
+      if (!containment.valid) {
+        throw new Error(containment.reason);
+      }
+      const importedDirection = normalizedLayoutDirection(imported.layoutDirection);
+
+      this._captureUndoState();
+
+      // No callbacks needed — SubflowNode uses getContext to access diagram.
+      this.nodes = imported.nodes as Node[];
+      this.edges = normalizedEdges as Edge[];
+      this.layoutDirection = importedDirection;
     } catch (error) {
       console.error("Errore durante l'importazione del modello:", error);
       return false;

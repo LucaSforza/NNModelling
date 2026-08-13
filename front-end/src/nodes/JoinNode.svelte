@@ -27,6 +27,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let inputsCount = $derived((data.inputsCount as number) || 2);
   let name = $derived((data.name as string) || "Join");
   let isNodeHovered = $state(false);
+  let isHorizontal = $derived(diagram.layoutDirection === "horizontal");
+  let targetPosition = $derived(isHorizontal ? Position.Left : Position.Top);
+  let sourcePosition = $derived(isHorizontal ? Position.Right : Position.Bottom);
+  let inputHandleIds = $derived(
+    Array.from({ length: inputsCount }, (_, index) => `in-${index}`),
+  );
 
   let outputShape = $derived.by(() => {
     const ann = diagram?.typeResult?.annotations.get(id);
@@ -58,26 +64,32 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 </script>
 
-<div class="node-wrapper" class:selected style="position: relative;" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
+<div class={["node-wrapper", { selected, horizontal: isHorizontal }]} style="position: relative;" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
   <button class="btn-branch" onclick={decrease} disabled={inputsCount <= 2}>
     -
   </button>
 
   <div class="join-center">
-    {#each Array(inputsCount) as _, i}
+    {#each inputHandleIds as handleId, i (handleId)}
       <Handle
         type="target"
-        position={Position.Top}
-        id={`in-${i}`}
+        position={targetPosition}
+        id={handleId}
         {isConnectable}
-        style="left: {((i + 1) * 100) / (inputsCount + 1)}%;"
+        style={isHorizontal
+          ? `top: ${((i + 1) * 100) / (inputsCount + 1)}%;`
+          : `left: ${((i + 1) * 100) / (inputsCount + 1)}%;`}
       />
     {/each}
 
-    <div class="join-line" style="width: {inputsCount * 30}px;"></div>
+    <div
+      class="join-line"
+      style:width={isHorizontal ? "6px" : `${inputsCount * 30}px`}
+      style:height={isHorizontal ? `${inputsCount * 30}px` : "6px"}
+    ></div>
 
     <div class="output-handle-wrapper">
-      <Handle type="source" position={Position.Bottom} id="out" {isConnectable} />
+      <Handle type="source" position={sourcePosition} id="out" {isConnectable} />
       {#if isNodeHovered && outputShape}
         <div class="shape-tooltip">[{outputShape}]</div>
       {/if}

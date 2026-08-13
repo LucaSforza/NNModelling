@@ -35,6 +35,13 @@ The browser is the only source of truth for a live diagram. The MCP server
 routes request/response RPC to the selected browser tab and must not mirror the
 graph. See [Browser-backed MCP](browser-mcp.md).
 
+`DiagramCore` also owns the diagram's presentation direction (`vertical` or
+`horizontal`). Automatic layout validates and computes the complete recursive
+geometry off-state, then applies node positions, expanded subflow dimensions
+and direction as one snapshot-based mutation. Editable diagram JSON persists
+the optional `layoutDirection` field; missing or unknown values default to
+vertical. This presentation metadata is not part of NNTree output.
+
 Remote training is an optional second boundary:
 
 ```text
@@ -55,7 +62,13 @@ See [Remote training](remote-training.md), the
   rules documented in `Stereotypes/AGENTS.md`.
 - Join inputs retain target-handle order, which is semantically significant for
   non-commutative operations.
+- Every edge connects endpoints in the same immediate containment scope. A
+  subflow is an atomic node in its parent's scope, and its children cannot
+  connect directly outside it.
 - Hidden children of collapsed subflows still compile.
+- Automatic layout retains hidden children and computes every containment
+  scope bottom-up. Svelte Flow handle internals and viewport fitting are
+  browser-only synchronization performed after the reactive DOM update.
 - Tensor behavior is selected by stereotype data. The engine implements
   generic semantics without branching on stereotype names.
 - Source Svelte Flow diagrams and compiled NNTree fixtures are different

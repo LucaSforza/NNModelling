@@ -20,13 +20,23 @@ import { DiagramCore } from "./core/DiagramCore";
 import { StereotypeCore } from "./core/StereotypeCore";
 import { TypeEngine } from "./conversion/typeEngine";
 import type { TypeResult } from "./conversion/tensortypes";
+import type { LayoutDirection } from "./layout/autoLayout";
 
 export const DIAGRAM_CONTEXT_KEY = Symbol("diagram-context");
 
 export class Diagram extends DiagramCore {
   public nodes: Node[] = $state.raw<Node[]>([]);
   public edges: Edge[] = $state.raw<Edge[]>([]);
+  private reactiveLayoutDirection: LayoutDirection = $state("vertical");
   public typeResult: TypeResult | null = $state.raw(null);
+
+  public override get layoutDirection(): LayoutDirection {
+    return this.reactiveLayoutDirection;
+  }
+
+  public override set layoutDirection(value: LayoutDirection) {
+    this.reactiveLayoutDirection = value;
+  }
 
   constructor() {
     super();

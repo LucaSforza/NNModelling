@@ -14,6 +14,7 @@
 import { type Connection, type Edge, type InternalNode, type Node } from "@xyflow/svelte";
 import type { Diagram } from "./Diagram.svelte";
 import { checkValidConnection as coreCheckValidConnection } from "./core/validation";
+import { validateReparenting } from "./core/containment";
 
 // Tipo esatto per il payload dell'evento di trascinamento
 export type NodeDragPayload = {
@@ -106,48 +107,32 @@ function getTargetSubflow(
     return cArea < sArea ? current : smallest;
   });
 }
-// HELPER 2: Controlla se stiamo per creare un paradosso (loop di parentela)
-function isAncestryLoop(
-  potentialParent: Node | undefined,
-  draggedNodeId: string,
-  allNodes: Node[],
-): boolean {
-  let checkNode = potentialParent;
-  while (checkNode) {
-    if (checkNode.id === draggedNodeId) return true;
-    checkNode = allNodes.find((n) => n.id === checkNode?.parentId);
-  }
-  return false;
-}
-
 // LOGICA REPARENTING
 export function onNodeDragStop(
   payload: NodeDragPayload,
   nodes: Node[],
   getIntersectingNodes: (node: Node) => Node[],
-  getInternalNode: (id: string) => InternalNode | undefined
+  getInternalNode: (id: string) => InternalNode | undefined,
+  edges: Edge[] = [],
 ): Node[] | undefined {
   const node: Node | null = payload?.targetNode;
   if (!node) return;
 
   const currentParentId = node.parentId;
-  let newParent = getTargetSubflow(node, getIntersectingNodes);
-
-  // --- SCUDO ANTI-LOOP ---
-  if (newParent && isAncestryLoop(newParent, node.id, nodes)) {
-    console.warn(
-      `Spostamento bloccato! Non puoi inserire ${node.id} dentro una sua discendenza.`,
-    );
-    // IL FIX È QUI! Anziché far diventare orfano il nodo,
-    // interrompiamo direttamente la logica: il nodo ignorerà
-    // questo finto "rilascio" e manterrà il suo padre attuale!
-    return undefined;
-  }
-
+  const newParent = getTargetSubflow(node, getIntersectingNodes);
   const newParentId = newParent?.id;
 
   // --- EARLY EXIT: Se il padre non è cambiato, non facciamo nulla ---
   if (currentParentId === newParentId) return;
+
+  // Keep containment ancestry valid and reject a move that would strand an
+  // existing incident edge across scopes. This is entirely pre-mutation:
+  // FlowCanvas receives undefined and leaves nodes and edges untouched.
+  const containment = validateReparenting(nodes, edges, node.id, newParentId);
+  if (!containment.valid) {
+    console.warn(`Spostamento bloccato: ${containment.reason}`);
+    return undefined;
+  }
 
   // --- PREPARAZIONE DELLE COORDINATE ---
   const internalNode: InternalNode | undefined = getInternalNode(node.id);
@@ -185,12 +170,19 @@ export function onNodeDragStop(
 
 // --- VALIDAZIONE CONNESSIONI ---
 export function checkValidConnection(diagram: Diagram, connection: Connection | Edge): boolean {
+  // Svelte Flow only asks about live nodes. Retaining the legacy fallback for
+  // synthetic test connections avoids treating a non-existent endpoint as a
+  // UI containment scope; DiagramCore mutations always pass all nodes and are
+  // strict about unknown endpoints.
+  const hasSource = diagram.nodes.some((node) => node.id === connection.source);
+  const hasTarget = diagram.nodes.some((node) => node.id === connection.target);
   const result = coreCheckValidConnection(
     diagram.edges,
     connection.source,
     connection.target,
     connection.sourceHandle ?? undefined,
-    connection.targetHandle ?? undefined
+    connection.targetHandle ?? undefined,
+    hasSource && hasTarget ? diagram.nodes : undefined,
   );
   return result.valid;
 }

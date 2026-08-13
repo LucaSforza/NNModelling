@@ -35,6 +35,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   let { data, selected, id }: NodeProps<MySubflowNode> = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
+  let targetPosition = $derived(
+    diagram.layoutDirection === "horizontal" ? Position.Left : Position.Top,
+  );
+  let sourcePosition = $derived(
+    diagram.layoutDirection === "horizontal" ? Position.Right : Position.Bottom,
+  );
 
   let topParams = $derived(
     Object.entries(data.params || {}).filter(
@@ -67,7 +73,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   isVisible={selected}
 />
 
-<Handle type="target" id="in" position={Position.Top} />
+<Handle type="target" id="in" position={targetPosition} />
 
 <div class="subflow-wrapper" class:collapsed={data.isCollapsed} style="position: relative;">
   <div
@@ -114,7 +120,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   {/if}
 </div>
 
-<Handle type="source" id="out" position={Position.Bottom} />
+<Handle type="source" id="out" position={sourcePosition} />
 
 <style>
   @import "../styles/subflow.css";

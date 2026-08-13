@@ -78,13 +78,15 @@ Connecting Nodes
 
 Each node has connection handles:
 
-* **Top handle** — input (receives data from a previous node)
-* **Bottom handle** — output (sends data to the next node)
+* In the default **vertical** layout, the top handle receives input and the
+  bottom handle sends output.
+* In the **horizontal** layout, the left handle receives input and the right
+  handle sends output.
 
 To connect two nodes:
 
-1. Click and drag from a node's **bottom handle** (source) to another node's
-   **top handle** (target).
+1. Click and drag from a node's output handle (bottom or right) to another
+   node's input handle (top or left).
 2. An edge appears showing the connection.
 
 **Rules:**
@@ -102,7 +104,24 @@ branches, use a **Join node** from the sidebar (Addition, Concat, Einsum,
 MatMul, ScaledDotProduct, MaskedScaledDotProduct).
 
 Join nodes have multiple input handles (``in-0``, ``in-1``, ...) and one
-output handle.
+output handle. Their semantic order is left-to-right vertically and
+top-to-bottom horizontally.
+
+.. _automatic-layout:
+
+Automatic Layout
+~~~~~~~~~~~~~~~~
+
+The toolbar's **Disponi** menu arranges the complete diagram in either
+**Verticale** (top-to-bottom) or **Orizzontale** (left-to-right) direction.
+It lays out every containment level, resizes expanded subflows around their
+contents, and also arranges hidden children inside collapsed subflows so they
+are ready when expanded again.
+
+Automatic layout is one undoable operation: use **Ctrl+Z** to restore the
+previous positions, subflow dimensions, and handle direction together. The
+chosen direction is saved in diagram JSON and restored on load; older files
+without direction metadata open vertically.
 
 Subflow Nodes
 ~~~~~~~~~~~~~~~

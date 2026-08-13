@@ -124,8 +124,16 @@ This is the heart of the frontend logic, written with zero Svelte dependencies.
     * ``addModule()``, ``addJoinNode()``, ``addSubGraph()``
     * ``deleteNodes()``, ``addEdge()``, ``moveNode()``, ``moveNodes()``
     * ``importFromJson()``, ``exportToJson()``
-    * ``toggleSubflow()``, ``undo()``, ``redo()``
+    * ``toggleSubflow()``, ``autoLayout()``, ``undo()``, ``redo()``
     * Snapshot-based undo/redo with 50-entry stack
+
+``autoLayout(direction)`` validates containment before applying a deterministic
+bottom-up Dagre layout. Each expanded subflow is sized around the recursively
+arranged direct children before its parent scope is laid out. Direction,
+positions, expanded dimensions, and parent-before-child node ordering are
+committed as one undoable mutation; edge endpoints and semantic handle IDs are
+preserved. ``FlowCanvas.svelte`` then refreshes Svelte Flow's node internals and
+fits the viewport after the rendered handle direction has changed.
 
 ``DiagramCore.onGraphChanged``
     The single graph-change notification contract. ``onGraphChanged(handler)``

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Final Task QA"
+  short_description: "Verify completed work through real usage"
+  default_prompt: "Use $verify-task to perform final QA on this completed task."

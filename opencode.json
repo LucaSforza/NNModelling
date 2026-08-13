@@ -1,6 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "architect",
+  "skills": {
+    "paths": [
+      ".agents/skills"
+    ]
+  },
   "permission": {
     "skill": {
       "*": "allow",
@@ -13,6 +18,7 @@
       "svelte-core-bestpractices": "allow",
       "svelte5-best-practices": "allow",
       "typescript-advanced-types": "allow",
+      "verify-task": "allow",
       "vitest": "allow"
     }
   },

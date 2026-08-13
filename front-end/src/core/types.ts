@@ -13,7 +13,9 @@
 
 // Re-export Svelte Flow types (type-only — no runtime dependency)
 import type { Node, Edge } from "@xyflow/svelte";
+import type { LayoutDirection } from "../layout/autoLayout";
 export type { Node, Edge };
+export type { LayoutDirection };
 
 // ── Position ────────────────────────────────────
 export interface Position { x: number; y: number; }
@@ -35,4 +37,5 @@ export interface JoinNodeConfig extends NodeConfig {
 export interface DiagramCoreSnapshot {
   nodes: Node[];
   edges: Edge[];
+  layoutDirection: LayoutDirection;
 }

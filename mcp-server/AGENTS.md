@@ -11,8 +11,9 @@ pnpm --dir mcp-server start
 npx tsx mcp-server/src/index.ts
 ```
 
-Use the `nnmodelling-mcp` skill when the user explicitly requests browser-backed
-MCP operation or connection diagnosis. Reuse its stack helper and startup order.
+Use the `nnmodelling-mcp` skill for live NNModelling browser operation or
+connection diagnosis. Reuse its host-aware browser routing, stack helper and
+startup order.
 
 ## Architecture contract
 
@@ -46,6 +47,11 @@ Run the focused Vitest suite and `pnpm --dir mcp-server test`. Changes to RPC
 method names or payloads also require corresponding frontend
 `BrowserRPCHandler` tests. Changes to conversion subprocess behavior require the
 relevant integration tier in `front-end/`.
+
+Apply `../.agents/skills/verify-task/SKILL.md` before final handoff. For a
+user-visible tool or protocol change, connect the live frontend and make one
+representative MCP call through the configured host path; unit tests alone do
+not prove browser selection, transport, and DiagramCore integration.
 
 Current ownership and protocol constraints are documented in
 `../docs/knowledge/architecture/browser-mcp.md`. Removed pre-simplification

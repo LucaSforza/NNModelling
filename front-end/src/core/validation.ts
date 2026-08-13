@@ -12,6 +12,7 @@
  */
 
 import type { Edge } from "@xyflow/svelte";
+import { validateSameScopeEdge } from "./containment";
 
 export interface ConnectionValidation {
   valid: boolean;
@@ -114,11 +115,22 @@ export function checkValidConnection(
   source: string,
   target: string,
   sourceHandle?: string,
-  targetHandle?: string
+  targetHandle?: string,
+  nodes?: readonly unknown[],
 ): ConnectionValidation {
   // Self-loop check
   if (source === target) {
     return { valid: false, reason: "Cannot connect a node to itself" };
+  }
+
+  // A connection belongs to exactly one immediate containment scope. This
+  // runs before cycle and handle checks so the caller can reject the mutation
+  // before it captures undo state or changes the edge array.
+  if (nodes) {
+    const containment = validateSameScopeEdge(nodes, { source, target });
+    if (!containment.valid) {
+      return { valid: false, reason: containment.reason };
+    }
   }
 
   // Directed-cycle check: adding source → target creates a cycle exactly when

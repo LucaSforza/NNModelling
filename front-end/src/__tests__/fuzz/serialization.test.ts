@@ -34,11 +34,21 @@ const moduleSpecArb = fc.record({
 
 const diagramSpecArb = fc.record({
   modules: fc.array(moduleSpecArb, { minLength: 0, maxLength: 6 }),
+  layoutDirection: fc.constantFrom("vertical", "horizontal"),
 });
 
 // ── Build a Diagram from spec ─────────────────────────────────────
 
-function buildDiagram(spec: { modules: Array<{ stereo: string; x: number; y: number; color: string; params: Record<string, string | undefined> }> }): Diagram {
+function buildDiagram(spec: {
+  modules: Array<{
+    stereo: string;
+    x: number;
+    y: number;
+    color: string;
+    params: Record<string, string | undefined>;
+  }>;
+  layoutDirection: "vertical" | "horizontal";
+}): Diagram {
   const d = new Diagram();
   const stereo = d.getStereotype("Linear");
   if (!stereo) throw new Error("Linear not found");
@@ -52,6 +62,7 @@ function buildDiagram(spec: { modules: Array<{ stereo: string; x: number; y: num
     }
     d.addModule(s, m.x, m.y, { color: m.color, params: cleanParams });
   }
+  d.layoutDirection = spec.layoutDirection;
   return d;
 }
 
@@ -74,6 +85,7 @@ describe("Fuzzer #3 — Serialization Idempotence", () => {
 
         expect(parsed2.nodes.length).toBe(parsed1.nodes.length);
         expect(parsed2.edges.length).toBe(parsed1.edges.length);
+        expect(parsed2.layoutDirection).toBe(parsed1.layoutDirection);
 
         const sortById = (arr: any[]) => [...arr].sort((a: any, b: any) => (a.id || "").localeCompare(b.id || ""));
         const nodes1 = sortById(parsed1.nodes);
