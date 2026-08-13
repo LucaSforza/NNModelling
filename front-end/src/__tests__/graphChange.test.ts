@@ -47,6 +47,19 @@ describe("DiagramCore graph-change subscription", () => {
     expect(calls).toBe(1);
   });
 
+  it("notifies once for accepted automatic layout and zero times for its no-op", () => {
+    const diagram = new Diagram();
+    diagram.addModule(getLinearStereotype(diagram), 100, 100);
+    let calls = 0;
+    diagram.onGraphChanged(() => calls++);
+
+    expect(diagram.autoLayout("horizontal")).toBe(true);
+    expect(calls).toBe(1);
+
+    expect(diagram.autoLayout("horizontal")).toBe(false);
+    expect(calls).toBe(1);
+  });
+
   it("does not notify when an RPC connection is rejected", () => {
     const diagram = new Diagram();
     let calls = 0;
