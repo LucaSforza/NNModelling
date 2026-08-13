@@ -1,7 +1,7 @@
 ---
 id: automatic-compound-layout
 kind: plan
-status: ready
+status: in_progress
 updated: 2026-08-13
 areas:
   - frontend

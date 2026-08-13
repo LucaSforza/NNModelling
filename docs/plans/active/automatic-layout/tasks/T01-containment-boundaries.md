@@ -1,7 +1,7 @@
 ---
 id: T01
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: frontend
 depends_on: []
@@ -11,6 +11,7 @@ write_scope:
   - front-end/src/core/validation.ts
   - front-end/src/core/DiagramCore.ts
   - front-end/src/utils.ts
+  - front-end/src/FlowCanvas.svelte
   - front-end/src/__tests__/containment.test.ts
   - front-end/src/__tests__/graphChange.test.ts
 ---
@@ -46,6 +47,8 @@ belong to the same immediate containment scope.
 - Only the files listed in `write_scope`.
 - `containment.ts` owns reusable pure scope and ancestry checks; it must not own
   diagram state.
+- `FlowCanvas.svelte` may change only at the `onNodeDragStop()` call site to
+  pass the current edge array required by containment validation.
 
 ## Out of scope
 

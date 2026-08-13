@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, afterAll } from "vitest";
 import { Diagram } from "../Diagram.svelte";
 import { BrowserRPCHandler } from "../sync/BrowserRPCHandler";
-import { stubWindow, unstubWindow } from "./helpers";
+import { edge, node, stubWindow, unstubWindow } from "./helpers";
 
 stubWindow();
 afterAll(() => unstubWindow());
@@ -76,6 +76,32 @@ describe("DiagramCore graph-change subscription", () => {
 
     // Invalid JSON must fail without any notification.
     expect(diagram.importFromJson("not json")).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  it("does not notify or capture undo for rejected containment mutations", () => {
+    const diagram = new Diagram();
+    diagram.nodes = [
+      node("top-a", "Linear", "top-a"),
+      node("top-b", "Linear", "top-b"),
+      node("container", "", "container", {}, { type: "subflow" }),
+      node("child", "Linear", "child", {}, { parentId: "container" }),
+    ];
+    diagram.edges = [edge("top-edge", "top-a", "top-b")];
+    const graphBefore = diagram.exportToJson();
+    const undoLengthBefore = (diagram as any)._undoStack.length;
+    let calls = 0;
+    diagram.onGraphChanged(() => calls++);
+
+    expect(() => diagram.addEdge("child", "top-a")).toThrow(/containment scope/i);
+    expect(() => diagram.reconnectEdge("top-edge", undefined, "child")).toThrow(/containment scope/i);
+    expect(diagram.importFromJson(JSON.stringify({
+      nodes: diagram.nodes,
+      edges: [edge("bad-import", "top-a", "child")],
+    }))).toBe(false);
+
+    expect(diagram.exportToJson()).toBe(graphBefore);
+    expect((diagram as any)._undoStack.length).toBe(undoLengthBefore);
     expect(calls).toBe(0);
   });
 

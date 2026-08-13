@@ -233,6 +233,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           diagram.nodes,
           getIntersectingNodes,
           getInternalNode,
+          diagram.edges,
         );
         if (newNodes !== undefined) diagram.nodes = newNodes;
         diagram.refreshTypes();
