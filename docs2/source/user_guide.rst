@@ -107,6 +107,8 @@ Join nodes have multiple input handles (``in-0``, ``in-1``, ...) and one
 output handle. Their semantic order is left-to-right vertically and
 top-to-bottom horizontally.
 
+.. _automatic-layout:
+
 Automatic Layout
 ~~~~~~~~~~~~~~~~
 

@@ -70,6 +70,10 @@ reference or the `nnmodelling-mcp` skill rather than improvising port cleanup.
 - Training, datasets, network downloads, Valkey and Slurm are separate slow or
   external boundaries; mock them in unit tests and run real tiers only when the
   requested behavior requires it.
+- Apply `../.agents/skills/verify-task/SKILL.md` before final handoff. Exercise
+  converter, runtime, training, inference, or backend changes through their
+  public command or endpoint with a representative fixture; run real external
+  boundaries only when the requested outcome depends on them.
 
 Current contracts are documented in
 `../docs/knowledge/architecture/remote-training.md`,

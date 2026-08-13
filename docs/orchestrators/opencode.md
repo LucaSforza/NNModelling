@@ -78,11 +78,14 @@ user chooses a provider.
    tasks explicitly permitted by their dependency graph.
 6. Require the handoff specified by the task, including exact validation
    evidence.
-7. Review the coherent implementation rather than automatically assigning one
-   reviewer per task.
-8. Route actionable findings to the implementer that owns the affected task,
+7. Load `.agents/skills/verify-task/SKILL.md` and run proportional final QA
+   through the real public interface. In OpenCode, browser QA uses the skill's
+   Chromium/CDP route.
+8. Review the coherent implementation when requested rather than automatically
+   assigning one reviewer per task.
+9. Route actionable findings to the implementer that owns the affected task,
    then validate and review again.
-9. Close only after acceptance and integration gates pass or a genuine blocker
+10. Close only after acceptance and integration gates pass or a genuine blocker
    requires user action.
 
 An OpenCode assignment copies the canonical task fields and adds only runtime
@@ -119,3 +122,8 @@ the task, and browser-backed work follows the routing rules in `AGENTS.md`.
 The `nnmodelling-mcp` skill is host-aware. In an OpenCode session without the
 Codex in-app Browser, it keeps using the external Chromium/CDP branch and the
 same `nnm-stack.sh` helper.
+
+The `verify-task` skill is also host-aware and is the mandatory final QA phase
+for every completed request. It reuses `nnmodelling-mcp` or `chrome-direct` for
+browser work and remains usable for CLI, API, documentation, configuration, and
+pure-logic tasks without a browser.

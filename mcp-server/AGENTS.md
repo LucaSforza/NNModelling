@@ -48,6 +48,11 @@ method names or payloads also require corresponding frontend
 `BrowserRPCHandler` tests. Changes to conversion subprocess behavior require the
 relevant integration tier in `front-end/`.
 
+Apply `../.agents/skills/verify-task/SKILL.md` before final handoff. For a
+user-visible tool or protocol change, connect the live frontend and make one
+representative MCP call through the configured host path; unit tests alone do
+not prove browser selection, transport, and DiagramCore integration.
+
 Current ownership and protocol constraints are documented in
 `../docs/knowledge/architecture/browser-mcp.md`. Removed pre-simplification
 architecture is preserved under `../docs/archive/superseded/` and is not

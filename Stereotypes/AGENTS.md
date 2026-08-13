@@ -50,6 +50,9 @@ pnpm --dir front-end test
 
 If the stereotype changes generated Python configuration or runtime operations,
 run the matching conversion/forward integration tier and focused Python tests.
+Before final handoff, apply `../.agents/skills/verify-task/SKILL.md` and load a
+representative editable diagram in the live editor to verify rendering, tensor
+inference, and compilation through the public workflow.
 Use `docs2/source/stereotypes.rst`, `docs2/source/type_system.rst`, and
 `docs/knowledge/contracts/tensor-types.md` as current references. Historical
 type-system plans are preserved under

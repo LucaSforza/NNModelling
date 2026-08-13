@@ -26,6 +26,12 @@ spawn Python through `uv`; training and inference tiers are slow and should be
 run only when relevant. Useful variables include `NNM_DIAGRAM`, `NNM_DEVICE`,
 `NNM_TIER`, `NNM_WANDB_MODE`, and `NNM_KEEP_TEMP`.
 
+For final QA, follow `../.agents/skills/verify-task/SKILL.md`. UI, layout,
+interaction, browser RPC, import/export, and rendered-diagnostic changes must be
+exercised in the live editor through the host-appropriate browser route, in
+addition to automated checks. Use a type-valid fixture for the happy path and
+distinguish pre-existing fixture diagnostics from regressions.
+
 ## State and UI architecture
 
 - `src/core/DiagramCore.ts` owns all diagram business logic as pure TypeScript.

@@ -12,6 +12,11 @@ The project consists of three main packages:
 * **mcp-server/** — An MCP server that proxies diagram state from the browser
   to LLM agents
 
+Editor highlights include recursive **automatic layout**: one toolbar menu can
+arrange an entire model vertically or horizontally, resize nested subflows
+around their contents, rotate connection handles, and preserve the result
+through undo/redo and diagram save/load. See :ref:`automatic-layout`.
+
 .. toctree::
    :maxdepth: 2
    :caption: User Guide

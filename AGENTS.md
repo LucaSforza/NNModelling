@@ -22,6 +22,10 @@ is preserved under `docs/archive/`.
   in its local `AGENTS.md`.
 - Do not copy historical test counts into status reports; rerun the relevant
   command and report its current result.
+- Before the final handoff, push, PR-readiness transition, release, or deployment,
+  load `.agents/skills/verify-task/SKILL.md` and perform proportional final QA
+  through the real user-facing interface. This is required for every completed
+  task and is not a request for automatic line-by-line code review.
 
 OpenCode-specific model routing, agent roster, and execution loops are defined
 in `docs/orchestrators/opencode.md`. When acting as an OpenCode architect, use
