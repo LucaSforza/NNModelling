@@ -27,8 +27,16 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import Sidebar from "./components/Sidebar.svelte";
   import TrainingSidebar from "./components/TrainingSidebar.svelte";
 
-  const { getInternalNode, getIntersectingNodes, screenToFlowPosition, fitView, setCenter } =
-    useSvelteFlow();
+  const {
+    getInternalNode,
+    getIntersectingNodes,
+    screenToFlowPosition,
+    fitView,
+    setCenter,
+    getViewport,
+    setViewport,
+    getNodesBounds,
+  } = useSvelteFlow();
   const updateNodeInternals = useUpdateNodeInternals();
 
   import CustomNode from "./nodes/CustomNode.svelte";
@@ -47,7 +55,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { Diagram, DIAGRAM_CONTEXT_KEY } from "./Diagram.svelte";
   import { setContext, tick } from "svelte";
   import type { LayoutDirection } from "./layout/autoLayout";
-  import { toPng } from "html-to-image";
+  import { toBlob, toPng } from "html-to-image";
+  import {
+    getPngEdgeStyle,
+    getPngExportLayout,
+    shouldIncludePngElement,
+  } from "./pngExport";
 
   // RPC handler — receives MCP server requests and dispatches to Diagram
   import { BrowserRPCHandler } from "./sync/BrowserRPCHandler";
@@ -233,23 +246,82 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       diagram.deleteEdges(selectedEdges.map((e) => e.id));
   }
 
+  function inlinePngEdgeStyles(container: HTMLElement): () => void {
+    const paths = Array.from(
+      container.querySelectorAll<SVGPathElement>(".svelte-flow__edge-path"),
+    );
+    const originalStyles = paths.map((path) => ({
+      path,
+      style: path.getAttribute("style"),
+    }));
+
+    for (const path of paths) {
+      const style = getPngEdgeStyle(getComputedStyle(path));
+      path.style.stroke = style.stroke;
+      path.style.strokeWidth = style.strokeWidth;
+      path.style.fill = style.fill;
+    }
+
+    return () => {
+      for (const { path, style } of originalStyles) {
+        if (style === null) path.removeAttribute("style");
+        else path.setAttribute("style", style);
+      }
+    };
+  }
+
   async function handleExportPng() {
-    if (!canvasRef) return;
+    if (!canvasRef || diagram.nodes.length === 0) return;
 
-    const dataUrl = await toPng(canvasRef, {
-      backgroundColor: "#ffffff",
-      filter: (element) => {
-        return (
-          !element.classList?.contains("toolbar") &&
-          !element.classList?.contains("svelte-flow__controls")
-        );
-      },
-    });
+    const visibleNodes = diagram.nodes.filter((node) => !node.hidden);
+    const bounds = getNodesBounds(visibleNodes);
+    const layout = getPngExportLayout(bounds);
+    const originalViewport = getViewport();
+    const originalWidth = canvasRef.style.width;
+    const originalHeight = canvasRef.style.height;
+    const restoreEdgeStyles = inlinePngEdgeStyles(canvasRef);
 
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = "diagram.png";
-    link.click();
+    try {
+      canvasRef.style.width = `${layout.width}px`;
+      canvasRef.style.height = `${layout.height}px`;
+      await tick();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      await setViewport(layout.viewport);
+      await tick();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const pngOptions = {
+        width: layout.width,
+        height: layout.height,
+        canvasWidth: layout.width,
+        canvasHeight: layout.height,
+        backgroundColor: "#ffffff",
+        filter: shouldIncludePngElement,
+      };
+      let blob = await toBlob(canvasRef, pngOptions);
+      if (!blob) {
+        const dataUrl = await toPng(canvasRef, pngOptions);
+        blob = await (await fetch(dataUrl)).blob();
+      }
+      if (!blob) return;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "diagram.png";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } finally {
+      restoreEdgeStyles();
+      canvasRef.style.width = originalWidth;
+      canvasRef.style.height = originalHeight;
+      await tick();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await setViewport(originalViewport);
+    }
   }
 
   async function handleConversion() {
