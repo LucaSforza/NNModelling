@@ -141,18 +141,19 @@ if (shouldRun) {
   // inference with no hard errors. Only the selected models (mninst and
   // autoencoder_mnist) declare this invariant; other diagrams with known
   // pre-existing hard type errors are intentionally not asserted here.
-  describe("Smoke: type-check invariant", () => {
-    const cleanModels = targets.filter((t) => t.entry.refreshTypesClean === true);
-
-    it.each(cleanModels.map((t) => t.name))(
-      "%s has no hard type errors after import",
-      (name) => {
-        const result = refreshTypesFor(name);
-        const hardErrors = result.errors.filter((e) => e.severity === "error");
-        expect(hardErrors).toEqual([]);
-      },
-    );
-  });
+  const cleanModels = targets.filter((t) => t.entry.refreshTypesClean === true);
+  if (cleanModels.length > 0) {
+    describe("Smoke: type-check invariant", () => {
+      it.each(cleanModels.map((t) => t.name))(
+        "%s has no hard type errors after import",
+        (name) => {
+          const result = refreshTypesFor(name);
+          const hardErrors = result.errors.filter((e) => e.severity === "error");
+          expect(hardErrors).toEqual([]);
+        },
+      );
+    });
+  }
 } else {
   describe.skip("Smoke tier disabled", () => {
     it("runs only when NNM_TIER is smoke or all", () => {});
