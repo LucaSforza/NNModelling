@@ -26,6 +26,13 @@ import { checkValidConnection as coreCheckValidConnection } from "./validation";
 import { validateContainmentGraph } from "./containment";
 import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
 import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig } from "./types";
+import {
+  edgeWithRoutePoints,
+  normalizeEditableEdge,
+  normalizeRoutePoints,
+  routePointsFromData,
+  sameRoutePoints,
+} from "./edgeRoute";
 
 /**
  * Deep equality for JSON-comparable parameter objects ({ value, position }
@@ -586,6 +593,8 @@ export class DiagramCore {
       target,
       sourceHandle,
       targetHandle,
+      type: "editable",
+      data: { route: { points: [] } },
     };
 
     this.edges = [...this.edges, newEdge];
@@ -606,6 +615,33 @@ export class DiagramCore {
     this.edges = this.edges.filter(e => !removedEdges.some(r => r.id === e.id));
 
     this.notifyGraphChanged();
+  }
+
+  /**
+   * Set an edge's scope-local bend points atomically. Only finite `{ x, y }`
+   * points are accepted; an empty list selects automatic routing. Invalid,
+   * unknown and unchanged updates are no-ops and return false.
+   */
+  public updateEdgeRoute(edgeId: string, points: unknown): boolean {
+    const normalizedPoints = normalizeRoutePoints(points);
+    if (!normalizedPoints) return false;
+
+    const edge = this.edges.find((candidate) => candidate.id === edgeId);
+    if (!edge || sameRoutePoints(routePointsFromData(edge.data), normalizedPoints)) {
+      return false;
+    }
+
+    this._captureUndoState();
+    this.edges = this.edges.map((candidate) => (
+      candidate.id === edgeId ? edgeWithRoutePoints(candidate, normalizedPoints) : candidate
+    ));
+    this.notifyGraphChanged();
+    return true;
+  }
+
+  /** Clear a manual route and return the edge to automatic routing. */
+  public clearEdgeRoute(edgeId: string): boolean {
+    return this.updateEdgeRoute(edgeId, []);
   }
 
   public reconnectEdge(
@@ -642,7 +678,7 @@ export class DiagramCore {
     this._captureUndoState();
     this.edges = this.edges.map(e => {
       if (e.id === edgeId) {
-        return { ...e, source, target, sourceHandle, targetHandle };
+        return edgeWithRoutePoints({ ...e, source, target, sourceHandle, targetHandle }, []);
       }
       return e;
     });
@@ -753,13 +789,13 @@ export class DiagramCore {
       const newSource = oldToNew.get(edge.source);
       const newTarget = oldToNew.get(edge.target);
       if (newSource && newTarget) {
-        newEdges.push({
+        newEdges.push(edgeWithRoutePoints({
           id: `edge_${crypto.randomUUID()}`,
           source: newSource,
           target: newTarget,
           sourceHandle: edge.sourceHandle ?? "out",
           targetHandle: edge.targetHandle ?? "in",
-        });
+        }, routePointsFromData(edge.data)));
       }
     }
 
@@ -839,7 +875,10 @@ export class DiagramCore {
   public getSnapshot(): DiagramCoreSnapshot {
     return {
       nodes: [...this.nodes],
-      edges: [...this.edges],
+      // Svelte Flow can supply a valid automatic edge before it has route
+      // metadata. Snapshots must still use the canonical explicit empty route
+      // so undo/redo changes the renderer's route state in both directions.
+      edges: this.edges.map((edge) => normalizeEditableEdge(edge)),
       layoutDirection: this.layoutDirection,
     };
   }
@@ -847,7 +886,7 @@ export class DiagramCore {
   public restoreSnapshot(snapshot: DiagramCoreSnapshot): void {
     this._assertNotNotifying();
     this.nodes = [...snapshot.nodes];
-    this.edges = [...snapshot.edges];
+    this.edges = snapshot.edges.map((edge) => normalizeEditableEdge(edge));
     this.layoutDirection = normalizedLayoutDirection(
       (snapshot as DiagramCoreSnapshot & { layoutDirection?: unknown }).layoutDirection,
     );
@@ -937,7 +976,9 @@ export class DiagramCore {
   public exportToJson(): string {
     const exportData = {
       nodes: this.nodes,
-      edges: this.edges,
+      // Persist the canonical edge contract even when a caller constructed a
+      // legacy edge directly instead of going through addEdge/import.
+      edges: this.edges.map((edge) => normalizeEditableEdge(edge)),
       layoutDirection: this.layoutDirection,
     };
     return JSON.stringify(exportData, null, 2);
@@ -965,11 +1006,11 @@ export class DiagramCore {
       const normalizedEdges = imported.edges.map((candidate) => {
         if (!candidate || typeof candidate !== "object") return candidate;
         const edge = candidate as Edge;
-        return {
+        return normalizeEditableEdge({
           ...edge,
           sourceHandle: edge.sourceHandle || "out",
           targetHandle: edge.targetHandle || "in",
-        };
+        });
       });
       const containment = validateContainmentGraph(imported.nodes, normalizedEdges);
       if (!containment.valid) {

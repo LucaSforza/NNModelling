@@ -42,6 +42,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import CustomNode from "./nodes/CustomNode.svelte";
   import SubflowNode from "./nodes/SubflowNode.svelte";
   import JoinNode from "./nodes/JoinNode.svelte";
+  import EditableEdge from "./edges/EditableEdge.svelte";
   import {
     checkValidConnection,
     handleLoadModel,
@@ -69,6 +70,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     custom: CustomNode,
     subflow: SubflowNode,
     join: JoinNode,
+  };
+
+  // Keep this module-level mapping stable so Svelte Flow does not recreate
+  // edge renderers during unrelated canvas updates.
+  const edgeTypes = {
+    editable: EditableEdge,
   };
 
   // 2. Istanziamo il nostro "Controller/Model"
@@ -207,13 +214,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       return;
     }
     // Ctrl+Alt+Z = Redo (check BEFORE Ctrl+Z)
-    if (e.ctrlKey && e.altKey && e.key === 'z') {
+    if (e.ctrlKey && e.altKey && e.code === 'KeyZ') {
       e.preventDefault();
       diagram.redo();
       return;
     }
     // Ctrl+Z = Undo
-    if (e.ctrlKey && e.key === 'z') {
+    if (e.ctrlKey && e.code === 'KeyZ') {
       e.preventDefault();
       diagram.undo();
       return;
@@ -378,7 +385,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       bind:nodes={diagram.nodes}
       bind:edges={diagram.edges}
       {nodeTypes}
+      {edgeTypes}
       defaultEdgeOptions={{
+        type: "editable",
         markerEnd: { type: MarkerType.ArrowClosed },
       }}
       isValidConnection={(conn: Connection | Edge) =>

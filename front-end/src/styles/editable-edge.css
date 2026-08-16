@@ -1,0 +1,68 @@
+:global(.editable-edge-path) {
+  stroke: #536273;
+  stroke-width: 2;
+}
+
+:global(.editable-edge-path--selected) {
+  stroke: #1769aa;
+  stroke-width: 2.5;
+}
+
+:global(.editable-edge-hit-target) {
+  cursor: crosshair;
+  pointer-events: stroke;
+}
+
+:global(.editable-edge-controls) {
+  pointer-events: all;
+}
+
+:global(.editable-edge-bend) {
+  fill: #ffffff;
+  stroke: #1769aa;
+  stroke-width: 2;
+  cursor: grab;
+}
+
+:global(.editable-edge-bend:active) {
+  cursor: grabbing;
+}
+
+:global(.editable-edge-remove circle) {
+  fill: #b42318;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+
+:global(.editable-edge-remove path) {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+:global(.editable-edge-remove),
+:global(.editable-edge-reset) {
+  cursor: pointer;
+}
+
+:global(.editable-edge-reset rect) {
+  fill: #ffffff;
+  stroke: #1769aa;
+  stroke-width: 1.25;
+}
+
+:global(.editable-edge-reset text) {
+  fill: #1769aa;
+  font-size: 10px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+:global(.editable-edge-bend:focus-visible),
+:global(.editable-edge-remove:focus-visible circle),
+:global(.editable-edge-reset:focus-visible rect) {
+  outline: none;
+  stroke: #f79009;
+  stroke-width: 3;
+}

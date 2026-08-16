@@ -11,6 +11,10 @@ const excludedPngClasses = new Set([
   "svelte-flow__panel",
   "svelte-flow__controls",
   "svelte-flow__attribution",
+  // The transparent pointer-capture path and selected-edge controls are UI
+  // affordances, not part of the persisted route rendered in an export.
+  "svelte-flow__edge-interaction",
+  "editable-edge-hit-target",
 ]);
 
 export type PngExportBounds = {
@@ -39,8 +43,10 @@ export type PngEdgeStyle = {
 export function shouldIncludePngElement(
   element: {
     classList?: Pick<DOMTokenList, "contains">;
+    getAttribute?: (qualifiedName: string) => string | null;
   },
 ): boolean {
+  if (element.getAttribute?.("data-png-exclude") === "true") return false;
   return !Array.from(excludedPngClasses).some((className) =>
     element.classList?.contains(className),
   );
