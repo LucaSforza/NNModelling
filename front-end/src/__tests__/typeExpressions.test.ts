@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileExpression, evaluateCompiled } from "../expr";
+import { compileExpression, equalDimensions, evaluateCompiled, isDimensionValue, isTerm, symbol } from "../expr";
 
 const tensor = { shape: [2, 3, 4], dtype: "float32" } as const;
 const run = (source: string, expected: "dimension" | "shape" | "constraint" | "dtype", context = {}) => {
@@ -43,6 +43,14 @@ describe("typed v2 expressions", () => {
     expect(run("sum(map([1, 2, 3], x => x * 2))", "dimension")).toMatchObject({ kind: "value", value: 12 });
     expect(run("all([true, true]) and not false", "constraint")).toMatchObject({ kind: "value", value: true });
     expect(run("if(param.n > 1, 7, 3)", "dimension", { params: { n: 2 } })).toMatchObject({ kind: "value", value: 7 });
+    expect(run("if(true, float32, float64)", "dtype")).toMatchObject({ kind: "value", value: "float32" });
+  });
+
+  it("indexes scalar and list parameters with scalar broadcasting", () => {
+    expect(run("item(param.axis, 3)", "dimension", { params: { axis: 2 } })).toMatchObject({ kind: "value", value: 2 });
+    expect(run("item(param.dims, 1)", "dimension", { params: { dims: [3, 5] } })).toMatchObject({ kind: "value", value: 5 });
+    expect(run("item(param.dims, 2)", "dimension", { params: { dims: [3, 5] } })).toMatchObject({ kind: "error", message: "item index out of range" });
+    expect(run("item(\"wrong\", 0)", "dimension")).toMatchObject({ kind: "error", message: "item requires a dimension or list" });
   });
 
   it("represents Addition, Concat, Flatten, Unflatten, and SequencePool generically", () => {
@@ -74,5 +82,31 @@ describe("typed v2 expressions", () => {
     if (!compiled.ok) return;
     expect(evaluateCompiled(compiled.value, { symbols: { H: 3 }, capturedDimensions: [2, 4] })).toMatchObject({ kind: "value", value: 11 });
     expect(evaluateCompiled(compiled.value, { symbols: { H: 3 } })).toMatchObject({ kind: "deferred" });
+  });
+
+  it("composes symbolic dimensions structurally and preserves them through apply and iterate", () => {
+    const expression = compileExpression("2 + $H", "dimension", { symbols: ["H"] });
+    expect(expression.ok).toBe(true);
+    if (!expression.ok) return;
+    const symbolic = evaluateCompiled(expression.value);
+    expect(symbolic).toMatchObject({ kind: "value" });
+    expect(symbolic.kind === "value" && isTerm(symbolic.value) && equalDimensions(symbolic.value, { tag: "op", op: "add", args: [2, symbol("H")] })).toBe(true);
+    const sameExpression = evaluateCompiled(expression.value);
+    const widthExpression = compileExpression("2 + $W", "dimension", { symbols: ["W"] });
+    expect(widthExpression.ok).toBe(true);
+    if (!widthExpression.ok || symbolic.kind !== "value" || sameExpression.kind !== "value") return;
+    const width = evaluateCompiled(widthExpression.value);
+    expect(isDimensionValue(symbolic.value) && isDimensionValue(sameExpression.value) && equalDimensions(symbolic.value, sameExpression.value)).toBe(true);
+    expect(width.kind === "value" && isDimensionValue(symbolic.value) && isDimensionValue(width.value) && !equalDimensions(symbolic.value, width.value)).toBe(true);
+    expect(equalDimensions(symbol("H", "local"), symbol("H", "global"))).toBe(false);
+    expect(isTerm({ tag: "symbol", name: "H" })).toBe(false);
+    expect(isTerm({ tag: "op", op: "unknown", args: [] })).toBe(false);
+    expect(evaluateCompiled(expression.value, { symbols: { H: 3 } })).toMatchObject({ kind: "value", value: 5 });
+    const source = { shape: [2, symbol("H")], dtype: "float32" };
+    const applied: typeof source[] = [];
+    const applySubflow = (value: typeof source, trace: readonly string[]) => { applied.push(value); return { kind: "value" as const, value, trace }; };
+    expect(run("shape(iterate(2, input(0, 0), x => apply(x)))", "shape", { inputs: [[source]], applySubflow })).toMatchObject({ kind: "value", value: source.shape });
+    expect(applied).toHaveLength(2);
+    expect(applied[1].shape).toEqual(source.shape);
   });
 });

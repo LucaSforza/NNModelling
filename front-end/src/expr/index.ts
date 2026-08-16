@@ -40,3 +40,5 @@ export function parseExpr(source: string): ReturnType<typeof parse> {
 export { evaluate };
 export { compileExpression, evaluateCompiled } from "./typed";
 export type { TypedEvalContext } from "./typed";
+export { dimensionOperation, equalDimensions, formatDimension, isDimensionValue, isTerm, symbol } from "./dimensionValues";
+export type { DimensionOperation, DimensionTerm, DimensionValue, SymbolScope } from "./dimensionValues";

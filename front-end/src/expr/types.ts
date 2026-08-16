@@ -1,4 +1,5 @@
 import type { ShapeDimension } from "../conversion/tensortypes";
+import type { DimensionValue } from "./dimensionValues";
 
 export type TokenKind =
   | "NUMBER" | "STRING" | "IDENTIFIER" | "DOLLAR_IDENT" | "DOLLAR_STAR"
@@ -22,8 +23,8 @@ export type ExprNode =
   | { readonly kind: "call"; readonly name: string; readonly args: readonly ExprNode[] };
 
 export type ExpressionKind = "dimension" | "shape" | "constraint" | "dtype";
-export type RuntimeValue = number | boolean | string | null | readonly RuntimeValue[] | TensorValue | LambdaValue;
-export interface TensorValue { readonly shape: readonly number[]; readonly dtype: string; }
+export type RuntimeValue = DimensionValue | boolean | string | null | readonly RuntimeValue[] | TensorValue | LambdaValue;
+export interface TensorValue { readonly shape: readonly DimensionValue[]; readonly dtype: string; }
 export interface LambdaValue { readonly parameter: string; readonly body: ExprNode; readonly scope: ReadonlyMap<string, RuntimeValue>; }
 export type Evaluation =
   | { readonly kind: "value"; readonly value: RuntimeValue; readonly trace: readonly string[] }

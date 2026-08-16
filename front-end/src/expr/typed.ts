@@ -9,6 +9,7 @@ import type {
   RuntimeValue,
   TensorValue,
 } from "./types";
+import { dimensionOperation, equalDimensions, isDimensionValue, symbol, type DimensionValue } from "./dimensionValues";
 
 type ValueKind = "number" | "boolean" | "string" | "shape" | "dtype" | "tensor" | "list" | "lambda" | "any";
 type CompileResult = { ok: true; value: CompiledExpression } | { ok: false; error: ExpressionDiagnostic };
@@ -30,8 +31,8 @@ export interface CompileOptions {
 export interface TypedEvalContext {
   readonly params?: Record<string, unknown>;
   readonly inputs?: readonly (readonly TensorValue[])[] | readonly TensorValue[];
-  readonly symbols?: ReadonlyMap<string, number> | Readonly<Record<string, number>>;
-  readonly capturedDimensions?: readonly number[];
+  readonly symbols?: ReadonlyMap<string, DimensionValue> | Readonly<Record<string, DimensionValue>>;
+  readonly capturedDimensions?: readonly DimensionValue[];
   readonly applySubflow?: (tensor: TensorValue, trace: readonly string[]) => Evaluation;
   readonly trace?: readonly string[];
   readonly maxIterations?: number;
@@ -59,6 +60,7 @@ const operators: Record<string, OperatorSignature> = {
   abs: { min: 1, max: 1, args: ["number"], result: "number" },
   min: { min: 1, max: Number.MAX_SAFE_INTEGER, args: ["number"], result: "number" },
   max: { min: 1, max: Number.MAX_SAFE_INTEGER, args: ["number"], result: "number" },
+  item: { min: 2, max: 2, args: ["any", "number"], result: "number" },
   product: { min: 1, max: 1, args: ["list"], result: "number" },
   sum: { min: 1, max: 1, args: ["list"], result: "number" },
   slice: { min: 2, max: 3, args: ["shape", "number", "number"], result: "shape" },
@@ -247,8 +249,9 @@ function evaluateVariable(node: Extract<ExprNode, { kind: "variable" }>, context
   if (scope.has(node.name)) return ok(scope.get(node.name)!, trace);
   if (node.isSymbolic) {
     const value = lookupSymbol(context.symbols, node.name);
-    return value === undefined ? defer(trace) : ok(value, trace);
+    return ok(value ?? symbol(node.name), trace);
   }
+  if (["float16", "float32", "float64", "int32", "int64", "bool"].includes(node.name)) return ok(node.name, trace);
   const name = node.name.startsWith("param.") ? node.name.slice(6) : node.name;
   const value = context.params?.[name];
   return value === undefined ? defer(trace) : ok(normalize(value), trace);
@@ -264,7 +267,7 @@ function evaluateUnary(node: Extract<ExprNode, { kind: "unary" }>, context: Type
   const result = evaluateNode(node.operand, context, scope, depth + 1);
   if (result.kind !== "value") return result;
   if (node.op === "not") return typeof result.value === "boolean" ? ok(!result.value, trace) : err("not requires boolean", trace);
-  return typeof result.value === "number" ? ok(-result.value, trace) : err("unary - requires number", trace);
+  return isDimensionValue(result.value) ? ok(dimensionOperation("neg", [result.value]), trace) : err("unary - requires number", trace);
 }
 
 function evaluateBinary(node: Extract<ExprNode, { kind: "binary" }>, context: TypedEvalContext, scope: ReadonlyMap<string, RuntimeValue>, depth: number, trace: readonly string[]): Evaluation {
@@ -286,12 +289,13 @@ function evaluateBooleanBinary(op: "and" | "or", left: RuntimeValue, right: Runt
 }
 
 function evaluateComparison(op: ">" | ">=" | "<" | "<=", left: RuntimeValue, right: RuntimeValue, trace: readonly string[]): Evaluation {
-  if (typeof left !== "number" || typeof right !== "number") return err("comparison requires numbers", trace);
+  if (!isDimensionValue(left) || !isDimensionValue(right)) return err("comparison requires numbers", trace);
+  if (typeof left !== "number" || typeof right !== "number") return defer(trace);
   return ok(op === ">" ? left > right : op === ">=" ? left >= right : op === "<" ? left < right : left <= right, trace);
 }
 
 function evaluateArithmetic(op: string, left: RuntimeValue, right: RuntimeValue, trace: readonly string[]): Evaluation {
-  if (typeof left !== "number" || typeof right !== "number") return err("arithmetic requires numbers", trace);
+  if (!isDimensionValue(left) || !isDimensionValue(right)) return err("arithmetic requires numbers", trace);
   return ok(arithmetic(op, left, right), trace);
 }
 
@@ -385,12 +389,21 @@ function callEager(name: string, values: readonly RuntimeValue[], context: Typed
   if (shapeResult) return shapeResult;
   const numericResult = callNumericOperation(name, values, trace);
   if (numericResult) return numericResult;
+  if (name === "item") return item(values[0], values[1], trace);
   if ((name === "all_equal" || name === "allEqual") && list(values[0])) {
     const collection = values[0];
     return ok(collection.every((value) => same(value, collection[0])), trace);
   }
   if (name === "apply" && tensor(values[0])) return context.applySubflow ? context.applySubflow(values[0], [...trace, "apply"]) : defer(trace);
   return err(`invalid arguments for '${name}'`, trace);
+}
+
+function item(value: RuntimeValue, index: RuntimeValue, trace: readonly string[]): Evaluation {
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0) return err("item index must be a non-negative integer", trace);
+  if (isDimensionValue(value)) return ok(value, trace);
+  if (!list(value)) return err("item requires a dimension or list", trace);
+  if (index >= value.length) return err("item index out of range", trace);
+  return isDimensionValue(value[index]) ? ok(value[index], trace) : err("item list must contain dimensions", trace);
 }
 
 function callInput(name: "input" | "inputs", values: readonly RuntimeValue[], context: TypedEvalContext, trace: readonly string[]): Evaluation {
@@ -419,19 +432,16 @@ function callShapeOperation(name: string, values: readonly RuntimeValue[], trace
   if (name !== "remove" && name !== "replace" && name !== "splice") return undefined;
   if (position === undefined) return err("axis out of range", trace);
   if (name === "remove") return ok(shape.filter((_, index) => index !== position), trace);
-  if (name === "replace") return ok(shape.map((value, index) => index === position ? values[2] : value), trace);
+  if (name === "replace" && isDimensionValue(values[2])) return ok(shape.map((value, index) => index === position ? values[2] : value), trace);
   return list(values[2]) ? ok([...shape.slice(0, position), ...values[2], ...shape.slice(position)], trace) : undefined;
 }
 
 function callNumericOperation(name: string, values: readonly RuntimeValue[], trace: readonly string[]): Evaluation | undefined {
-  if ((name === "sum" || name === "product") && list(values[0]) && values[0].every((value) => typeof value === "number")) {
-    const numbers = values[0] as readonly number[];
-    return ok(numbers.reduce((left, right) => name === "sum" ? left + right : left * right, name === "sum" ? 0 : 1), trace);
+  if ((name === "sum" || name === "product") && list(values[0]) && values[0].every(isDimensionValue)) {
+    return ok(dimensionOperation(name === "sum" ? "add" : "mul", values[0] as readonly DimensionValue[]), trace);
   }
-  if (["floor", "ceil", "abs", "min", "max"].includes(name) && values.every((value) => typeof value === "number")) {
-    const numbers = values as readonly number[];
-    const value = name === "floor" ? Math.floor(numbers[0]) : name === "ceil" ? Math.ceil(numbers[0]) : name === "abs" ? Math.abs(numbers[0]) : name === "min" ? Math.min(...numbers) : Math.max(...numbers);
-    return ok(value, trace);
+  if (["floor", "ceil", "abs", "min", "max"].includes(name) && values.every(isDimensionValue)) {
+    return ok(dimensionOperation(name as "floor" | "ceil" | "abs" | "min" | "max", values as readonly DimensionValue[]), trace);
   }
   if (name === "is_integer" && typeof values[0] === "number") return ok(Number.isInteger(values[0]), trace);
   if (name === "between" && values.every((value) => typeof value === "number")) return ok((values[0] as number) >= (values[1] as number) && (values[0] as number) <= (values[2] as number), trace);
@@ -450,15 +460,15 @@ function bind<K, V>(scope: ReadonlyMap<K, V>, key: K, value: V): Map<K, V> {
 
 function evaluateWildcardProduct(context: TypedEvalContext, trace: readonly string[]): Evaluation {
   const dimensions = context.capturedDimensions;
-  return dimensions ? ok(dimensions.reduce((product, dimension) => product * dimension, 1), trace) : defer(trace);
+  return dimensions ? ok(dimensionOperation("mul", dimensions), trace) : defer(trace);
 }
 
-function lookupSymbol(symbols: TypedEvalContext["symbols"], name: string): number | undefined {
+function lookupSymbol(symbols: TypedEvalContext["symbols"], name: string): DimensionValue | undefined {
   if (!symbols) return undefined;
   return isSymbolMap(symbols) ? symbols.get(name) : symbols[name];
 }
 
-function isSymbolMap(symbols: NonNullable<TypedEvalContext["symbols"]>): symbols is ReadonlyMap<string, number> {
+function isSymbolMap(symbols: NonNullable<TypedEvalContext["symbols"]>): symbols is ReadonlyMap<string, DimensionValue> {
   return "get" in symbols && typeof symbols.get === "function";
 }
 
@@ -487,7 +497,7 @@ function index(axis: number, rank: number, allowEnd = false): number | undefined
   return normalized >= 0 && normalized < (allowEnd ? rank + 1 : rank) ? normalized : undefined;
 }
 
-function at(shape: readonly number[], axis: number, trace: readonly string[]): Evaluation {
+function at(shape: readonly DimensionValue[], axis: number, trace: readonly string[]): Evaluation {
   const position = index(axis, shape.length);
   return position === undefined ? err("axis out of range", trace) : ok(shape[position], trace);
 }
@@ -497,12 +507,16 @@ function normalizeAxis(rawAxis: number, rank: number, trace: readonly string[]):
   return normalized === undefined ? err("axis out of range", trace) : ok(normalized, trace);
 }
 
-function arithmetic(op: string, left: number, right: number): number {
-  return op === "+" ? left + right : op === "-" ? left - right : op === "*" ? left * right : op === "/" ? left / right : op === "//" ? Math.floor(left / right) : left % right;
+function arithmetic(op: string, left: DimensionValue, right: DimensionValue): DimensionValue {
+  return dimensionOperation(op === "+" ? "add" : op === "-" ? "sub" : op === "*" ? "mul" : op === "/" ? "div" : op === "//" ? "floor_div" : "mod", [left, right]);
 }
 
 function isComparisonOperator(op: string): op is ">" | ">=" | "<" | "<=" {
   return op === ">" || op === ">=" || op === "<" || op === "<=";
 }
 
-function same(left: RuntimeValue, right: RuntimeValue): boolean { return JSON.stringify(left) === JSON.stringify(right); }
+function same(left: RuntimeValue, right: RuntimeValue): boolean {
+  if (isDimensionValue(left) && isDimensionValue(right)) return equalDimensions(left, right);
+  if (list(left) && list(right)) return left.length === right.length && left.every((value, index) => same(value, right[index]));
+  return left === right;
+}
