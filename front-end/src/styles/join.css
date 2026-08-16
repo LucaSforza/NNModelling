@@ -26,7 +26,6 @@
   height: 6px;
   background-color: #333;
   border-radius: 3px;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .node-wrapper.horizontal {
@@ -40,7 +39,6 @@
 
 .node-wrapper.horizontal .join-line {
   width: 6px;
-  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .node-wrapper.horizontal .join-label {

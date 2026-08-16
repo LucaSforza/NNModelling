@@ -13,11 +13,15 @@ import {
   shouldIncludePngElement,
 } from "../pngExport";
 
-function elementWithClasses(...classes: string[]) {
+function elementWithClasses(
+  classes: string[] = [],
+  attributes: Record<string, string> = {},
+) {
   return {
     classList: {
       contains: (className: string) => classes.includes(className),
     },
+    getAttribute: (name: string) => attributes[name] ?? null,
   };
 }
 
@@ -27,15 +31,25 @@ describe("PNG export", () => {
     "svelte-flow__controls",
     "svelte-flow__attribution",
   ])("excludes the %s UI element", (className) => {
-    expect(shouldIncludePngElement(elementWithClasses(className))).toBe(false);
+    expect(shouldIncludePngElement(elementWithClasses([className]))).toBe(false);
   });
 
   it("keeps diagram content in the export", () => {
-    expect(shouldIncludePngElement(elementWithClasses("svelte-flow__node"))).toBe(true);
+    expect(shouldIncludePngElement(elementWithClasses(["svelte-flow__node"]))).toBe(true);
   });
 
   it("keeps nodes without a class list in the export", () => {
     expect(shouldIncludePngElement({})).toBe(true);
+  });
+
+  it("excludes editable-edge controls while retaining the routed SVG path", () => {
+    expect(shouldIncludePngElement(elementWithClasses(
+      ["editable-edge-controls"],
+      { "data-png-exclude": "true" },
+    ))).toBe(false);
+    expect(shouldIncludePngElement(elementWithClasses(["svelte-flow__edge-interaction"]))).toBe(false);
+    expect(shouldIncludePngElement(elementWithClasses(["editable-edge-hit-target"]))).toBe(false);
+    expect(shouldIncludePngElement(elementWithClasses(["editable-edge-path"]))).toBe(true);
   });
 
   it("converts the CSS edge stroke into inline SVG styles", () => {

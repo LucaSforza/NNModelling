@@ -60,6 +60,28 @@ describe("DiagramCore graph-change subscription", () => {
     expect(calls).toBe(1);
   });
 
+  it("notifies once for an accepted route update and never for route no-ops", () => {
+    const diagram = new Diagram();
+    const linear = getLinearStereotype(diagram);
+    diagram.addModule(linear, 100, 100);
+    diagram.addModule(linear, 200, 200);
+    const [source, target] = diagram.nodes.filter((node) => !node.data.isInput);
+    const edge = diagram.addEdge(source.id, target.id);
+
+    let calls = 0;
+    diagram.onGraphChanged(() => calls++);
+    const undoLength = (diagram as any)._undoStack.length;
+
+    expect(diagram.updateEdgeRoute(edge.id, [{ x: 20, y: 40 }])).toBe(true);
+    expect(calls).toBe(1);
+    expect((diagram as any)._undoStack).toHaveLength(undoLength + 1);
+
+    expect(diagram.updateEdgeRoute(edge.id, [{ x: 20, y: 40 }])).toBe(false);
+    expect(diagram.updateEdgeRoute("unknown", [{ x: 20, y: 40 }])).toBe(false);
+    expect(calls).toBe(1);
+    expect((diagram as any)._undoStack).toHaveLength(undoLength + 1);
+  });
+
   it("does not notify when an RPC connection is rejected", () => {
     const diagram = new Diagram();
     let calls = 0;

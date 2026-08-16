@@ -20,6 +20,19 @@ export type { LayoutDirection };
 // ── Position ────────────────────────────────────
 export interface Position { x: number; y: number; }
 
+/** A finite bend position stored in an edge's immediate containment scope. */
+export interface EdgeRoutePoint {
+  x: number;
+  y: number;
+}
+
+/** Persisted route metadata carried by editable Svelte Flow edges. */
+export interface EdgeRouteData {
+  route: {
+    points: EdgeRoutePoint[];
+  };
+}
+
 // ── Node Configuration ──────────────────────────
 export interface NodeConfig {
   name?: string;
