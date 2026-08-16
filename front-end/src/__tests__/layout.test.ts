@@ -128,6 +128,28 @@ describe("computeAutoLayout", () => {
     );
   });
 
+  it("orients join geometry from its live input count instead of stale measurements", () => {
+    const join = layoutNode("join", {
+      type: "join",
+      width: 164,
+      height: 46,
+      measured: { width: 164, height: 46 },
+      data: { inputsCount: 3 },
+    });
+
+    const vertical = byId(computeAutoLayout([join], [], "vertical"), "join");
+    const horizontal = byId(computeAutoLayout([join], [], "horizontal"), "join");
+
+    expect({ width: vertical.width, height: vertical.height }).toEqual({
+      width: 194,
+      height: AUTO_LAYOUT_GEOMETRY.joinCrossSize,
+    });
+    expect({ width: horizontal.width, height: horizontal.height }).toEqual({
+      width: AUTO_LAYOUT_GEOMETRY.joinCrossSize,
+      height: 194,
+    });
+  });
+
   it("keeps fork, join, and skip-edge semantics while separating both directions", () => {
     const nodes = [
       layoutNode("fork", { width: 100, height: 60 }),

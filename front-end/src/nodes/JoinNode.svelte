@@ -12,13 +12,20 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 -->
 
 <script lang="ts">
-  import { Handle, Position, useSvelteFlow, type NodeProps } from "@xyflow/svelte";
-  import { getContext } from "svelte";
+  import {
+    Handle,
+    Position,
+    useSvelteFlow,
+    useUpdateNodeInternals,
+    type NodeProps,
+  } from "@xyflow/svelte";
+  import { getContext, tick } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
 
   let { id, data, selected, isConnectable }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
+  const updateNodeInternals = useUpdateNodeInternals();
   
   // Usiamo l'API nativa per aggiornare i dati del nodo senza impazzire con classi esterne
   const { updateNodeData } = useSvelteFlow();
@@ -33,6 +40,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let inputHandleIds = $derived(
     Array.from({ length: inputsCount }, (_, index) => `in-${index}`),
   );
+
+  // Svelte Flow caches handle coordinates. Refresh them after the directional
+  // markup or dynamic input set has reached the DOM.
+  $effect(() => {
+    void isHorizontal;
+    void inputsCount;
+    void tick().then(() => updateNodeInternals(id));
+  });
 
   let outputShape = $derived.by(() => {
     const ann = diagram?.typeResult?.annotations.get(id);

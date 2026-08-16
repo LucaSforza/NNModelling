@@ -43,7 +43,7 @@ export const AUTO_LAYOUT_GEOMETRY = {
   defaultNodeHeight: 80,
   inputNodeWidth: 30,
   inputNodeHeight: 30,
-  defaultJoinHeight: 80,
+  joinCrossSize: 46,
   defaultExpandedSubflowWidth: 400,
   defaultExpandedSubflowHeight: 300,
 } as const;
@@ -74,7 +74,7 @@ function finitePositive(value: unknown): number | undefined {
     : undefined;
 }
 
-function fallbackNodeSize(node: Node): NodeSize {
+function fallbackNodeSize(node: Node, direction: LayoutDirection): NodeSize {
   if (node.type === "subflow") {
     return {
       width: AUTO_LAYOUT_GEOMETRY.defaultExpandedSubflowWidth,
@@ -85,10 +85,10 @@ function fallbackNodeSize(node: Node): NodeSize {
   if (node.type === "join") {
     const rawInputsCount = finitePositive(node.data?.inputsCount);
     const inputsCount = Math.max(2, Math.floor(rawInputsCount ?? 2));
-    return {
-      width: Math.max(164, 104 + inputsCount * 30),
-      height: AUTO_LAYOUT_GEOMETRY.defaultJoinHeight,
-    };
+    const inputSpan = Math.max(164, 104 + inputsCount * 30);
+    return direction === "horizontal"
+      ? { width: AUTO_LAYOUT_GEOMETRY.joinCrossSize, height: inputSpan }
+      : { width: inputSpan, height: AUTO_LAYOUT_GEOMETRY.joinCrossSize };
   }
 
   if (node.data?.isInput === true) {
@@ -104,8 +104,15 @@ function fallbackNodeSize(node: Node): NodeSize {
   };
 }
 
-function resolveNodeSize(node: Node, calculatedSubflows: ReadonlySet<string>): NodeSize {
-  const fallback = fallbackNodeSize(node);
+function resolveNodeSize(
+  node: Node,
+  calculatedSubflows: ReadonlySet<string>,
+  direction: LayoutDirection,
+): NodeSize {
+  const fallback = fallbackNodeSize(node, direction);
+  // Join dimensions are directional and depend on the live input count. A
+  // measurement from the previous orientation is necessarily stale.
+  if (node.type === "join") return fallback;
   const explicitFirst = node.type === "subflow" && (
     calculatedSubflows.has(node.id) || node.data?.isCollapsed === true
   );
@@ -286,7 +293,7 @@ export function computeAutoLayout(
       const sizes = new Map<string, NodeSize>();
       for (const childId of [...childIds].sort()) {
         const child = workingById.get(childId)!;
-        const size = resolveNodeSize(child, calculatedSubflows);
+        const size = resolveNodeSize(child, calculatedSubflows, direction);
         sizes.set(childId, size);
         graph.setNode(childId, { width: size.width, height: size.height });
       }
@@ -339,6 +346,10 @@ export function computeAutoLayout(
         workingById.set(placement.id, {
           ...child,
           position: { x: placement.x, y: placement.y },
+          ...(child.type === "join" && {
+            width: placement.width,
+            height: placement.height,
+          }),
         } as Node);
       }
     }
