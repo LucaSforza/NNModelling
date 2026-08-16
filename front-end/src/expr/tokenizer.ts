@@ -1,158 +1,50 @@
-/**
- * @file Tokenizer for the expression language.
- *
- * Converts a source string into a sequence of tokens.
- * Handles $-prefixed identifiers and $* as single tokens.
- */
+import { ParseError, type Token, type TokenKind } from "./types";
 
-import { ParseError } from "./types";
-import type { Token, TokenKind } from "./types";
+const SINGLE_TOKENS: Readonly<Record<string, TokenKind>> = { "+": "PLUS", "-": "MINUS", "*": "STAR", "/": "SLASH", "%": "PERCENT", "(": "LPAREN", ")": "RPAREN", "[": "LBRACKET", "]": "RBRACKET", ",": "COMMA", "=": "EQUAL" };
 
-/**
- * Tokenize an expression source string.
- *
- * Grammar:
- *   NUMBER       → \d+
- *   IDENTIFIER   → [a-zA-Z_][a-zA-Z0-9_]*
- *   DOLLAR_IDENT → \$[a-zA-Z_][a-zA-Z0-9_]*
- *   DOLLAR_STAR  → \$\*
- */
 export function tokenize(source: string): Token[] {
   const tokens: Token[] = [];
-  let i = 0;
-
-  // Sentinel: when we've consumed everything, the loop ends
-  while (i < source.length) {
-    const ch = source[i];
-
-    // ── Whitespace ──────────────────────────────────────────
-    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
-      i++;
-      continue;
-    }
-
-    // ── Single-char tokens ──────────────────────────────────
-    if (ch === "+") {
-      tokens.push({ kind: "PLUS", value: "+", pos: i });
-      i++;
-      continue;
-    }
-    if (ch === "-") {
-      tokens.push({ kind: "MINUS", value: "-", pos: i });
-      i++;
-      continue;
-    }
-    if (ch === "*") {
-      // Check for $* — but that's handled below in the $ branch.
-      // Bare * is not valid in the grammar, but we tokenize it anyway
-      // and let the parser reject it.
-      tokens.push({ kind: "STAR", value: "*", pos: i });
-      i++;
-      continue;
-    }
-    if (ch === "/") {
-      // Check for //
-      if (i + 1 < source.length && source[i + 1] === "/") {
-        tokens.push({ kind: "FLOOR_DIV", value: "//", pos: i });
-        i += 2;
-      } else {
-        tokens.push({ kind: "SLASH", value: "/", pos: i });
-        i++;
-      }
-      continue;
-    }
-    if (ch === "%") {
-      tokens.push({ kind: "PERCENT", value: "%", pos: i });
-      i++;
-      continue;
-    }
-    if (ch === "(") {
-      tokens.push({ kind: "LPAREN", value: "(", pos: i });
-      i++;
-      continue;
-    }
-    if (ch === ")") {
-      tokens.push({ kind: "RPAREN", value: ")", pos: i });
-      i++;
-      continue;
-    }
-    if (ch === ",") {
-      tokens.push({ kind: "COMMA", value: ",", pos: i });
-      i++;
-      continue;
-    }
-
-    // ── Dollar-prefixed tokens ──────────────────────────────
-    if (ch === "$") {
-      // Check for $* (DOLLAR_STAR)
-      if (i + 1 < source.length && source[i + 1] === "*") {
-        tokens.push({ kind: "DOLLAR_STAR", value: "$*", pos: i });
-        i += 2;
-        continue;
-      }
-
-      // $ followed by identifier → DOLLAR_IDENT
-      if (i + 1 < source.length && isIdentStart(source[i + 1])) {
-        const start = i;
-        i++; // skip $
-        while (i < source.length && isIdentChar(source[i])) {
-          i++;
-        }
-        const name = source.slice(start + 1, i);
-        tokens.push({ kind: "DOLLAR_IDENT", value: name, pos: start });
-        continue;
-      }
-
-      // Lone $ → error
-      throw new ParseError("Unexpected '$' — expected '$*' or '$IDENTIFIER'", i);
-    }
-
-    // ── Number ──────────────────────────────────────────────
-    if (isDigit(ch)) {
-      const start = i;
-      while (i < source.length && isDigit(source[i])) {
-        i++;
-      }
-      // Optional decimal part
-      if (i < source.length && source[i] === ".") {
-        i++;
-        while (i < source.length && isDigit(source[i])) {
-          i++;
-        }
-      }
-      tokens.push({ kind: "NUMBER", value: source.slice(start, i), pos: start });
-      continue;
-    }
-
-    // ── Identifier (without $) ──────────────────────────────
-    if (isIdentStart(ch)) {
-      const start = i;
-      while (i < source.length && isIdentChar(source[i])) {
-        i++;
-      }
-      tokens.push({
-        kind: "IDENTIFIER",
-        value: source.slice(start, i),
-        pos: start,
-      });
-      continue;
-    }
-
-    // ── Unknown character ───────────────────────────────────
-    throw new ParseError(`Unexpected character '${ch}'`, i);
+  let index = 0;
+  while (index < source.length) {
+    const start = index;
+    const character = source[index];
+    if (/\s/.test(character)) { index++; continue; }
+    if (source.startsWith("=>", index)) { tokens.push(token("ARROW", "=>", index)); index += 2; continue; }
+    if (source.startsWith("//", index)) { tokens.push(token("FLOOR_DIV", "//", index)); index += 2; continue; }
+    const comparison = ["==", "!=", ">=", "<="].find((operator) => source.startsWith(operator, index));
+    if (comparison) { tokens.push(token("OP", comparison, index)); index += comparison.length; continue; }
+    if (character === ">" || character === "<") { tokens.push(token("OP", character, index)); index++; continue; }
+    if (SINGLE_TOKENS[character]) { tokens.push(token(SINGLE_TOKENS[character], character, index)); index++; continue; }
+    if (character === "$") { index = readDollar(source, index, tokens); continue; }
+    if (character === '"' || character === "'") { index = readString(source, index, tokens); continue; }
+    if (/\d/.test(character)) { index = readNumber(source, index, tokens); continue; }
+    if (/[A-Za-z_]/.test(character)) { index = readIdentifier(source, index, tokens); continue; }
+    throw new ParseError(`Unexpected character '${character}'`, start);
   }
-
   return tokens;
 }
 
-function isDigit(ch: string): boolean {
-  return ch >= "0" && ch <= "9";
+function token(kind: TokenKind, value: string, pos: number): Token { return { kind, value, pos }; }
+function readDollar(source: string, index: number, tokens: Token[]): number {
+  if (source[index + 1] === "*") { tokens.push(token("DOLLAR_STAR", "$*", index)); return index + 2; }
+  if (!/[A-Za-z_]/.test(source[index + 1] ?? "")) throw new ParseError("Unexpected '$'", index);
+  const start = index++;
+  while (/[A-Za-z0-9_]/.test(source[index] ?? "")) index++;
+  tokens.push(token("DOLLAR_IDENT", source.slice(start + 1, index), start));
+  return index;
 }
-
-function isIdentStart(ch: string): boolean {
-  return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_";
+function readString(source: string, index: number, tokens: Token[]): number {
+  const start = index; const quote = source[index++]; let value = "";
+  while (index < source.length && source[index] !== quote) { if (source[index] === "\\" && index + 1 < source.length) index++; value += source[index++]; }
+  if (source[index] !== quote) throw new ParseError("Unterminated string", start);
+  tokens.push(token("STRING", value, start)); return index + 1;
 }
-
-function isIdentChar(ch: string): boolean {
-  return isIdentStart(ch) || isDigit(ch);
+function readNumber(source: string, index: number, tokens: Token[]): number {
+  const start = index; while (/\d/.test(source[index] ?? "")) index++;
+  if (source[index] === ".") { index++; while (/\d/.test(source[index] ?? "")) index++; }
+  tokens.push(token("NUMBER", source.slice(start, index), start)); return index;
+}
+function readIdentifier(source: string, index: number, tokens: Token[]): number {
+  const start = index; while (/[A-Za-z0-9_.]/.test(source[index] ?? "")) index++;
+  tokens.push(token("IDENTIFIER", source.slice(start, index), start)); return index;
 }

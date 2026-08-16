@@ -13,6 +13,7 @@ import { evaluate } from "./evaluator";
 import { ParseError } from "./types";
 
 export type { ExprNode, EvalContext, BinaryOp, Token, TokenKind } from "./types";
+export type { CompiledExpression, Evaluation, ExpressionKind, ExpressionDiagnostic, RuntimeValue, TensorValue } from "./types";
 export { ParseError };
 
 // ── Parsing with cache ──────────────────────────────────────────────────────
@@ -37,3 +38,5 @@ export function parseExpr(source: string): ReturnType<typeof parse> {
 }
 
 export { evaluate };
+export { compileExpression, evaluateCompiled } from "./typed";
+export type { TypedEvalContext } from "./typed";

@@ -83,6 +83,12 @@ export function evaluate(
           return Math.floor(left / right);
         case "%":
           return left % right;
+        case "==": return left === right ? 1 : 0;
+        case "!=": return left !== right ? 1 : 0;
+        case ">": return left > right ? 1 : 0;
+        case ">=": return left >= right ? 1 : 0;
+        case "<": return left < right ? 1 : 0;
+        case "<=": return left <= right ? 1 : 0;
         default:
           return undefined;
       }

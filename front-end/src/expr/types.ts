@@ -1,77 +1,35 @@
-/**
- * @file Type definitions for the expression evaluator.
- *
- * The expression language is a small arithmetic language used to declare
- * computed tensor dimensions in stereotype type signatures.
- */
-
 import type { ShapeDimension } from "../conversion/tensortypes";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tokens
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type TokenKind =
-  | "NUMBER"
-  | "IDENTIFIER"
-  | "DOLLAR_IDENT"
-  | "DOLLAR_STAR"
-  | "PLUS"
-  | "MINUS"
-  | "STAR"
-  | "SLASH"
-  | "FLOOR_DIV"
-  | "PERCENT"
-  | "LPAREN"
-  | "RPAREN"
-  | "COMMA";
+  | "NUMBER" | "STRING" | "IDENTIFIER" | "DOLLAR_IDENT" | "DOLLAR_STAR"
+  | "PLUS" | "MINUS" | "STAR" | "SLASH" | "FLOOR_DIV" | "PERCENT"
+  | "LPAREN" | "RPAREN" | "LBRACKET" | "RBRACKET" | "COMMA" | "EQUAL"
+  | "ARROW" | "OP";
 
-export interface Token {
-  kind: TokenKind;
-  value: string;
-  pos: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AST
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type BinaryOp = "+" | "-" | "*" | "/" | "//" | "%";
-
+export interface Token { readonly kind: TokenKind; readonly value: string; readonly pos: number; }
+export type BinaryOp = "+" | "-" | "*" | "/" | "//" | "%" | "==" | "!=" | ">" | ">=" | "<" | "<=" | "and" | "or";
 export type ExprNode =
-  | { kind: "number"; value: number }
-  | { kind: "variable"; name: string; isSymbolic: boolean }
-  | { kind: "wildcard_product" }
-  | { kind: "binary"; op: BinaryOp; left: ExprNode; right: ExprNode }
-  | { kind: "unary"; op: "-"; operand: ExprNode }
-  | { kind: "call"; name: string; args: ExprNode[] };
+  | { readonly kind: "number"; readonly value: number }
+  | { readonly kind: "string"; readonly value: string }
+  | { readonly kind: "boolean"; readonly value: boolean }
+  | { readonly kind: "variable"; readonly name: string; readonly isSymbolic: boolean }
+  | { readonly kind: "wildcard_product" }
+  | { readonly kind: "list"; readonly items: readonly ExprNode[] }
+  | { readonly kind: "let"; readonly name: string; readonly value: ExprNode; readonly body: ExprNode }
+  | { readonly kind: "lambda"; readonly parameter: string; readonly body: ExprNode }
+  | { readonly kind: "binary"; readonly op: BinaryOp; readonly left: ExprNode; readonly right: ExprNode }
+  | { readonly kind: "unary"; readonly op: "-" | "not"; readonly operand: ExprNode }
+  | { readonly kind: "call"; readonly name: string; readonly args: readonly ExprNode[] };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Evaluation context
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface EvalContext {
-  /** Symbolic environment from pattern matching (B, H, W, ...). */
-  env: Map<string, ShapeDimension>;
-  /** Wildcard-captured dimensions from pattern matching. */
-  captured: ShapeDimension[];
-  /** Node parameters to resolve bare identifiers. */
-  params: Record<string, unknown>;
-  /** Optional: resolve a parameter name to its numeric value.
-   *  If not provided, falls back to reading from `params` directly. */
-  resolveParam?: (name: string) => number | undefined;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
-export class ParseError extends Error {
-  constructor(
-    message: string,
-    public position: number,
-  ) {
-    super(message);
-    this.name = "ParseError";
-  }
-}
+export type ExpressionKind = "dimension" | "shape" | "constraint" | "dtype";
+export type RuntimeValue = number | boolean | string | null | readonly RuntimeValue[] | TensorValue | LambdaValue;
+export interface TensorValue { readonly shape: readonly number[]; readonly dtype: string; }
+export interface LambdaValue { readonly parameter: string; readonly body: ExprNode; readonly scope: ReadonlyMap<string, RuntimeValue>; }
+export type Evaluation =
+  | { readonly kind: "value"; readonly value: RuntimeValue; readonly trace: readonly string[] }
+  | { readonly kind: "deferred"; readonly trace: readonly string[] }
+  | { readonly kind: "error"; readonly message: string; readonly trace: readonly string[] };
+export interface CompiledExpression { readonly source: string; readonly expected: ExpressionKind; readonly ast: ExprNode; }
+export interface ExpressionDiagnostic { readonly message: string; readonly start: number; readonly end: number; }
+export interface EvalContext { env: Map<string, ShapeDimension>; captured: ShapeDimension[]; params: Record<string, unknown>; resolveParam?: (name: string) => number | undefined; }
+export class ParseError extends Error { constructor(message: string, public readonly position: number) { super(message); this.name = "ParseError"; } }
