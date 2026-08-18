@@ -1,67 +1,90 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-16
 ---
 
 # Tensor type-system contract
 
-The editor performs constraint-based shape and dtype inference before Python
-execution. Stereotype JSON declares contracts; `TypeEngine` interprets generic
-semantics and must not branch on stereotype names.
+The editor performs shape and dtype inference before conversion. Stereotype JSON
+is the source of tensor contracts; the generic engine evaluates compiled v2
+signatures and must not branch on an ordinary stereotype name, category, Join
+or Subflow action.
 
-## Type model
+## V2 signature
 
-A `TensorType` is an ordered shape plus an extensible string dtype. Dimension
-patterns support:
+Every declared signature has `version: 2`, ordered `inputs`, one `output`, a
+required `to_dtype`, and optional `from_dtype` and `constraints`.
 
-- `const`: literal integer;
-- `symbolic`: named unification variable;
-- `param_ref`: node parameter value;
-- `wildcard`: zero or more dimensions;
-- `computed`: expression-derived value;
-- `param_spread`: tuple/list parameter expanded into dimensions.
+An `InputGroup` partitions the ordered incoming tensors. It declares `lower`,
+`upper` (`null` means unbounded), an optional diagnostic `label`, and one
+pattern used for every tensor in that group. Version 2 permits at most one
+variable-width group, which keeps allocation deterministic. The Join editor derives its minimum
+and maximum handle count from these bounds; imported out-of-range counts are
+reported rather than silently rewritten.
 
-`$` symbols participate in the propagated environment. `#` symbols are local
-to one stereotype inference and do not leak downstream. Keep `$B` for the
-shared batch dimension and use local symbols for internal sequence, channel or
-feature relationships unless a dimension is intentionally global.
+`ShapeDefinition` is one of:
 
-## Declarative behavior
+- `pattern`: resolves an ordinary dimension pattern;
+- `computed_shape`: evaluates a generic shape expression;
+- `einsum`: evaluates an equation read from its declared parameter.
 
-`type_signature.kind` is `module`, `join` or `subflow`.
+`einsum` is the intentional exception: the dedicated equation evaluator is
+selected exclusively by `output.kind === "einsum"`. It is never selected by a
+stereotype name or an action field, and ellipsis is unsupported.
 
-- Modules match one input pattern and resolve one output pattern.
-- Joins match ordered input patterns and select generic actions such as
-  element-wise, concat, matmul or einsum.
-- Subflows select identity, recursive inference, repeat composition, or
-  infer-then-transform.
-- Computed dimensions use the expression language under `front-end/src/expr/`.
-- Dtype input/output contracts and advisories are declared in stereotype JSON.
+## Patterns, scope, and parameters
 
-Generic semantic primitives remain engine code: for example, JSON selects
-concat while the engine validates ranks and non-concatenated dimensions. This
-is data-selected behavior, not arbitrary code encoded in JSON.
+Pattern dimensions are `const`, `symbolic`, `param_ref`, `wildcard`, `computed`,
+and `param_spread`. A symbolic dimension always declares `scope: "global"` or
+`scope: "local"`; global bindings propagate through the graph while local
+bindings are limited to the current signature evaluation. A symbol name cannot
+be declared in both scopes in one signature.
 
-## Result contract
+`param_ref` and `param_spread` reference declared stereotype parameters by
+name. Parameter values are normalized and validated: malformed values are hard
+diagnostics, while compatible unresolved values can produce suggestions. A
+spread expands a list-valued parameter into dimensions; input spread matching is
+about arity unless a separate constraint declares value equality.
 
-`TypeResult` contains:
+An output-pattern wildcard replays the capture from the first occurrence of the
+first input group. Signatures that need another capture source use
+`computed_shape` instead.
 
-- `ok` and hard `errors`;
-- per-node input/output `annotations`;
-- non-blocking categorized `warnings`;
-- parameter `suggestions` derived from concrete incoming dimensions.
+## Expressions and validation
 
-Invalid parameter text is a hard error; a genuinely unset value may yield a
-suggestion. Downstream nodes blocked by a primary failure record `blockedBy`
-instead of emitting duplicated errors.
+Serialized expressions are human-readable DSL source strings, never AST JSON.
+The loader structurally validates every signature, verifies parameter and symbol
+references, then parses and type-checks expression source before the stereotype
+can be used. Compiled ASTs are immutable internal implementation details.
+
+The DSL has typed dimension, shape, constraint, and dtype contexts. It supports
+`param.name`, `$symbol`, `$*`, arithmetic and comparisons, shape/list helpers,
+collection primitives (`map`, `sum`, `all`), and generic subflow primitives
+`apply` and `iterate`. It is not JavaScript: no arbitrary property access,
+host calls, mutation, I/O, or evaluation of parameter text is allowed.
+
+Constraints are generic boolean expressions with an optional message, category,
+and `error`/`warning` severity. `from_dtype` validates incoming dtype as a
+warning; `to_dtype` explicitly computes the output dtype.
+
+## Evaluation result
+
+`TypeResult` provides hard errors, categorized warnings, node input/output
+annotations, and parameter suggestions. A primary failure blocks downstream
+inference using `blockedBy` rather than duplicating its diagnostic. Conversion
+is blocked by hard type errors.
 
 ## Extension rule
 
-A conventional new layer should require stereotype and test changes only. Add
-engine code only for a genuinely new generic dimension, join or subflow
-semantic. Cover parser/evaluator changes separately from type-engine behavior.
+Add a conventional tensor contract by changing its v2 stereotype and tests.
+Add engine code only for a new generic language primitive (dimension, shape,
+constraint, dtype, or expression operator), with schema/parser/evaluator tests.
+Do not add action fields, formula identifiers, category branches, or
+stereotype-name branches. The only allowed specialized shape evaluator is
+`EinsumShape`, selected solely by the output discriminant.
 
-Principal definitions are in `front-end/src/conversion/tensortypes.ts`; runtime
-logic is in `front-end/src/conversion/typeEngine.ts`. Public educational
-documentation is in `docs2/source/type_system.rst`.
+Principal definitions are in `front-end/src/type-system/model.ts`; schema
+compilation is in `front-end/src/type-system/schema.ts`; generic evaluation is
+in `front-end/src/type-system/signatureEvaluator.ts`. Public documentation is
+in `docs2/source/type_system.rst`.
