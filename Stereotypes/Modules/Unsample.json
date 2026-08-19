@@ -25,18 +25,61 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#C" },
-      { "kind": "symbolic", "name": "#H" },
-      { "kind": "symbolic", "name": "#W" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "symbolic",
+              "name": "C",
+              "scope": "local"
+            },
+            {
+              "kind": "symbolic",
+              "name": "H",
+              "scope": "local"
+            },
+            {
+              "kind": "symbolic",
+              "name": "W",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#C" },
-      { "kind": "computed", "expr": "$H * scale_factor" },
-      { "kind": "computed", "expr": "$W * scale_factor" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "symbolic",
+          "name": "C",
+          "scope": "local"
+        },
+        {
+          "kind": "computed",
+          "expr": "item(coalesce(param.size, floor($H * item(param.scale_factor, 0))), 0)"
+        },
+        {
+          "kind": "computed",
+          "expr": "item(coalesce(param.size, floor($W * item(param.scale_factor, 1))), 1)"
+        }
+      ]
+    },
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

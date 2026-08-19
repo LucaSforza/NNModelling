@@ -8,8 +8,29 @@
   },
   "params": {},
   "type_signature": {
-    "kind": "module",
-    "input": [{ "kind": "wildcard" }],
-    "output": [{ "kind": "wildcard" }]
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
+    ],
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "wildcard"
+        }
+      ]
+    },
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

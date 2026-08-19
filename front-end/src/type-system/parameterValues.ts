@@ -13,16 +13,17 @@ export function normalizeParameterValue(raw: unknown, declaredType: string): Nor
   }
 
   const types = declaredType.toLowerCase().split("|").map((type) => type.trim());
-  const attempts = types.map((type) => normalizeAs(raw, type));
+  const listElementType = types.some((type) => type === "float" || type === "number") ? "number" : "integer";
+  const attempts = types.map((type) => normalizeAs(raw, type, listElementType));
   return attempts.find((attempt) => attempt.status === "resolved")
     ?? { status: "invalid", raw, reason: `expected ${declaredType}` };
 }
 
-function normalizeAs(raw: unknown, type: string): NormalizedParameterValue {
+function normalizeAs(raw: unknown, type: string, listElementType: "integer" | "number"): NormalizedParameterValue {
   if (type === "int" || type === "integer") return normalizeInteger(raw);
   if (type === "float" || type === "number") return normalizeNumber(raw);
   if (type === "bool" || type === "boolean") return normalizeBoolean(raw);
-  if (type === "tuple" || type === "list" || type === "shape" || type === "int[]") return normalizeIntegerList(raw);
+  if (type === "tuple" || type === "list" || type === "shape" || type === "int[]") return normalizeNumberList(raw, listElementType);
   if (type === "str" || type === "string") return typeof raw === "string"
     ? { status: "resolved", raw, value: raw }
     : { status: "invalid", raw, reason: "expected a string" };
@@ -53,21 +54,21 @@ function normalizeBoolean(raw: unknown): NormalizedParameterValue {
   return { status: "invalid", raw, reason: "expected true or false" };
 }
 
-function normalizeIntegerList(raw: unknown): NormalizedParameterValue {
-  const items = Array.isArray(raw) ? raw : parseDelimitedIntegerList(raw);
-  if (items.length === 0) return { status: "invalid", raw, reason: "expected a non-empty integer list" };
+function normalizeNumberList(raw: unknown, elementType: "integer" | "number"): NormalizedParameterValue {
+  const items = Array.isArray(raw) ? raw : parseDelimitedList(raw);
+  if (items.length === 0) return { status: "invalid", raw, reason: `expected a non-empty ${elementType} list` };
   const values: number[] = [];
   for (const item of items) {
-    const normalized = normalizeInteger(item);
+    const normalized = elementType === "integer" ? normalizeInteger(item) : normalizeNumber(item);
     if (normalized.status !== "resolved" || typeof normalized.value !== "number") {
-      return { status: "invalid", raw, reason: "expected an integer list" };
+      return { status: "invalid", raw, reason: `expected a ${elementType} list` };
     }
     values.push(normalized.value);
   }
   return { status: "resolved", raw, value: values };
 }
 
-function parseDelimitedIntegerList(raw: unknown): unknown[] {
+function parseDelimitedList(raw: unknown): unknown[] {
   if (typeof raw !== "string") return [];
   const text = raw.trim();
   const delimiters = (text.startsWith("(") && text.endsWith(")")) || (text.startsWith("[") && text.endsWith("]"));

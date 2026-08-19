@@ -37,13 +37,62 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "dtype": { "input": "float32", "output": "float32" },
-    "input": [
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+          {
+            "kind": "symbolic",
+            "name": "B",
+            "scope": "global"
+          },
+          {
+            "kind": "param_ref",
+            "name": "num_features"
+          },
+          {
+            "kind": "symbolic",
+            "name": "H",
+            "scope": "local"
+          },
+          {
+            "kind": "symbolic",
+            "name": "W",
+            "scope": "local"
+          }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "wildcard" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+          {
+            "kind": "symbolic",
+            "name": "B",
+            "scope": "global"
+          },
+          {
+            "kind": "param_ref",
+            "name": "num_features"
+          },
+          {
+            "kind": "symbolic",
+            "name": "H",
+            "scope": "local"
+          },
+          {
+            "kind": "symbolic",
+            "name": "W",
+            "scope": "local"
+          }
+      ]
+    },
+    "from_dtype": "float32",
+    "to_dtype": "float32"
   }
 }

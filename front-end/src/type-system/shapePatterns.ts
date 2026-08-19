@@ -43,10 +43,14 @@ function resolvedParameters(params: Readonly<Record<string, NormalizedParameterV
 
 function spreadValue(name: string, parameters: Readonly<Record<string, NormalizedParameterValue>>, bindings: PatternBindings): readonly DimensionValue[] | undefined {
   const parameter = parameters[name];
-  if (parameter?.status === "resolved") return Array.isArray(parameter.value) ? parameter.value : undefined;
+  if (parameter?.status === "resolved") return Array.isArray(parameter.value) ? parameter.value : typeof parameter.value === "number" ? [parameter.value] : undefined;
   const bound = bindings.parameters.get(name);
   return Array.isArray(bound) ? bound : undefined;
 }
+
+const isConcreteDimension = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const validSpread = (value: unknown): value is readonly number[] => Array.isArray(value) && value.every(isConcreteDimension);
+const invalidDimensionMessage = (name: string) => `parameter '${name}' must be a positive safe integer`;
 
 function expressionOptions(parameters: Readonly<Record<string, NormalizedParameterValue>>, bindings: PatternBindings) {
   return { parameterNames: Object.keys(parameters), symbols: [...bindings.global.keys(), ...bindings.local.keys()] };
@@ -71,7 +75,9 @@ export function matchPattern(
   for (const spread of spreads) {
     const parameter = parameters[spread.name];
     if (parameter?.status === "invalid") diagnostics.push({ code: "parameter", parameter: spread.name, message: `parameter spread '${spread.name}' is invalid: ${parameter.reason}` });
-    if (parameter?.status === "resolved" && !Array.isArray(parameter.value)) diagnostics.push({ code: "parameter", parameter: spread.name, message: `parameter spread '${spread.name}' must be a list` });
+    if (parameter?.status === "resolved" && typeof parameter.value === "number" && !isConcreteDimension(parameter.value)) diagnostics.push({ code: "parameter", parameter: spread.name, message: invalidDimensionMessage(spread.name) });
+    if (parameter?.status === "resolved" && Array.isArray(parameter.value) && !validSpread(parameter.value)) diagnostics.push({ code: "parameter", parameter: spread.name, message: `parameter spread '${spread.name}' must contain positive safe integers` });
+    if (parameter?.status === "resolved" && !Array.isArray(parameter.value) && typeof parameter.value !== "number") diagnostics.push({ code: "parameter", parameter: spread.name, message: `parameter spread '${spread.name}' must be a number or list` });
   }
   if (diagnostics.length) return { ok: false, bindings: next, wildcard: [], diagnostics, suggestions };
   if (unresolvedSpreads.length > 1 || (unresolvedSpreads.length && wildcardIndex >= 0)) {
@@ -118,10 +124,12 @@ export function matchPattern(
       const parameter = parameters[dimension.name];
       const bound = next.parameters.get(dimension.name);
       if (parameter?.status === "invalid") diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter '${dimension.name}' is invalid: ${parameter.reason}` });
-      else if (parameter?.status === "resolved" && typeof parameter.value !== "number") diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter '${dimension.name}' must be a number` });
-      else if (parameter?.status === "resolved" && typeof parameter.value === "number" && !equalDimensions(parameter.value, actual)) diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter '${dimension.name}' is ${parameter.value}, got ${formatDimension(actual)}` });
+      else if (parameter?.status === "resolved") {
+        if (!isConcreteDimension(parameter.value)) diagnostics.push({ code: "parameter", parameter: dimension.name, message: invalidDimensionMessage(dimension.name) });
+        else if (!equalDimensions(parameter.value, actual)) diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter '${dimension.name}' is ${parameter.value}, got ${formatDimension(actual)}` });
+      }
       else if (bound !== undefined && !Array.isArray(bound) && !equalDimensions(bound as DimensionValue, actual)) diagnostics.push({ code: "parameter", parameter: dimension.name, message: `bound parameter '${dimension.name}' is ${formatDimension(bound as DimensionValue)}, got ${formatDimension(actual)}` });
-      else if (parameter?.status !== "resolved" && bound === undefined) {
+      else if (bound === undefined) {
         next.parameters.set(dimension.name, actual);
         if (typeof actual === "number") suggestions.push({ parameter: dimension.name, value: actual, message: `set '${dimension.name}' to ${actual}` });
       }
@@ -157,11 +165,24 @@ export function resolvePattern(
     } else if (dimension.kind === "param_ref") {
       const parameter = parameters[dimension.name];
       const bound = bindings.parameters.get(dimension.name);
-      const value = parameter?.status === "resolved" ? parameter.value : bound;
-      if (isDimensionValue(value)) shape.push(value); else diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter '${dimension.name}' is not a resolved number` });
+      if (parameter?.status === "invalid") diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter '${dimension.name}' is invalid: ${parameter.reason}` });
+      else if (parameter?.status === "resolved") {
+        if (isConcreteDimension(parameter.value)) shape.push(parameter.value);
+        else diagnostics.push({ code: "parameter", parameter: dimension.name, message: invalidDimensionMessage(dimension.name) });
+      } else if (isDimensionValue(bound)) shape.push(bound);
+      else diagnostics.push({ code: "deferred_parameter", parameter: dimension.name, message: `parameter '${dimension.name}' is unset` });
     } else if (dimension.kind === "param_spread") {
-      const value = spreadValue(dimension.name, parameters, bindings);
-      if (value) shape.push(...value); else diagnostics.push({ code: "deferred_spread", parameter: dimension.name, message: `parameter spread '${dimension.name}' has no concrete length` });
+      const parameter = parameters[dimension.name];
+      const bound = bindings.parameters.get(dimension.name);
+      if (parameter?.status === "invalid") diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter spread '${dimension.name}' is invalid: ${parameter.reason}` });
+      else if (parameter?.status === "resolved") {
+        if (validSpread(parameter.value)) shape.push(...parameter.value);
+        else if (isConcreteDimension(parameter.value)) shape.push(parameter.value);
+        else if (Array.isArray(parameter.value)) diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter spread '${dimension.name}' must contain positive safe integers` });
+        else if (typeof parameter.value === "number") diagnostics.push({ code: "parameter", parameter: dimension.name, message: invalidDimensionMessage(dimension.name) });
+        else diagnostics.push({ code: "parameter", parameter: dimension.name, message: `parameter spread '${dimension.name}' must be a number or list` });
+      } else if (Array.isArray(bound)) shape.push(...bound);
+      else diagnostics.push({ code: "deferred_spread", parameter: dimension.name, message: `parameter spread '${dimension.name}' has no concrete length` });
     } else {
       const compiled = compileExpression(dimension.expr, "dimension", expressionOptions(parameters, bindings));
       const evaluated = compiled.ok ? evaluateCompiled(compiled.value, { params: resolvedParameters(parameters), symbols: new Map([...bindings.global, ...bindings.local]), capturedDimensions: wildcard }) : undefined;

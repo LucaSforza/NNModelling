@@ -22,6 +22,11 @@ export function evaluateSignature(signature: CompiledTypeSignatureV2, inputs: re
   const state: PatternBindings = { global: new Map(bindings.global), local: new Map(bindings.local), parameters: new Map(bindings.parameters) };
   if (!allocation.ok) return result(false, state, diagnostics.concat({ code: "arity", message: allocation.message, location: "inputs", severity: "error" }), suggestions, false);
   const grouped: readonly (readonly TensorValue[])[] = allocation.groups.map((group) => group.inputs);
+  for (const group of allocation.groups) {
+    for (let index = 0; index < group.inputs.length; index += 1) {
+      if (!validShape(group.inputs[index].shape)) diagnostics.push({ code: "dimension", message: "tensor shape contains a non-positive, non-integer, or unsafe dimension", location: `inputs/${group.index}/${index}`, severity: "error" });
+    }
+  }
   let firstWildcard: readonly DimensionValue[] = [];
   let capturedFirstWildcard = false;
   for (const group of allocation.groups) {
@@ -40,6 +45,7 @@ export function evaluateSignature(signature: CompiledTypeSignatureV2, inputs: re
   }
   if (signature.from_dtype) validateInputDtype(signature.from_dtype, inputs, grouped, parameters, state, capabilities, diagnostics);
   const outputShape = resolveOutput(signature.output, inputs, grouped, parameters, state, firstWildcard, capabilities, diagnostics);
+  if (outputShape && !validShape(outputShape)) diagnostics.push({ code: "dimension", message: "output shape contains a non-positive, non-integer, or unsafe dimension", location: "output", severity: "error" });
   const dtype = evaluateDtype(signature.to_dtype, inputs, grouped, parameters, state, capabilities, "to_dtype", diagnostics);
   for (let index = 0; index < (signature.constraints ?? []).length; index += 1) {
     const constraint = signature.constraints![index];
@@ -90,4 +96,8 @@ function result(ok: boolean, bindings: PatternBindings, diagnostics: readonly Si
 }
 function compile(source: string, expected: "dimension" | "shape" | "constraint" | "dtype", parameters: Readonly<Record<string, NormalizedParameterValue>>, state: PatternBindings) {
   return compileExpression(source, expected, { parameterNames: Object.keys(parameters), symbols: [...state.global.keys(), ...state.local.keys()] });
+}
+
+function validShape(shape: readonly DimensionValue[]): boolean {
+  return shape.every((dimension) => typeof dimension !== "number" || Number.isSafeInteger(dimension) && dimension > 0);
 }

@@ -13,7 +13,8 @@
 
 // front-end/src/core/StereotypeCore.ts
 
-import type { TypeSignature, ShapeDimPattern, ShapePattern } from "../conversion/tensortypes";
+import { compileTypeSignature } from "../type-system/schema";
+import type { CompiledTypeSignatureV2 } from "../type-system/model";
 
 export interface ModuleParameter {
   type: string;
@@ -33,7 +34,7 @@ export interface StereotypeJson {
   taskType?: "classification" | "regression";
   view?: Partial<StereotypeView>;
   params?: Record<string, ModuleParameter>;
-  type_signature?: TypeSignature;
+  type_signature?: unknown;
 }
 
 export class StereotypeCore {
@@ -44,7 +45,7 @@ export class StereotypeCore {
   public readonly taskType: string;
   public readonly parameters: Record<string, ModuleParameter>;
   public readonly view: StereotypeView;
-  public readonly typeSignature?: TypeSignature;
+  public readonly typeSignature?: CompiledTypeSignatureV2;
   public readonly isJoin: boolean;
   public readonly isInput: boolean;
   public readonly isLoss: boolean;
@@ -81,7 +82,7 @@ export class StereotypeCore {
       height: view.height || 60,
     };
 
-    this.typeSignature = StereotypeCore.parseTypeSignature(data.type_signature);
+    this.typeSignature = StereotypeCore.compileTypeSignature(filePath, data.type_signature, Object.keys(this.parameters));
 
     // Category flags
     this.isJoin   = data.category === "Join"   || filePath.includes("/Joins/");
@@ -94,51 +95,33 @@ export class StereotypeCore {
   // Uses import.meta.glob — a Vite compile-time feature.
   // This method is only callable in the browser/Vite context.
   public static loadFromDirectory(): StereotypeCore[] {
-    const files = import.meta.glob('../../../Stereotypes/**/*.json', { eager: true }) as Record<string, any>;
+    const files = import.meta.glob('../../../Stereotypes/**/*.json', { eager: true }) as Record<string, unknown>;
     const loaded: StereotypeCore[] = [];
+    const failures: Error[] = [];
 
     for (const [path, rawData] of Object.entries(files)) {
-      const jsonData = rawData.default || rawData;
+      const jsonData = StereotypeCore.unwrapModule(rawData);
       try {
         loaded.push(new StereotypeCore(path, jsonData));
       } catch (e) {
-        console.error(`Error loading stereotype from ${path}:`, e);
+        failures.push(e instanceof Error ? e : new Error(`${path}: ${String(e)}`));
       }
     }
+
+    if (failures.length > 0) throw new AggregateError(failures, "Failed to load stereotype type signatures");
 
     return loaded.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // ── Type signature parsing ────────────────────────
-
-  /**
-   * Deep-clone and strip $ from symbolic names in the type signature.
-   * $B → { kind: 'symbolic', name: 'B' }
-   */
-  private static parseTypeSignature(raw: TypeSignature | undefined): TypeSignature | undefined {
-    if (!raw) return undefined;
-    // Distinguish join input (ShapePattern[]) from module input (ShapePattern):
-    // join input's first element is itself an array.
-    const joined = Array.isArray(raw.input[0]);
-    return {
-      kind: raw.kind,
-      input: joined
-        ? (raw.input as ShapePattern[]).map((pat) => pat.map((d) => StereotypeCore.stripDollar(d)))
-        : (raw.input as ShapePattern).map((d) => StereotypeCore.stripDollar(d)),
-      output: raw.output.map((d) => StereotypeCore.stripDollar(d)),
-      dtype: raw.dtype ? { ...raw.dtype } : undefined,
-      subflow: raw.subflow ? { ...raw.subflow } : undefined,
-      join: raw.join ? { ...raw.join } : undefined,
-      advisories: raw.advisories ? [...raw.advisories] : undefined,
-    };
+  private static compileTypeSignature(filePath: string, raw: unknown, parameterNames: Iterable<string>): CompiledTypeSignatureV2 | undefined {
+    if (raw === undefined) return undefined;
+    const compiled = compileTypeSignature(raw, { parameterNames });
+    if (compiled.ok) return compiled.value;
+    throw new Error(`${filePath}: ${compiled.errors.map(error => `${error.pointer || "/"}: ${error.message}`).join("; ")}`);
   }
 
-  private static stripDollar(dim: ShapeDimPattern): ShapeDimPattern {
-    if (dim.kind === "symbolic" && dim.name.startsWith("$")) {
-      return { ...dim, name: dim.name.slice(1) };
-    }
-    // Computed dims carry an expression string; the `$` inside it is not a
-    // symbolic name but tokenizer syntax ($H, $*, ...) and is left untouched.
-    return dim;
+  private static unwrapModule(raw: unknown): StereotypeJson {
+    if (raw && typeof raw === "object" && "default" in raw) return (raw as { default: StereotypeJson }).default;
+    return raw as StereotypeJson;
   }
 }

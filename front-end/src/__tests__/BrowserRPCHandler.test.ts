@@ -222,6 +222,27 @@ describe("BrowserRPCHandler", () => {
     });
   });
 
+  it("creates joins at their InputGroup lower bound and preserves RPC arity", () => {
+    const { handler, diagram, mockSend } = createHandler();
+
+    const dispatch = (id: string, params: Record<string, unknown>) => {
+      mockSend.mockClear();
+      (handler as any).handleMessage({
+        data: JSON.stringify({ id, method: "create_node", params }),
+      });
+      return JSON.parse(mockSend.mock.calls[0][0]);
+    };
+
+    const defaultJoin = dispatch("create-addition", { stereotype: "Addition" });
+    const savedJoin = dispatch("create-matmul", {
+      stereotype: "MatMul",
+      config: { inputsCount: 1 },
+    });
+
+    expect(diagram.getNodeById(defaultJoin.result.nodeId)?.data.inputsCount).toBe(2);
+    expect(diagram.getNodeById(savedJoin.result.nodeId)?.data.inputsCount).toBe(1);
+  });
+
   it("validates a Repeat subflow's internal Input without counting it as a second graph Input", () => {
     const { handler, diagram, mockSend } = createHandler();
     diagram.nodes = [

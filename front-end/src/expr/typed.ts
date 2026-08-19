@@ -61,7 +61,9 @@ const operators: Record<string, OperatorSignature> = {
   min: { min: 1, max: Number.MAX_SAFE_INTEGER, args: ["number"], result: "number" },
   max: { min: 1, max: Number.MAX_SAFE_INTEGER, args: ["number"], result: "number" },
   item: { min: 2, max: 2, args: ["any", "number"], result: "number" },
-  product: { min: 1, max: 1, args: ["list"], result: "number" },
+  product: { min: 1, max: 1, args: ["any"], result: "number" },
+  as_list: { min: 1, max: 1, args: ["any"], result: "shape" },
+  length: { min: 1, max: 1, args: ["list"], result: "number" },
   sum: { min: 1, max: 1, args: ["list"], result: "number" },
   slice: { min: 2, max: 3, args: ["shape", "number", "number"], result: "shape" },
   remove: { min: 2, max: 2, args: ["shape", "number"], result: "shape" },
@@ -197,6 +199,7 @@ function inferCall(node: CallNode, options: CompileOptions, bound: ReadonlyMap<s
   });
   if (node.name === "if") return unifyKinds(argumentKinds[1], argumentKinds[2]);
   if (node.name === "coalesce") return argumentKinds.reduce(unifyKinds);
+  if (node.name === "product" && !["number", "shape", "list", "any"].includes(argumentKinds[0])) throw new Error("product requires a dimension or list");
   return operator.result;
 }
 
@@ -389,6 +392,8 @@ function callEager(name: string, values: readonly RuntimeValue[], context: Typed
   if (shapeResult) return shapeResult;
   const numericResult = callNumericOperation(name, values, trace);
   if (numericResult) return numericResult;
+  if (name === "as_list") return asList(values[0], trace);
+  if (name === "length") return list(values[0]) ? ok(values[0].length, trace) : err("length requires a list", trace);
   if (name === "item") return item(values[0], values[1], trace);
   if ((name === "all_equal" || name === "allEqual") && list(values[0])) {
     const collection = values[0];
@@ -396,6 +401,12 @@ function callEager(name: string, values: readonly RuntimeValue[], context: Typed
   }
   if (name === "apply" && tensor(values[0])) return context.applySubflow ? context.applySubflow(values[0], [...trace, "apply"]) : defer(trace);
   return err(`invalid arguments for '${name}'`, trace);
+}
+
+function asList(value: RuntimeValue, trace: readonly string[]): Evaluation {
+  if (isDimensionValue(value)) return ok([value], trace);
+  if (list(value) && value.every(isDimensionValue)) return ok(value, trace);
+  return err("as_list requires a dimension or list", trace);
 }
 
 function item(value: RuntimeValue, index: RuntimeValue, trace: readonly string[]): Evaluation {
@@ -437,6 +448,7 @@ function callShapeOperation(name: string, values: readonly RuntimeValue[], trace
 }
 
 function callNumericOperation(name: string, values: readonly RuntimeValue[], trace: readonly string[]): Evaluation | undefined {
+  if (name === "product" && isDimensionValue(values[0])) return ok(values[0], trace);
   if ((name === "sum" || name === "product") && list(values[0]) && values[0].every(isDimensionValue)) {
     return ok(dimensionOperation(name === "sum" ? "add" : "mul", values[0] as readonly DimensionValue[]), trace);
   }

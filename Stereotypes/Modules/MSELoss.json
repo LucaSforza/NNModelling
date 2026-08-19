@@ -14,14 +14,36 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" }
-    ],
-    "dtype": { "output": "float32" }
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        }
+      ]
+    },
+    "to_dtype": "float32"
   }
 }

@@ -53,6 +53,17 @@ describe("typed v2 expressions", () => {
     expect(run("item(\"wrong\", 0)", "dimension")).toMatchObject({ kind: "error", message: "item requires a dimension or list" });
   });
 
+  it("normalizes dimension scalars and lists for generic collection expressions", () => {
+    expect(run("as_list(param.axis)", "shape", { params: { axis: 2 } })).toMatchObject({ kind: "value", value: [2] });
+    expect(run("as_list(param.dims)", "shape", { params: { dims: [3, 5] } })).toMatchObject({ kind: "value", value: [3, 5] });
+    expect(run("length(as_list(param.axis))", "dimension", { params: { axis: 2 } })).toMatchObject({ kind: "value", value: 1 });
+    expect(run("product(param.axis)", "dimension", { params: { axis: 7 } })).toMatchObject({ kind: "value", value: 7 });
+    expect(run("product(param.dims)", "dimension", { params: { dims: [3, 5] } })).toMatchObject({ kind: "value", value: 15 });
+    expect(run("as_list(\"wrong\")", "shape")).toMatchObject({ kind: "error", message: "as_list requires a dimension or list" });
+    expect(compileExpression("length(3)", "dimension")).toMatchObject({ ok: false, error: { message: "operator 'length' argument 1 expects list, got number" } });
+    expect(compileExpression("product(\"wrong\")", "dimension")).toMatchObject({ ok: false, error: { message: "product requires a dimension or list" } });
+  });
+
   it("represents Addition, Concat, Flatten, Unflatten, and SequencePool generically", () => {
     const inputs = [[tensor, { shape: [2, 3, 4], dtype: "float32" }]] as const;
     expect(run("all(inputs(0), x => shape(x) == shape(input(0, 0)))", "constraint", { inputs })).toMatchObject({ kind: "value", value: true });

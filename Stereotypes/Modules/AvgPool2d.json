@@ -33,18 +33,67 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#C" },
-      { "kind": "symbolic", "name": "#H" },
-      { "kind": "symbolic", "name": "#W" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "symbolic",
+              "name": "C",
+              "scope": "local"
+            },
+            {
+              "kind": "symbolic",
+              "name": "H",
+              "scope": "local"
+            },
+            {
+              "kind": "symbolic",
+              "name": "W",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#C" },
-      { "kind": "computed", "expr": "floor(($H + 2*padding - kernel_size)/stride + 1)" },
-      { "kind": "computed", "expr": "floor(($W + 2*padding - kernel_size)/stride + 1)" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "symbolic",
+          "name": "C",
+          "scope": "local"
+        },
+        {
+          "kind": "computed",
+          "expr": "floor(($H + 2 * item(param.padding, 0) - item(param.kernel_size, 0)) / item(coalesce(param.stride, param.kernel_size), 0) + 1)"
+        },
+        {
+          "kind": "computed",
+          "expr": "floor(($W + 2 * item(param.padding, 1) - item(param.kernel_size, 1)) / item(coalesce(param.stride, param.kernel_size), 1) + 1)"
+        }
+      ]
+    },
+  "to_dtype": "dtype(input(0, 0))",
+  "constraints": [
+    {
+      "condition": "not param.ceil_mode",
+      "message": "ceil_mode=true is not modelled by this signature"
+    }
+  ]
   }
 }

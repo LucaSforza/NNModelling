@@ -14,12 +14,27 @@
     }
   },
   "type_signature": {
-    "kind": "subflow",
-    "subflow": {
-      "action": "repeat",
-      "iterations_param": "iterations"
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [{ "kind": "wildcard" }]
+        }
+      }
+    ],
+    "output": {
+      "kind": "computed_shape",
+      "expr": "shape(iterate(param.iterations, input(0, 0), x => apply(x)))"
     },
-    "input": [{ "kind": "wildcard" }],
-    "output": [{ "kind": "wildcard" }]
+    "to_dtype": "dtype(iterate(param.iterations, input(0, 0), x => apply(x)))",
+    "constraints": [
+      {
+        "condition": "is_integer(param.iterations) and param.iterations >= 1",
+        "message": "iterations must be a positive integer"
+      }
+    ]
   }
 }

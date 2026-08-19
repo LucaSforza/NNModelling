@@ -10,27 +10,39 @@
     "height": 30
   },
   "type_signature": {
-    "kind": "join",
-    "input": [
-      [
-        { "kind": "symbolic", "name": "$B" },
-        { "kind": "symbolic", "name": "#L" },
-        { "kind": "symbolic", "name": "#D" }
-      ],
-      [
-        { "kind": "symbolic", "name": "$B" },
-        { "kind": "symbolic", "name": "#S" },
-        { "kind": "symbolic", "name": "#D" }
-      ]
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "label": "Q",
+        "pattern": { "kind": "pattern", "dims": [
+          { "kind": "symbolic", "name": "B", "scope": "global" },
+          { "kind": "symbolic", "name": "L", "scope": "local" },
+          { "kind": "symbolic", "name": "D", "scope": "local" }
+        ] }
+      },
+      {
+        "lower": 1,
+        "upper": 1,
+        "label": "K",
+        "pattern": { "kind": "pattern", "dims": [
+          { "kind": "symbolic", "name": "B", "scope": "global" },
+          { "kind": "symbolic", "name": "S", "scope": "local" },
+          { "kind": "symbolic", "name": "D", "scope": "local" }
+        ] }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" },
-      { "kind": "symbolic", "name": "#S" }
-    ],
-    "join": {
-      "action": "element_wise",
-      "input_labels": ["Q", "K"]
-    }
+    "output": { "kind": "pattern", "dims": [
+      { "kind": "symbolic", "name": "B", "scope": "global" },
+      { "kind": "symbolic", "name": "L", "scope": "local" },
+      { "kind": "symbolic", "name": "S", "scope": "local" }
+    ] },
+    "constraints": [{
+      "condition": "$D == param.d_model",
+      "message": "Q and K feature dimensions must equal d_model"
+    }],
+    "from_dtype": "dtype(input(0, 0))",
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

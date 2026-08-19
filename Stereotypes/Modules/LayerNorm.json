@@ -33,13 +33,36 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "dtype": { "input": "float32", "output": "float32" },
-    "input": [
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "wildcard" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "wildcard"
+        }
+      ]
+    },
+    "from_dtype": "float32",
+  "to_dtype": "float32",
+  "constraints": [
+    {
+      "condition": "let dims = as_list(param.normalized_shape) in slice(shape(input(0, 0)), -length(dims)) == dims",
+      "message": "trailing input dimensions must equal normalized_shape"
+    }
+  ]
   }
 }

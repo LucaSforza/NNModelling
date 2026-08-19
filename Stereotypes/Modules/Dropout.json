@@ -17,18 +17,42 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "dtype": { "input": "float32", "output": "float32" },
-    "input": [
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "wildcard" }
-    ],
-    "advisories": [{
-      "condition": "p > 0.5",
-      "message": "Dropout rate > 0.5: more than half of activations are dropped",
-      "kind": "perf"
-    }]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "wildcard"
+        }
+      ]
+    },
+    "from_dtype": "float32",
+    "to_dtype": "float32",
+    "constraints": [
+      {
+      "condition": "param.p <= 0.5",
+        "message": "Dropout rate > 0.5: more than half of activations are dropped",
+        "severity": "warning",
+      "category": "perf"
+    },
+    {
+      "condition": "between(param.p, 0, 1)",
+      "message": "Dropout probability must be in [0, 1]"
+      }
+    ]
   }
 }

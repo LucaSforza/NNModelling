@@ -34,14 +34,39 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#C" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "symbolic",
+              "name": "C",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" }
-    ],
-    "dtype": { "input": "float32", "output": "float32" }
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        }
+      ]
+    },
+    "from_dtype": "float32",
+    "to_dtype": "float32"
   }
 }

@@ -3,16 +3,14 @@
  *
  * Provides:
  *   - parseExpr(source) — parse an expression string into an AST
- *   - evaluate(node, context) — evaluate an AST to a number
  *   - ParseError — thrown on syntax errors
  */
 
 import { tokenize } from "./tokenizer";
 import { parse } from "./parser";
-import { evaluate } from "./evaluator";
 import { ParseError } from "./types";
 
-export type { ExprNode, EvalContext, BinaryOp, Token, TokenKind } from "./types";
+export type { ExprNode, BinaryOp, Token, TokenKind } from "./types";
 export type { CompiledExpression, Evaluation, ExpressionKind, ExpressionDiagnostic, RuntimeValue, TensorValue } from "./types";
 export { ParseError };
 
@@ -37,7 +35,6 @@ export function parseExpr(source: string): ReturnType<typeof parse> {
   return ast;
 }
 
-export { evaluate };
 export { compileExpression, evaluateCompiled } from "./typed";
 export type { TypedEvalContext } from "./typed";
 export { dimensionOperation, equalDimensions, formatDimension, isDimensionValue, isTerm, symbol } from "./dimensionValues";

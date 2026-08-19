@@ -119,5 +119,7 @@ describe("parameter normalization", () => {
     expect(normalizeParameterValue([2, 3], "int | tuple")).toMatchObject({ status: "resolved", value: [2, 3] });
     expect(normalizeParameterValue("same", "int | tuple | str")).toMatchObject({ status: "resolved", value: "same" });
     expect(normalizeParameterValue("[2, nope]", "int | tuple")).toMatchObject({ status: "invalid" });
+    expect(normalizeParameterValue("(1.5, 2)", "float | tuple")).toMatchObject({ status: "resolved", value: [1.5, 2] });
+    expect(normalizeParameterValue("(1.5, 2)", "int | tuple")).toMatchObject({ status: "invalid" });
   });
 });

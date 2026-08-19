@@ -15,6 +15,7 @@ import { describe, it, expect, vi, afterAll } from "vitest";
 import { Diagram } from "../Diagram.svelte";
 import { BrowserRPCHandler } from "../sync/BrowserRPCHandler";
 import { edge, node, stubWindow, unstubWindow } from "./helpers";
+import { getInputArityBounds } from "../core/types";
 
 stubWindow();
 afterAll(() => unstubWindow());
@@ -36,6 +37,60 @@ function getLinearStereotype(diagram: Diagram) {
 }
 
 describe("DiagramCore graph-change subscription", () => {
+  it("derives Join handle bounds from every ordered InputGroup", () => {
+    expect(getInputArityBounds({
+      inputs: [
+        { lower: 1, upper: 1 },
+        { lower: 2, upper: 4 },
+      ],
+    })).toEqual({ min: 3, max: 5 });
+    expect(getInputArityBounds({
+      inputs: [
+        { lower: 2, upper: null },
+        { lower: 1, upper: 1 },
+      ],
+    })).toEqual({ min: 3, max: null });
+  });
+
+  it("uses the bundled Join signatures for fixed and variadic handle bounds", () => {
+    const diagram = new Diagram();
+    const arityOf = (name: string) => getInputArityBounds(
+      diagram.getStereotype(name)?.typeSignature,
+    );
+
+    expect(arityOf("Addition")).toEqual({ min: 2, max: null });
+    expect(arityOf("Concat")).toEqual({ min: 2, max: null });
+    expect(arityOf("MatMul")).toEqual({ min: 2, max: 2 });
+    expect(arityOf("ScaledDotProduct")).toEqual({ min: 2, max: 2 });
+    expect(arityOf("Einsum")).toEqual({ min: 1, max: null });
+  });
+
+  it("creates joins at the signature lower bound and preserves saved arity", () => {
+    const diagram = new Diagram();
+    const addition = diagram.getStereotype("Addition")!;
+    const matMul = diagram.getStereotype("MatMul")!;
+
+    diagram.addJoinNode(addition, 0, 0);
+    diagram.addJoinNode(matMul, 100, 0, { inputsCount: 1 });
+
+    expect(diagram.nodes.filter((node) => node.type === "join").map((node) => node.data.inputsCount)).toEqual([2, 1]);
+  });
+
+  it("preserves a duplicated join's saved arity through undo and redo", () => {
+    const diagram = new Diagram();
+    const addition = diagram.getStereotype("Addition")!;
+    diagram.addJoinNode(addition, 0, 0, { inputsCount: 3 });
+    const original = diagram.nodes.find((node) => node.type === "join")!;
+
+    const [{ newId }] = diagram.duplicateNodes([original.id]);
+    expect(diagram.getNodeById(newId)?.data.inputsCount).toBe(3);
+
+    expect(diagram.undo()).toBe(true);
+    expect(diagram.getNodeById(newId)).toBeUndefined();
+    expect(diagram.redo()).toBe(true);
+    expect(diagram.getNodeById(newId)?.data.inputsCount).toBe(3);
+  });
+
   it("notifies synchronously when a public mutation succeeds", () => {
     const diagram = new Diagram();
     let calls = 0;

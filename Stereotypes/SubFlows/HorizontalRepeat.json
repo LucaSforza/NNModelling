@@ -14,17 +14,31 @@
     }
   },
   "type_signature": {
-    "kind": "subflow",
-    "subflow": {
-      "action": "infer_then_transform",
-      "transform": {
-        "last_dim": {
-          "kind": "multiply",
-          "expr": "n"
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [{ "kind": "wildcard" }]
         }
       }
+    ],
+    "output": {
+      "kind": "computed_shape",
+      "expr": "let t = apply(input(0, 0)) in replace(shape(t), -1, dim(t, -1) * param.n)"
     },
-    "input": [{ "kind": "wildcard" }],
-    "output": [{ "kind": "wildcard" }]
+    "to_dtype": "let t = apply(input(0, 0)) in dtype(t)",
+    "constraints": [
+      {
+        "condition": "is_integer(param.n) and param.n >= 1",
+        "message": "n must be a positive integer"
+      },
+      {
+        "condition": "rank(apply(input(0, 0))) >= 1",
+        "message": "HorizontalRepeat requires an applied subflow result with rank at least 1"
+      }
+    ]
   }
 }

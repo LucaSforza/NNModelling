@@ -8,27 +8,50 @@
   },
   "params": {},
   "type_signature": {
-    "kind": "join",
-    "input": [
-      [
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "label": "A",
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            { "kind": "wildcard" },
+            { "kind": "symbolic", "name": "M", "scope": "local" },
+            { "kind": "symbolic", "name": "K", "scope": "local" }
+          ]
+        }
+      },
+      {
+        "lower": 1,
+        "upper": 1,
+        "label": "B",
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            { "kind": "wildcard" },
+            { "kind": "symbolic", "name": "K", "scope": "local" },
+            { "kind": "symbolic", "name": "N", "scope": "local" }
+          ]
+        }
+      }
+    ],
+    "output": {
+      "kind": "pattern",
+      "dims": [
         { "kind": "wildcard" },
-        { "kind": "symbolic", "name": "#M" },
-        { "kind": "symbolic", "name": "#K" }
-      ],
-      [
-        { "kind": "wildcard" },
-        { "kind": "symbolic", "name": "#K" },
-        { "kind": "symbolic", "name": "#N" }
+        { "kind": "symbolic", "name": "M", "scope": "local" },
+        { "kind": "symbolic", "name": "N", "scope": "local" }
       ]
+    },
+    "constraints": [
+      {
+        "condition": "slice(shape(input(0, 0)), 0, -2) == slice(shape(input(1, 0)), 0, -2)",
+        "message": "MatMul batch prefixes must match"
+      }
     ],
-    "output": [
-      { "kind": "wildcard" },
-      { "kind": "symbolic", "name": "#M" },
-      { "kind": "symbolic", "name": "#N" }
-    ],
-    "join": {
-      "action": "matmul",
-      "input_labels": ["A", "B"]
-    }
+    "from_dtype": "dtype(input(0, 0))",
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

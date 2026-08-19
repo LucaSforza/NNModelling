@@ -46,6 +46,32 @@ export interface JoinNodeConfig extends NodeConfig {
   inputsCount?: number;
 }
 
+/** The total handle range declared by a signature's ordered input groups. */
+export interface InputArityBounds {
+  min: number;
+  max: number | null;
+}
+
+/**
+ * Convert independent input-group multiplicities into the one handle count
+ * used by a visual Join. A missing signature keeps the legacy editor default.
+ */
+export function getInputArityBounds(
+  signature?: { readonly inputs: readonly { readonly lower: number; readonly upper: number | null }[] },
+): InputArityBounds {
+  if (!signature) return { min: 2, max: null };
+
+  let min = 0;
+  let max = 0;
+  let unbounded = false;
+  for (const group of signature.inputs) {
+    min += group.lower;
+    if (group.upper === null) unbounded = true;
+    else max += group.upper;
+  }
+  return { min, max: unbounded ? null : max };
+}
+
 // ── Snapshots ───────────────────────────────────
 export interface DiagramCoreSnapshot {
   nodes: Node[];

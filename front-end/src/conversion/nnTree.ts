@@ -13,27 +13,8 @@
 
 import type { DiagramCore } from "../core/DiagramCore";
 import { findDirectedCycle } from "../core/validation";
+import { describeScopeGraph, orderPredecessors } from "../core/scopeGraph";
 import { type Edge, type Node } from "@xyflow/svelte";
-
-/** Order join inputs by numbered target handles, with legacy handles stable after them. */
-function orderJoinInputs(edges: Edge[], targetId: string): string[] {
-  const numbered: Array<{ index: number; order: number; source: string }> = [];
-  const legacy: Array<{ order: number; source: string }> = [];
-
-  edges.forEach((edge, order) => {
-    if (edge.target !== targetId) return;
-    const match = edge.targetHandle?.match(/^in-(\d+)$/);
-    if (match) {
-      numbered.push({ index: Number(match[1]), order, source: edge.source });
-    } else {
-      legacy.push({ order, source: edge.source });
-    }
-  });
-
-  numbered.sort((a, b) => a.index - b.index || a.order - b.order);
-  legacy.sort((a, b) => a.order - b.order);
-  return [...numbered.map((entry) => entry.source), ...legacy.map((entry) => entry.source)];
-}
 
 export class NNTree {
   public nodes: Map<string, NNTreeNode>;
@@ -118,7 +99,7 @@ export class NNTree {
       const visualNode = diagram.getNodeById(id);
       if (treeNode.data.type !== "join" || visualNode?.parentId != null) continue;
 
-      const inputs = orderJoinInputs(diagram.edges, id)
+      const inputs = orderPredecessors(diagram.edges, id)
         .filter((sourceId) => {
           const source = diagram.getNodeById(sourceId);
           const stereotype = source
@@ -143,45 +124,15 @@ export class NNTree {
       internalIds.has(e.source) && internalIds.has(e.target),
     );
 
-    // Kahn's topological sort
-    const inDegree = new Map<string, number>();
-    const adj = new Map<string, string[]>();
-    for (const n of internalNodes) {
-      inDegree.set(n.id, 0);
-      adj.set(n.id, []);
-    }
-    for (const e of internalEdges) {
-      adj.get(e.source)?.push(e.target);
-      inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
-    }
-
-    const queue = internalNodes.filter((n: any) => inDegree.get(n.id) === 0).map((n: any) => n.id);
-    const sorted: string[] = [];
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      sorted.push(id);
-      for (const target of adj.get(id) || []) {
-        const d = (inDegree.get(target) || 1) - 1;
-        inDegree.set(target, d);
-        if (d === 0) queue.push(target);
-      }
-    }
-
-    if (sorted.length !== internalNodes.length) {
-      throw new Error("Subflow " + subflowId + " contains a cycle");
-    }
-
-    // Build input ordering for joins from edge targetHandles
-    const targetInputs: Record<string, string[]> = {};
-    for (const n of internalNodes) {
-      targetInputs[n.id] = orderJoinInputs(internalEdges, n.id);
-    }
+    const scope = describeScopeGraph(internalNodes, internalEdges, {
+      isEntry: (candidate) => diagram.getStereotype((candidate.data as Record<string, unknown>).stereotype as string)?.isInput ?? false,
+    });
 
     const nodesMap: Record<string, InternalNodeData> = {};
 
-    for (const id of sorted) {
+    for (const id of scope.topologicalOrder) {
       const n = internalNodes.find((m: any) => m.id === id)!;
-      const children = adj.get(id) || [];
+      const children = [...(scope.successors.get(id) ?? [])];
 
       const nd = n.data as Record<string, unknown>;
       if (this.isSubflowNode(n)) {
@@ -207,12 +158,12 @@ export class NNTree {
           taskType: this.getTaskType(diagram, n),
           params: nd.params,
           children,
-          ...(isJoinNode ? { inputs: targetInputs[id] } : {}),
+          ...(isJoinNode ? { inputs: [...(scope.predecessors.get(id) ?? [])] } : {}),
         };
       }
     }
 
-    return { entryNode: sorted[0], nodes: nodesMap };
+    return { entryNode: scope.entryId, nodes: nodesMap };
   }
 
   private processSubflow(node: Node, diagram: DiagramCore, visited: Set<string>): string {
@@ -307,7 +258,7 @@ export class NNTree {
       stereotype: node.data.stereotype,
       pythonClassName: this.getPythonClassName(diagram, node),
       params: node.data.params,
-      inputs: orderJoinInputs(diagram.edges, node.id),
+      inputs: orderPredecessors(diagram.edges, node.id),
     } as JoinData));
     this.runtimeProducerByVisualId.set(node.id, node.id);
     return node.id;

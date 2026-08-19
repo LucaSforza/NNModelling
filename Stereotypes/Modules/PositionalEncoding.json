@@ -2,8 +2,14 @@
   "category": "Layer",
   "pythonClassName": "ops.PositionalEncoding",
   "params": {
-    "d_model": { "type": "int", "default": "512" },
-    "max_len": { "type": "int", "default": "5000" }
+    "d_model": {
+      "type": "int",
+      "default": "512"
+    },
+    "max_len": {
+      "type": "int",
+      "default": "5000"
+    }
   },
   "view": {
     "color": "#2ecc71",
@@ -11,16 +17,63 @@
     "height": 30
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" },
-      { "kind": "symbolic", "name": "#D" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "symbolic",
+              "name": "L",
+              "scope": "local"
+            },
+            {
+              "kind": "symbolic",
+              "name": "D",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" },
-      { "kind": "symbolic", "name": "#D" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "symbolic",
+          "name": "L",
+          "scope": "local"
+        },
+        {
+          "kind": "symbolic",
+          "name": "D",
+          "scope": "local"
+        }
+      ]
+    },
+  "to_dtype": "dtype(input(0, 0))",
+  "constraints": [
+    {
+      "condition": "$D == param.d_model",
+      "message": "last dimension must equal d_model"
+    },
+    {
+      "condition": "$L <= param.max_len",
+      "message": "sequence length must not exceed max_len"
+    }
+  ]
   }
 }

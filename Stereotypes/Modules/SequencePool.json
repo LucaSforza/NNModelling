@@ -2,7 +2,10 @@
   "category": "Layer",
   "pythonClassName": "ops.SequencePool",
   "params": {
-    "dim": { "type": "int", "default": "1" }
+    "dim": {
+      "type": "int",
+      "default": "1"
+    }
   },
   "view": {
     "color": "#3498db",
@@ -10,15 +13,35 @@
     "height": 30
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "wildcard" },
-      { "kind": "symbolic", "name": "#D" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "wildcard"
+            },
+            {
+              "kind": "symbolic",
+              "name": "D",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#D" }
-    ]
+    "output": {
+      "kind": "computed_shape",
+    "expr": "if(rank(input(0, 0)) <= 2, shape(input(0, 0)), remove(shape(input(0, 0)), axis(param.dim, rank(input(0, 0)))) )"
+    },
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

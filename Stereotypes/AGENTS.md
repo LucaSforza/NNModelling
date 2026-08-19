@@ -28,17 +28,24 @@ Einsum's `params.expr` remains a user parameter.
 ## Tensor contracts
 
 - Put tensor behavior in `type_signature`, not in TypeScript name checks.
-- Dimension patterns include `const`, `symbolic`, `param_ref`, `wildcard`,
-  computed expression dimensions and `param_spread`.
-- Computed dimensions use expression strings interpreted by `front-end/src/expr/`.
-- Joins use declarative actions such as concat, element-wise, matmul or einsum;
-  label ordered inputs where clearer diagnostics are needed.
-- Subflows use declarative actions such as identity, infer, repeat or
-  infer-then-transform.
-- Dtype checks and advisories belong in JSON declarations. Keep warnings distinct
-  from hard shape or parameter errors.
-- Adding a conventional module should require stereotype and test updates, not a
-  new module-name branch in `typeEngine.ts`.
+- Every `type_signature` is version 2: ordered `inputs` (`InputGroup` bounds,
+  label and pattern), one `output` `ShapeDefinition`, `to_dtype`, optional
+  `from_dtype`, and generic `constraints`. `upper: null` means unbounded.
+- Dimension patterns include `const`, explicitly scoped `symbolic`, `param_ref`,
+  `wildcard`, computed expression dimensions and `param_spread`. A symbol must
+  declare `scope: "global"` or `"local"`; never encode scope in its name.
+- `ShapeDefinition` is `pattern`, `computed_shape`, or `einsum`. Use readable
+  expression source strings for computed dimensions/shapes, dtype expressions
+  and constraints. The loader parses and type-validates them; its AST is not
+  serialized. Use `param.name` for parameter references.
+- Model joins and subflows with groups, constraints and generic expression
+  primitives (`apply`, `iterate`, `map`, `replace`, and related shape helpers),
+  not `action` fields. `einsum` is the sole special shape primitive and is
+  selected only by `output.kind`, with an explicitly named equation parameter.
+- Dtype checks and advisories belong in JSON declarations. Constraint severity
+  distinguishes warnings from hard shape or parameter errors.
+- Adding a conventional module should require stereotype and test updates, not
+  a new module-name branch or category/action branch in `typeEngine.ts`.
 
 ## Verification
 

@@ -22,6 +22,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { getContext, tick } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
+  import { getInputArityBounds } from "../core/types";
 
   let { id, data, selected, isConnectable }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
@@ -31,7 +32,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   const { updateNodeData } = useSvelteFlow();
 
   // Reattività nativa Svelte 5 basata sul payload "data"
-  let inputsCount = $derived((data.inputsCount as number) || 2);
+  let inputArity = $derived(
+    getInputArityBounds(diagram?.getStereotype(data.stereotype as string)?.typeSignature),
+  );
+  // Imported diagrams retain their saved count, including an out-of-bounds
+  // value. The type engine reports that mismatch instead of rewriting it here.
+  let inputsCount = $derived(
+    typeof data.inputsCount === "number" ? data.inputsCount : inputArity.min,
+  );
   let name = $derived((data.name as string) || "Join");
   let isNodeHovered = $state(false);
   let isHorizontal = $derived(diagram.layoutDirection === "horizontal");
@@ -68,19 +76,21 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   function increase(e: Event) {
     e.stopPropagation();
-    updateNodeData(id, { inputsCount: inputsCount + 1 });
+    if (inputArity.max === null || inputsCount < inputArity.max) {
+      updateNodeData(id, { inputsCount: inputsCount + 1 });
+    }
   }
 
   function decrease(e: Event) {
     e.stopPropagation();
-    if (inputsCount > 2) {
+    if (inputsCount > inputArity.min) {
       updateNodeData(id, { inputsCount: inputsCount - 1 });
     }
   }
 </script>
 
 <div class={["node-wrapper", { selected, horizontal: isHorizontal }]} style="position: relative;" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
-  <button class="btn-branch" onclick={decrease} disabled={inputsCount <= 2}>
+  <button class="btn-branch" onclick={decrease} disabled={inputsCount <= inputArity.min}>
     -
   </button>
 
@@ -111,7 +121,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     </div>
   </div>
 
-  <button class="btn-branch" onclick={increase}>+</button>
+  <button class="btn-branch" onclick={increase} disabled={inputArity.max !== null && inputsCount >= inputArity.max}>+</button>
 
   <div class="join-label" title={name}>
     {name.length > 8 ? name.slice(0, 8) + '...' : name}

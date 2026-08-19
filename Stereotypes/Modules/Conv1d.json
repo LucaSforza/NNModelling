@@ -55,21 +55,58 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "param_ref", "name": "in_channels" },
-      { "kind": "symbolic", "name": "#L" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "param_ref",
+              "name": "in_channels"
+            },
+            {
+              "kind": "symbolic",
+              "name": "L",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "param_ref", "name": "out_channels" },
-      { "kind": "computed", "expr": "floor(($L + 2*padding - dilation*(kernel_size - 1) - 1)/stride + 1)" }
-    ],
-    "advisories": [{
-      "condition": "kernel_size > $L",
-      "message": "kernel_size exceeds input spatial dimension",
-      "kind": "perf"
-    }]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "param_ref",
+          "name": "out_channels"
+        },
+        {
+          "kind": "computed",
+          "expr": "floor(($L + 2 * item(param.padding, 0) - item(param.dilation, 0) * (item(param.kernel_size, 0) - 1) - 1) / item(param.stride, 0) + 1)"
+        }
+      ]
+    },
+    "to_dtype": "dtype(input(0, 0))",
+    "constraints": [
+      {
+      "condition": "item(param.kernel_size, 0) <= $L",
+        "message": "kernel_size exceeds input spatial dimension",
+        "severity": "warning",
+        "category": "perf"
+      }
+    ]
   }
 }

@@ -455,7 +455,7 @@ export class BrowserRPCHandler {
     } else if (stereo.isJoin) {
       this.diagram.addJoinNode(stereo, x, y, {
         name: config.name as string | undefined,
-        inputsCount: (config.inputsCount as number) ?? 2,
+        inputsCount: config.inputsCount as number | undefined,
         color: config.color as string | undefined,
         params: (config.params as Record<string, string>) ?? {},
         parentId,

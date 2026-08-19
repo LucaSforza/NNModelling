@@ -17,14 +17,36 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "param_spread", "param": "unflattened_size" }
-    ]
+    "output": {
+      "kind": "computed_shape",
+    "expr": "let x = shape(input(0, 0)) in let target = axis(param.dim, rank(input(0, 0))) in splice(remove(x, target), target, as_list(param.unflattened_size))"
+  },
+  "to_dtype": "dtype(input(0, 0))",
+  "constraints": [
+    {
+      "condition": "let target = axis(param.dim, rank(input(0, 0))) in product(as_list(param.unflattened_size)) == dim(input(0, 0), target)",
+      "message": "unflattened_size product must equal the selected input dimension"
+    }
+  ]
   }
 }

@@ -69,16 +69,57 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" },
-      { "kind": "param_ref", "name": "d_model" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "symbolic",
+              "name": "L",
+              "scope": "local"
+            },
+            {
+              "kind": "param_ref",
+              "name": "d_model"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" },
-      { "kind": "param_ref", "name": "d_model" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "symbolic",
+          "name": "L",
+          "scope": "local"
+        },
+        {
+          "kind": "param_ref",
+          "name": "d_model"
+        }
+      ]
+    },
+  "to_dtype": "dtype(input(0, 0))",
+  "constraints": [
+    {
+      "condition": "param.d_model % param.nhead == 0",
+      "message": "d_model must be divisible by nhead"
+    }
+  ]
   }
 }

@@ -78,8 +78,10 @@ commands manually.
 
 - The browser's `DiagramCore` is the only authority for live diagram state.
   The MCP server must remain a thin proxy and must not introduce a second graph.
-- Stereotype behavior and tensor contracts are data-driven. Avoid hardcoded
-  module names, formula bodies, or join/subflow rules in the type engine.
+- Stereotype behavior and tensor contracts are data-driven. V2 signatures use
+  input groups, shape definitions, explicit dtype expressions and constraints;
+  avoid action fields, formula bodies, join/subflow rules, and ordinary
+  stereotype-name branches in the type engine.
 - A top-level model requires exactly one `Input`. An internal subflow may use an
   `Input` only as its declared boundary entry; `Fork` is the canonical internal
   pass-through and cannot replace the required top-level `Input`.

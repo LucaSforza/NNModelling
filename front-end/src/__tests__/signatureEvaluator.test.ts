@@ -35,9 +35,34 @@ describe("signature evaluator", () => {
     expect(result.suggestions).toMatchObject([{ parameter: "width", value: 4 }]);
     expect(result.diagnostics).toMatchObject([{ code: "deferred_spread", location: "output" }]);
   });
+  it("keeps invalid output parameters distinct from deferred ones", () => {
+    const scalar: CompiledTypeSignatureV2 = { version: 2, inputs: [], output: { kind: "pattern", dims: [{ kind: "param_ref", name: "width" }] }, to_dtype: "float32" };
+    expect(evaluateSignature(scalar, [], { width: normalizeParameterValue("oops", "int") }).diagnostics).toMatchObject([{ code: "parameter", message: expect.stringContaining("invalid: expected int") }]);
+    expect(evaluateSignature(scalar, [], { width: normalizeParameterValue(undefined, "int") }).diagnostics).toMatchObject([{ code: "deferred_parameter" }]);
+    const spread: CompiledTypeSignatureV2 = { version: 2, inputs: [], output: { kind: "pattern", dims: [{ kind: "param_spread", name: "dims" }] }, to_dtype: "float32" };
+    expect(evaluateSignature(spread, [], { dims: resolved(3) })).toMatchObject({ ok: true, output: { shape: [3] } });
+    expect(evaluateSignature(spread, [], { dims: normalizeParameterValue(undefined, "tuple") }).diagnostics).toMatchObject([{ code: "deferred_spread" }]);
+  });
   it("consumes resolved input spreads by declared list length without imposing value equality", () => {
     const signature: CompiledTypeSignatureV2 = { version: 2, inputs: [{ lower: 1, upper: 1, pattern: { kind: "pattern", dims: [{ kind: "const", value: 2 }, { kind: "param_spread", name: "tail" }] } }], output: { kind: "computed_shape", expr: "shape(input(0, 0))" }, to_dtype: "dtype(input(0, 0))" };
     expect(evaluateSignature(signature, [tensor([2, 8, 9])], { tail: resolved("(3, 4)", "tuple") })).toMatchObject({ ok: true });
+  });
+  it("treats a scalar parameter spread as one output dimension", () => {
+    const signature: CompiledTypeSignatureV2 = { version: 2, inputs: [], output: { kind: "pattern", dims: [{ kind: "symbolic", name: "B", scope: "global" }, { kind: "param_spread", name: "out_features" }] }, to_dtype: "float32" };
+    expect(evaluateSignature(signature, [], { out_features: normalizeParameterValue(784, "int | tuple") })).toMatchObject({ ok: true, output: { shape: [symbol("B", "global"), 784] } });
+  });
+  it("rejects non-positive, fractional, and unsafe resolved parameter dimensions", () => {
+    const scalar: CompiledTypeSignatureV2 = { version: 2, inputs: [{ lower: 1, upper: 1, pattern: { kind: "pattern", dims: [{ kind: "param_ref", name: "width" }] } }], output: { kind: "pattern", dims: [{ kind: "param_ref", name: "width" }] }, to_dtype: "float32" };
+    for (const value of [1.5, 0, -1]) expect(evaluateSignature(scalar, [tensor([2])], { width: resolved(value, "float") }).diagnostics.some((diagnostic) => diagnostic.code === "parameter" && diagnostic.message.includes("positive safe integer"))).toBe(true);
+    const spread: CompiledTypeSignatureV2 = { version: 2, inputs: [{ lower: 1, upper: 1, pattern: { kind: "pattern", dims: [{ kind: "param_spread", name: "dims" }] } }], output: { kind: "pattern", dims: [{ kind: "param_spread", name: "dims" }] }, to_dtype: "float32" };
+    expect(evaluateSignature(spread, [tensor([2, 3])], { dims: resolved("(1.5, 2)", "float | tuple") }).diagnostics.some((diagnostic) => diagnostic.code === "parameter" && diagnostic.message.includes("positive safe integers"))).toBe(true);
+  });
+  it("rejects invalid concrete tensor dimensions while allowing symbolic terms", () => {
+    const identity: CompiledTypeSignatureV2 = { version: 2, inputs: [{ lower: 1, upper: 1, pattern: { kind: "pattern", dims: [{ kind: "wildcard" }] } }], output: { kind: "pattern", dims: [{ kind: "wildcard" }] }, to_dtype: "float32" };
+    expect(evaluateSignature(identity, [tensor([0])], {}).diagnostics.some((diagnostic) => diagnostic.code === "dimension" && diagnostic.location === "inputs/0/0")).toBe(true);
+    expect(evaluateSignature(identity, [tensor([symbol("H")])], {})).toMatchObject({ ok: true, output: { shape: [symbol("H")] } });
+    const computed: CompiledTypeSignatureV2 = { version: 2, inputs: [], output: { kind: "computed_shape", expr: "[0]" }, to_dtype: "float32" };
+    expect(evaluateSignature(computed, [], {}).diagnostics).toMatchObject([{ code: "dimension", location: "output" }]);
   });
   it("handles a positive MatMul contract without operation-name branches", () => {
     const signature: CompiledTypeSignatureV2 = { version: 2, inputs: [{ lower: 1, upper: 1, pattern: { kind: "pattern", dims: [{ kind: "symbolic", name: "B", scope: "global" }, { kind: "symbolic", name: "M", scope: "local" }, { kind: "symbolic", name: "K", scope: "local" }] } }, { lower: 1, upper: 1, pattern: { kind: "pattern", dims: [{ kind: "symbolic", name: "B", scope: "global" }, { kind: "symbolic", name: "K", scope: "local" }, { kind: "symbolic", name: "N", scope: "local" }] } }], output: { kind: "pattern", dims: [{ kind: "symbolic", name: "B", scope: "global" }, { kind: "symbolic", name: "M", scope: "local" }, { kind: "symbolic", name: "N", scope: "local" }] }, to_dtype: "float32" };

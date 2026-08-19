@@ -13,15 +13,17 @@
     }
   },
   "type_signature": {
-    "kind": "join",
-    "input": [
-      [{ "kind": "wildcard" }],
-      [{ "kind": "wildcard" }]
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": null,
+        "label": "input",
+        "pattern": { "kind": "pattern", "dims": [{ "kind": "wildcard" }] }
+      }
     ],
-    "output": [{ "kind": "wildcard" }],
-    "join": {
-      "action": "einsum",
-      "einsum_param": "expr"
-    }
+    "output": { "kind": "einsum", "equation": { "parameter": "expr" } },
+    "from_dtype": "dtype(input(0, 0))",
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

@@ -13,14 +13,22 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "param_spread", "param": "out_features" }
-    ],
-    "dtype": {
-      "output": "float32"
-    }
+    "version": 2,
+    "inputs": [],
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "param_spread",
+          "name": "out_features"
+        }
+      ]
+    },
+    "to_dtype": "float32"
   }
 }

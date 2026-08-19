@@ -13,13 +13,36 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "dtype": { "input": "float32", "output": "float32" },
-    "input": [
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "wildcard" }
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "wildcard"
+        }
+      ]
+    },
+    "from_dtype": "float32",
+    "to_dtype": "float32",
+    "constraints": [
+      {
+        "condition": "between(param.dim, -rank(input(0, 0)), rank(input(0, 0)) - 1)",
+        "message": "dim must select an existing axis"
+      }
     ]
   }
 }

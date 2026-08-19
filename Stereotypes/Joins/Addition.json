@@ -8,11 +8,23 @@
   },
   "params": {},
   "type_signature": {
-    "kind": "join",
-    "input": [
-      [{ "kind": "wildcard" }],
-      [{ "kind": "wildcard" }]
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 2,
+        "upper": null,
+        "label": "input",
+        "pattern": { "kind": "pattern", "dims": [{ "kind": "wildcard" }] }
+      }
     ],
-    "output": [{ "kind": "wildcard" }]
+    "output": { "kind": "pattern", "dims": [{ "kind": "wildcard" }] },
+    "constraints": [
+      {
+        "condition": "all(inputs(0), x => shape(x) == shape(input(0, 0)))",
+        "message": "Addition inputs must have identical shapes"
+      }
+    ],
+    "from_dtype": "dtype(input(0, 0))",
+    "to_dtype": "dtype(input(0, 0))"
   }
 }

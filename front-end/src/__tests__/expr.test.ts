@@ -6,45 +6,33 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseExpr, evaluate, ParseError } from "../expr/index";
+import { compileExpression, evaluateCompiled, parseExpr, ParseError } from "../expr/index";
 import { tokenize } from "../expr/tokenizer";
 import { parse } from "../expr/parser";
-import type { EvalContext } from "../expr/types";
-import type { ShapeDimension } from "../conversion/tensortypes";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function mkEnv(entries: Record<string, number>): Map<string, ShapeDimension> {
-  const env = new Map<string, ShapeDimension>();
-  for (const [key, val] of Object.entries(entries)) {
-    env.set(key, { kind: "const", value: val });
-  }
-  return env;
-}
-
-function mkCaptured(values: number[]): ShapeDimension[] {
-  return values.map((v) => ({ kind: "const" as const, value: v }));
-}
-
-function mkContext(overrides: {
-  env?: Record<string, number>;
-  captured?: number[];
-  params?: Record<string, unknown>;
-}): EvalContext {
-  return {
-    env: mkEnv(overrides.env ?? {}),
-    captured: overrides.captured ? mkCaptured(overrides.captured) : [],
-    params: overrides.params ?? {},
-  };
-}
 
 function evalStr(source: string, overrides?: {
   env?: Record<string, number>;
   captured?: number[];
   params?: Record<string, unknown>;
 }): number | undefined {
-  const ast = parseExpr(source);
-  return evaluate(ast, mkContext(overrides ?? {}));
+  const values = overrides ?? {};
+  const params = Object.fromEntries(Object.entries(values.params ?? {}).map(([name, value]) => {
+    const number = typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+    return [name, Number.isFinite(number) ? number : value];
+  }));
+  const compiled = compileExpression(source, "dimension", {
+    parameterNames: Object.keys(params),
+    symbols: Object.keys(values.env ?? {}),
+  });
+  if (!compiled.ok) return undefined;
+  const result = evaluateCompiled(compiled.value, {
+    params,
+    symbols: values.env,
+    capturedDimensions: values.captured,
+  });
+  return result.kind === "value" && typeof result.value === "number" ? result.value : undefined;
 }
 
 // ── Tokenizer Tests ─────────────────────────────────────────────────────────
@@ -329,14 +317,11 @@ describe("Expression Evaluator", () => {
     expect(evalStr("$*", { captured: [28, 28] })).toBe(784);
   });
 
-  it("returns undefined for $* when captured dims are non-const", () => {
-    const ast = parseExpr("$*");
-    const ctx: EvalContext = {
-      env: new Map(),
-      captured: [{ kind: "symbolic", name: "X" }, { kind: "const", value: 28 }],
-      params: {},
-    };
-    expect(evaluate(ast, ctx)).toBeUndefined();
+  it("returns undefined for $* when captured dims are unresolved", () => {
+    const compiled = compileExpression("$*", "dimension");
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+    expect(evaluateCompiled(compiled.value)).toMatchObject({ kind: "deferred" });
   });
 
   it("returns undefined for unresolved $H", () => {
@@ -453,43 +438,14 @@ describe("Expression Evaluator", () => {
 describe("Expression parse→evaluate round-trip", () => {
   it("handles complex nested expressions", () => {
     const src = "floor(($H + 2*padding - dilation*(kernel_size - 1) - 1)/stride + 1)";
-    const ast = parseExpr(src);
-    const ctx: EvalContext = {
-      env: mkEnv({ H: 32 }),
-      captured: [],
-      params: { kernel_size: "3", stride: "1", padding: "1", dilation: "1" },
-    };
-    expect(evaluate(ast, ctx)).toBe(32);
+    expect(evalStr(src, { env: { H: 32 }, params: { kernel_size: "3", stride: "1", padding: "1", dilation: "1" } })).toBe(32);
   });
 
   it("max with two parameters works", () => {
-    const ast = parseExpr("max(stride, padding)");
-    const ctx: EvalContext = {
-      env: new Map(),
-      captured: [],
-      params: { stride: "2", padding: "1" },
-    };
-    // Fallback: params values are strings, parsed as numbers
-    // max(2, 1) = 2
-    expect(evaluate(ast, ctx)).toBe(2);
+    expect(evalStr("max(stride, padding)", { params: { stride: "2", padding: "1" } })).toBe(2);
   });
 
-  it("handles resolution via resolveParam callback", () => {
-    const ast = parseExpr("kernel_size + 1");
-    const ctx: EvalContext = {
-      env: new Map(),
-      captured: [],
-      params: { kernel_size: "3" },
-      resolveParam: (name: string) => {
-        // Simulate TypeEngine.resolveParamRef behavior
-        const raw = { kernel_size: "3" }[name];
-        if (raw !== undefined) {
-          const parsed = Number(raw);
-          if (!isNaN(parsed)) return parsed;
-        }
-        return undefined;
-      },
-    };
-    expect(evaluate(ast, ctx)).toBe(4);
+  it("resolves declared parameter references", () => {
+    expect(evalStr("kernel_size + 1", { params: { kernel_size: "3" } })).toBe(4);
   });
 });

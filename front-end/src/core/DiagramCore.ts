@@ -25,7 +25,12 @@ import { StereotypeCore } from "./StereotypeCore";
 import { checkValidConnection as coreCheckValidConnection } from "./validation";
 import { validateContainmentGraph } from "./containment";
 import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
-import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig } from "./types";
+import {
+  getInputArityBounds,
+  type DiagramCoreSnapshot,
+  type NodeConfig,
+  type JoinNodeConfig,
+} from "./types";
 import {
   edgeWithRoutePoints,
   normalizeEditableEdge,
@@ -276,6 +281,7 @@ export class DiagramCore {
   ) {
     this._captureUndoState();
     const id = `join_${crypto.randomUUID()}`;
+    const { min } = getInputArityBounds(stereotype.typeSignature);
 
     const newJoinNode: Node = {
       id,
@@ -285,7 +291,7 @@ export class DiagramCore {
       data: {
         stereotype: stereotype.name,
         name: stereotype.name,
-        inputsCount: config?.inputsCount || 2,
+        inputsCount: config?.inputsCount ?? min,
         color: config?.color || stereotype.view?.color || "#333",
         params: this._mergeNodeParams(stereotype, config?.params)
       }
@@ -750,6 +756,7 @@ export class DiagramCore {
         | Record<string, string | { value: string; position?: string }>
         | undefined;
       if (isJoin) {
+        const { min } = getInputArityBounds(stereo.typeSignature);
         newNodes.push({
           id: finalId,
           type: "join",
@@ -758,7 +765,7 @@ export class DiagramCore {
           data: {
             stereotype: stereo.name,
             name: stereo.name,
-            inputsCount: (nd.inputsCount as number | undefined) ?? 2,
+            inputsCount: (nd.inputsCount as number | undefined) ?? min,
             color: (nd.color as string | undefined) ?? stereo.view?.color ?? "#333",
             params: this._mergeNodeParams(stereo, sharedParams),
           },

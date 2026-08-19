@@ -17,14 +17,36 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "wildcard" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "wildcard"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "computed", "expr": "$*" }
+    "output": {
+      "kind": "computed_shape",
+    "expr": "let x = shape(input(0, 0)) in let start = axis(param.start_dim, rank(input(0, 0))) in let end = axis(param.end_dim, rank(input(0, 0))) in let prefix = splice(slice(x, 0, start), start, [product(slice(x, start, end + 1))]) in splice(prefix, length(prefix), slice(x, end + 1))"
+    },
+    "to_dtype": "dtype(input(0, 0))",
+    "constraints": [
+      {
+        "condition": "axis(param.start_dim, rank(input(0, 0))) <= axis(param.end_dim, rank(input(0, 0)))",
+        "message": "start_dim must not follow end_dim"
+      }
     ]
   }
 }

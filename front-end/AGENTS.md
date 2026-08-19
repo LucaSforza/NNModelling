@@ -56,21 +56,30 @@ handles may fan out. Reparenting must preserve ancestry-loop protection.
 - `src/conversion/nnTree.ts` compiles the graph with topological ordering and
   recursively preserves subflows as `type: "subflow"` nodes.
 - Joins retain parents in target-handle order. Hidden subflow children compile.
-- `src/conversion/typeEngine.ts` interprets stereotype JSON declarations. Keep
-  formulas in expression strings and join/subflow behavior in declarative config.
-- Dimension kinds include constants, symbolic bindings, parameter references,
-  wildcards, computed expressions, and parameter spreads.
+- `src/conversion/typeEngine.ts` evaluates compiled v2 stereotype declarations.
+  Signatures use ordered `InputGroup`s, a `ShapeDefinition`, explicit dtype
+  expressions and generic constraints; never restore Join/Subflow action
+  switches or branches on an ordinary stereotype name.
+- `ShapeDefinition` is `pattern`, `computed_shape`, or `einsum`. The Einsum
+  evaluator is the sole exception and is selected only by `output.kind ===
+  "einsum"`, never by an action or name.
+- Dimension patterns include constants, explicitly scoped symbolic bindings,
+  parameter references, wildcards, computed expression source, and parameter
+  spreads. Serialized expressions stay readable source strings; their typed
+  ASTs are internal and must be compiled during signature loading.
 - Invalid parameter values are errors; unset compatible values may produce
   suggestions. Dtype and advisory diagnostics are warnings where declared.
 - Primary errors own diagnostics; downstream nodes should use `blockedBy` rather
   than duplicate the same failure.
-- Subflow inference is recursive. Repeat composes its internal transform and
-  HorizontalRepeat applies its declared final-dimension transform.
-- Einsum inference uses the declarative equation and rejects unsupported ellipsis.
+- Subflow inference is recursive through generic `apply` and `iterate`
+  expression primitives. Repeat and HorizontalRepeat are signature expressions,
+  not engine cases. Einsum uses its declared equation and rejects unsupported
+  ellipsis.
 
-The expression language lives in `src/expr/` and supports symbolic variables,
-wildcard products, arithmetic, grouping, and the documented built-ins. Extend it
-through parser/evaluator tests, not through module-specific branches.
+The expression language lives in `src/expr/` and supports typed dimension,
+shape, constraint, and dtype expressions, including `param.name`, `$symbol`,
+collection operators, `apply`, and `iterate`. Extend it through parser/type
+checker/evaluator tests, not through module-specific branches.
 
 ## Tests and fixtures
 

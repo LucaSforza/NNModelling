@@ -45,16 +45,48 @@
     }
   },
   "type_signature": {
-    "kind": "module",
-    "dtype": { "input": "int64", "output": "float32" },
-    "input": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" }
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 1,
+        "upper": 1,
+        "pattern": {
+          "kind": "pattern",
+          "dims": [
+            {
+              "kind": "symbolic",
+              "name": "B",
+              "scope": "global"
+            },
+            {
+              "kind": "symbolic",
+              "name": "L",
+              "scope": "local"
+            }
+          ]
+        }
+      }
     ],
-    "output": [
-      { "kind": "symbolic", "name": "$B" },
-      { "kind": "symbolic", "name": "#L" },
-      { "kind": "param_ref", "name": "embedding_dim" }
-    ]
+    "output": {
+      "kind": "pattern",
+      "dims": [
+        {
+          "kind": "symbolic",
+          "name": "B",
+          "scope": "global"
+        },
+        {
+          "kind": "symbolic",
+          "name": "L",
+          "scope": "local"
+        },
+        {
+          "kind": "param_ref",
+          "name": "embedding_dim"
+        }
+      ]
+    },
+    "from_dtype": "int64",
+    "to_dtype": "float32"
   }
 }

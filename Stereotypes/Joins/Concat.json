@@ -14,15 +14,26 @@
     }
   },
   "type_signature": {
-    "kind": "join",
-    "input": [
-      [{ "kind": "wildcard" }],
-      [{ "kind": "wildcard" }]
+    "version": 2,
+    "inputs": [
+      {
+        "lower": 2,
+        "upper": null,
+        "label": "input",
+        "pattern": { "kind": "pattern", "dims": [{ "kind": "wildcard" }] }
+      }
     ],
-    "output": [{ "kind": "wildcard" }],
-    "join": {
-      "action": "concat",
-      "dim_expr": "dim"
-    }
+    "output": {
+      "kind": "computed_shape",
+      "expr": "let first = input(0, 0) in let a = axis(param.dim, rank(first)) in replace(shape(first), a, sum(map(inputs(0), x => dim(x, a))))"
+    },
+    "constraints": [
+      {
+        "condition": "let first = input(0, 0) in let a = axis(param.dim, rank(first)) in all(inputs(0), x => rank(x) == rank(first) and remove(shape(x), a) == remove(shape(first), a))",
+        "message": "Concat inputs must match outside the selected axis"
+      }
+    ],
+    "from_dtype": "dtype(input(0, 0))",
+    "to_dtype": "dtype(input(0, 0))"
   }
 }
