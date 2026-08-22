@@ -1,0 +1,11 @@
+{
+  "name": "Fork",
+  "description": "Preserves its input while exposing a graph fan-out point.",
+  "kind": "layer",
+  "view": {
+    "color": "#6b78b8",
+    "width": 120,
+    "height": 80
+  },
+  "parameters": {}
+}

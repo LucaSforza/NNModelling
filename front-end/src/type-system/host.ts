@@ -7,6 +7,7 @@ import { PackageLoader, type PackageLease } from "./packages/loader"
 import { LuaPackageInferenceRuntime } from "./packages/lua-runtime"
 import { PackageRegistry } from "./packages/registry"
 import type { PackageResourceMap, PackageResourceProvider } from "./packages/types"
+import type { Definition } from "./packages/types"
 
 export type PackageSelection = {
   readonly resources: PackageResourceProvider | PackageResourceMap
@@ -56,6 +57,15 @@ export class TypeSystemHost {
 
   isActive(packageId: string): boolean {
     return this.registry.has(packageId)
+  }
+
+  /** Read-only metadata used by the graph adapter; inference remains package-owned. */
+  packageDefinition(packageId: string): Definition | undefined {
+    return this.registry.get(packageId)?.packageInfo.definition
+  }
+
+  packageVersion(packageId: string): string | undefined {
+    return this.registry.get(packageId)?.packageInfo.manifest.version
   }
 
   /**

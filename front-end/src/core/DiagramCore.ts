@@ -25,7 +25,7 @@ import { StereotypeCore } from "./StereotypeCore";
 import { checkValidConnection as coreCheckValidConnection } from "./validation";
 import { validateContainmentGraph } from "./containment";
 import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
-import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig } from "./types";
+import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig, PackageIdentity } from "./types";
 import {
   edgeWithRoutePoints,
   normalizeEditableEdge,
@@ -266,6 +266,41 @@ export class DiagramCore {
     this.nodes = [...this.nodes, newNode];
 
     this.notifyGraphChanged();
+  }
+
+  /**
+   * Create a node backed by a versioned package identity.  This is additive to
+   * the legacy StereotypeCore path: the new graph adapter reads `data.package`
+   * and never derives identity from the display name.
+   */
+  public addPackageModule(
+    identity: PackageIdentity,
+    kind: "input" | "layer",
+    x: number,
+    y: number,
+    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string },
+  ): Node {
+    this._captureUndoState();
+    const finalName = config?.name?.trim() || identity.name;
+    const newNode: Node = {
+      id: crypto.randomUUID(),
+      type: "custom",
+      position: { x, y },
+      width: config?.width ?? (kind === "input" ? 30 : 140),
+      height: config?.height ?? (kind === "input" ? 30 : 60),
+      parentId: config?.parentId,
+      data: {
+        package: { ...identity },
+        stereotype: identity.name,
+        name: finalName,
+        color: config?.color ?? "#ffffff",
+        params: structuredClone(config?.params ?? {}),
+        isInput: kind === "input",
+      },
+    };
+    this.nodes = [...this.nodes, newNode];
+    this.notifyGraphChanged();
+    return newNode;
   }
 
   public addJoinNode(

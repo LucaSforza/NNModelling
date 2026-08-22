@@ -42,6 +42,13 @@ export interface NodeConfig {
   params?: Record<string, any>;
 }
 
+/** Stable identity persisted by nodes created through the new package host. */
+export interface PackageIdentity {
+  id: string;
+  version: string;
+  name: string;
+}
+
 export interface JoinNodeConfig extends NodeConfig {
   inputsCount?: number;
 }
