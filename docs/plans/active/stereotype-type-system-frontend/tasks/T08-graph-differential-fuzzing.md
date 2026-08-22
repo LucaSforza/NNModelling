@@ -1,7 +1,7 @@
 ---
 id: T08
 kind: task
-status: draft
+status: done
 plan: ../plan.md
 role: testing
 depends_on: [T07]
@@ -14,14 +14,15 @@ write_scope:
   - docs/plans/active/stereotype-type-system-frontend/evidence/
 ---
 
-# Differential-fuzz complete graphs against the oracle
+# Cross-validate three representative graphs against the oracle
 
 ## Objective
 
-Generate complete DAGs and nested subflows, execute the same canonical scenario
-against independent `stereotype-lab` and NNModelling adapters, compare exact
-observable results, shrink divergences, and retain minimized regressions. This
-is the final frontend gate before backend planning.
+Execute deterministic Transformer, variational-autoencoder and ResNet semantic
+graphs against independent `stereotype-lab` and NNModelling adapters, compare
+exact observable results, and produce saved editor diagrams that exercise the
+same package identities. Generative differential fuzzing is explicitly
+deferred to the next frontend testing milestone.
 
 ## Context required
 
@@ -32,39 +33,22 @@ is the final frontend gate before backend planning.
 - Reuse/adapt reference package fixtures and deterministic examples as fuzzer
   seeds. Do not invent alternative package semantics in the generator.
 
-## Generated semantic graphs
+## Deterministic semantic graphs
 
 The versioned wire graph is minimal semantic data, independent of Svelte and
-NNTree. Generation varies:
+NNTree. The three fixtures are complete acyclic graphs with exactly one
+terminal, exact package IDs/versions, ordered join handles, symbolic dimensions
+and canonical dtypes. The product ResNet additionally covers NCHW convolution,
+normalization, activation, pooling, flattening and classification.
 
-- complete acyclic topology with exactly one terminal;
-- package IDs/versions, all five kinds, valid cardinalities and ordered join
-  handles;
-- numeric/symbolic shapes, canonical dtypes, defaults and boundary parameters;
-- nested subflows, repeat counts, branches, dynamic joins and diagnostic paths;
-- activation/lease sequences and compatible/incompatible selected packages.
-
-Valid graphs are generated first. Invalid graphs are derived by one targeted
-mutation, such as a dtype mismatch, rank/dimension boundary, wrong parameter,
-wrong kind/version, missing activation, or incompatible nested branch. Random
-invalid JSON and random Lua source are excluded.
-
-## Comparison and shrinking
+## Comparison
 
 - Normalize canonical JSON and compare successful tensor results exactly.
 - Compare structured expected causes and ordered context frames exactly.
 - Compare fault category and semantic fault metadata without requiring equal
   internal stack traces or class names.
-- Shrink node/edge count, tensor rank/dimensions, parameter magnitudes,
-  package count, subflow depth, branch count and operation sequence.
-- Store seed, original/minimized scenario, oracle/candidate/protocol/package
-  identities, and both results. Every minimized divergence becomes a fixed
-  regression before the gate can pass.
-
-Incomplete editor graphs have a separate generator. It checks NNModelling's
-local reachability/unresolved-state properties and compares each actual package
-invocation with the oracle, but does not mislabel the incomplete graph as a
-complete oracle scenario.
+- Preserve the exact protocol and package identities so these fixtures remain
+  seeds for the later generator and shrinker.
 
 ## Independent properties
 
@@ -77,32 +61,29 @@ integer-to-floating selection.
 
 ## Acceptance criteria
 
-- [ ] Bounded CI and extended local profiles are deterministic by seed and run
-  both shared-package and product-package modes.
-- [ ] Generated complete graphs cover every kind, core package, composition
-  form, canonical dtype, and targeted-invalid category in the coverage ledger.
-- [ ] Candidate and oracle have zero untriaged divergences.
-- [ ] Every discovered divergence is minimized and retained as a deterministic
-  regression with full identities and outcomes.
-- [ ] Independent properties pass and can fail when their invariant is
-  deliberately violated in a test fixture.
-- [ ] Incomplete-graph fuzzing preserves local inference without treating the
-  graph as a complete oracle model.
+- [x] Candidate and oracle run as independent processes using protocol v2.
+- [x] Transformer, variational-autoencoder and reference-compatible ResNet
+  scenarios have zero divergences.
+- [x] Product ResNet passes the candidate scheduler through a realistic NCHW
+  residual graph.
+- [x] All four semantic fixtures survive editor export/import and retain exact
+  package ID, version and display name.
+- [ ] Seeded generation, invalid mutations, shrinking, nested subflows and
+  retained fuzz regressions are deferred to the future fuzzing milestone.
 
 ## Validation
 
 ```bash
-pnpm --dir front-end test:stereotype-conformance
-pnpm --dir front-end test:stereotype-fuzz -- --profile ci
+pnpm --dir front-end test:type-system:models
+pnpm --dir front-end exec vitest run src/__tests__/packageEditorModels.test.ts
 pnpm --dir front-end check
 pnpm --dir front-end test
-pnpm --dir front-end test:integration:smoke
+pnpm --dir front-end build
 git diff --check
 ```
 
 ## Required handoff
 
-Return generator/protocol schemas, seeds, coverage ledger, shrink results,
-retained corpus, shared/product outcomes, independent-property results, and an
-explicit statement that the frontend gate passes before any backend plan is
-opened.
+Return protocol/fixture schemas, shared/product outcomes and live-editor
+evidence. State explicitly that this is the requested three-model milestone,
+not the full frontend parity or fuzzing gate; no backend plan is opened.

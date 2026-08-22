@@ -16,9 +16,10 @@ areas:
 
 Build a new frontend-owned type system whose observable package activation,
 Lua inference, tensor types, dtype behavior, composition, and diagnostics match
-the `stereotype-lab` oracle. Implement reference-first, prove every slice with
-shared deterministic scenarios, then prove whole-graph equality with
-differential fuzzing. Stop before backend implementation.
+the `stereotype-lab` oracle. Implement reference-first and prove every slice
+with shared deterministic scenarios. The current milestone proves three model
+families; whole-graph differential fuzzing remains the next frontend milestone.
+Stop before backend implementation.
 
 ## Architecture discovery
 
@@ -185,8 +186,8 @@ wire data.
 | [T04](tasks/T04-joins.md) | `frontend` | `T03` | — | join scheduling, `core.add`, `core.concat` | Ordered multi-input inference matches the oracle without central package cases. |
 | [T05](tasks/T05-subflow-composition.md) | `frontend` | `T04` | — | nested graph adapter, repeat packages | Sequential/parallel subflows preserve inner causes and add iteration/branch/reference context. |
 | [T06](tasks/T06-dtype-and-loss.md) | `frontend` | `T05` | — | dtype controls/display, loss handling, remaining reference core packages | Canonical dtype and `loss` semantics are schema-driven and oracle-compatible. |
-| [T07](tasks/T07-differential-gate.md) | `testing` | `T06` | — | reference-suite port and test-only black-box protocol | Every relevant reference Bun test is run at the oracle and accounted for in the candidate. |
-| [T08](tasks/T08-graph-differential-fuzzing.md) | `testing` | `T07` | — | graph generators, adapters, shrinkers, regression corpus | Generated complete DAGs and nested subflows produce identical canonical observations. |
+| [T07](tasks/T07-differential-gate.md) | `testing` | `T06` | — | reference-suite port and test-only black-box protocol | The reference suite is run and a versioned independent-process protocol compares candidate and oracle. |
+| [T08](tasks/T08-graph-differential-fuzzing.md) | `testing` | `T07` | — | three deterministic model scenarios and editor fixtures | Transformer, variational-autoencoder and ResNet graphs produce identical canonical observations; generative fuzzing is deferred. |
 
 Tasks remain sequential because each extends the same semantic host and graph
 adapter. Every task is a reviewable vertical slice and must leave the previous
@@ -245,16 +246,16 @@ traversal or composition.
 
 ## Acceptance criteria
 
-- [ ] All reference core frontend inference semantics pass deterministic
-  candidate/oracle comparisons.
-- [ ] The original pinned frontend Bun suite passes in `stereotype-lab`, and
-  every applicable case has a candidate counterpart with a recorded reuse
-  mapping.
-- [ ] Schema-aware differential tests cover valid and targeted-invalid shapes,
-  dtypes, parameters, kinds, joins, subflows, and nested diagnostics.
-- [ ] Differential graph fuzzing compares complete DAGs with exactly one
-  terminal in shared-package and product-package modes, shrinks divergences,
-  and retains minimized failures.
+- [x] The pinned reference frontend Bun suite passes in `stereotype-lab`.
+- [x] Independent candidate/oracle processes compare deterministic Transformer,
+  variational-autoencoder and ResNet semantic graphs.
+- [x] Product-mode ResNet exercises copied reference primitives plus the
+  NNModelling-only convolutional package slice.
+- [ ] Every applicable reference test has a candidate counterpart and reuse
+  mapping; this remains part of full frontend parity.
+- [ ] Differential graph fuzzing covers complete DAGs, invalid mutations,
+  subflows, shrinking and retained regressions; explicitly deferred by the
+  user until after the three-model milestone.
 - [ ] Expected errors, unresolved editor states, and runtime faults are
   observably distinct.
 - [ ] New-format nodes persist exact package ID/version and display name.
@@ -266,22 +267,22 @@ traversal or composition.
 
 ## Final verification
 
-Run from the repository root:
+For the current three-model milestone, run from the repository root:
 
 ```bash
-pnpm --dir front-end test -- src/type-system tests/differential
-pnpm --dir front-end test:stereotype-conformance
-pnpm --dir front-end test:stereotype-fuzz -- --profile ci
+pnpm --dir front-end test:type-system:models
 pnpm --dir front-end check
 pnpm --dir front-end test
-pnpm --dir front-end test:integration:smoke
+pnpm --dir front-end build
 git diff --check
 ```
 
-In the live editor, create a new-format input-to-layer diagram, inspect shape
-and dtype on its output, introduce an expected mismatch, observe its structured
-context, disconnect an edge, and confirm the reachable region remains inferred
-while the dependent region becomes unresolved.
+In the live editor, load the generated Transformer, variational-autoencoder and
+product ResNet diagrams. Confirm the package scheduler reports exactly one
+terminal, every node succeeds, and the terminal shape/dtype matches the
+deterministic scenario. The complete diagnostic-composition and schema-driven
+editing workflow remains within T03–T06 rather than being claimed by this
+milestone.
 
 ## Backend: da vedere ancora
 
