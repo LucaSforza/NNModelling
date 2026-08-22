@@ -50,7 +50,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     onNodeDragStop,
   } from "./utils";
 
-  import { NNTree } from "./conversion/nnTree";
 
   // 1. Importiamo la classe Diagram
   import { Diagram, DIAGRAM_CONTEXT_KEY } from "./Diagram.svelte";
@@ -241,8 +240,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   function handleAddSubGraph() {
-    const pos = getSpawnPosition();
-    diagram.addSubGraph(pos.x, pos.y);
+    alert("I subflow richiedono un package attivo; seleziona un package Subflow dalla sidebar.");
   }
 
   function deleteSelectedElements() {
@@ -332,47 +330,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   async function handleConversion() {
-    const typeResult = diagram.refreshTypes();
-    const blockingErrors = typeResult.errors.filter(
-      (error) => error.severity === "error",
-    );
-    if (blockingErrors.length > 0) {
-      const summary = blockingErrors
-        .slice(0, 5)
-        .map((error) => `${error.nodeId || "graph"}: ${error.message}`)
-        .join("\n");
-      alert(`Conversione bloccata da ${blockingErrors.length} errori di tipo:\n${summary}`);
-      return;
-    }
-
-    const nnTree = new NNTree(diagram);
-    const data = nnTree.toJson();
-
-    // Controlla se showSaveFilePicker esiste (Chrome/Edge)
-    if ("showSaveFilePicker" in window) {
-      try {
-        const handle = await (window as any).showSaveFilePicker({
-          suggestedName: "nnTree.json",
-          types: [{ accept: { "application/json": [".json"] } }],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(data);
-        await writable.close();
-        return;
-      } catch (e) {
-        console.warn("L'utente ha chiuso la finestra o c'è stato un errore.");
-        return;
-      }
-    }
-
-    // Fallback per Firefox e browser vecchi
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "nnTree.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    alert("Conversione non disponibile: il backend package non è ancora installato.");
   }
 </script>
 

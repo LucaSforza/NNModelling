@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { Diagram } from "../Diagram.svelte";
-  import { NNTree } from "../conversion/nnTree";
   import {
     BackendApiError,
     TrainingApiClient,
@@ -278,49 +277,7 @@
   }
 
   function buildRequest(): TrainingJobRequest {
-    if (!selectedDatasetInfo) throw new Error("Seleziona un dataset");
-    const normalizedPackageSuffix = packageSuffix.trim();
-    if (normalizedPackageSuffix && !/^[A-Za-z][A-Za-z0-9_]*$/.test(normalizedPackageSuffix)) {
-      throw new Error("Il nome del pacchetto può contenere solo lettere, numeri e _ e deve iniziare con una lettera");
-    }
-    const datasetConfig: Record<string, unknown> = { _target_: selectedDataset };
-    for (const parameter of selectedDatasetInfo.parameters) {
-      const value = datasetParams[parameter.name];
-      if (value !== undefined && value !== "") datasetConfig[parameter.name] = coerce(value, parameter.type);
-    }
-    const nntree = JSON.parse(new NNTree(diagram).toJson()) as Record<string, unknown>;
-    return {
-      schema_version: 1,
-      network: { format: "nntree", value: nntree },
-      training: {
-        seed: Number.parseInt(seed, 10),
-        ...(selectedDatasetInfo.num_classes === null ? {} : { num_classes: selectedDatasetInfo.num_classes }),
-        dataset: {
-          ...datasetConfig,
-          batch_size: Number.parseInt(batchSize, 10),
-          num_workers: Number.parseInt(numWorkers, 10),
-          train_size: Number.parseFloat(trainSize),
-        },
-        optimizer: { _target_: optimizerTarget, lr: Number.parseFloat(learningRate) },
-        trainer: { max_epochs: Number.parseInt(maxEpochs, 10), accelerator },
-        wandb: { project: wandbProject, mode: wandbMode },
-        early_stopping: {
-          patience: Number.parseInt(patience, 10),
-          min_delta: Number.parseFloat(minDelta),
-        },
-        overrides: overridesText.split("\n").map((line) => line.trim()).filter(Boolean),
-      },
-      resources: {
-        cpu: Number.parseInt(cpu, 10),
-        memory_gb: Number.parseFloat(memoryGb),
-        gpu: Number.parseInt(gpu, 10),
-        ...(gpuMemoryGb ? { gpu_memory_gb: Number.parseFloat(gpuMemoryGb) } : {}),
-        ...(gpuType ? { gpu_type: gpuType } : {}),
-        ...(node ? { node } : {}),
-      },
-      priority: Number.parseInt(priority, 10),
-      ...(normalizedPackageSuffix ? { package_name: `nnm_${normalizedPackageSuffix}` } : {}),
-    };
+    throw new Error("Training is unavailable until the package backend runtime exists");
   }
 
   async function submit() {
