@@ -64,6 +64,7 @@ export class LuaInferenceRuntime {
       engine.global.set("__host_tensor_dimension", tensorDimension)
       engine.global.set("__host_tensor_with_dimension", tensorWithDimension)
       engine.global.set("__host_tensor_append_dimension", tensorAppendDimension)
+      engine.global.set("__host_tensor_flatten", tensorFlatten)
       engine.global.set("__host_tensor_dtype", tensorDType)
       engine.global.set("__host_tensor_with_dtype", tensorWithDType)
       engine.global.set("__host_tensor_equal", tensorEqual)
@@ -126,6 +127,7 @@ function buildLoader(source: string): string {
   local host_dimension = __host_tensor_dimension
   local host_with_dimension = __host_tensor_with_dimension
   local host_append_dimension = __host_tensor_append_dimension
+  local host_flatten = __host_tensor_flatten
   local host_dtype = __host_tensor_dtype
   local host_with_dtype = __host_tensor_with_dtype
   local host_equal = __host_tensor_equal
@@ -135,6 +137,7 @@ function buildLoader(source: string): string {
     dimension = host_dimension,
     with_dimension = host_with_dimension,
     append_dimension = host_append_dimension,
+    flatten = host_flatten,
     dtype = host_dtype,
     with_dtype = host_with_dtype,
     equal = host_equal,
@@ -236,6 +239,32 @@ function tensorAppendDimension(value: unknown, size: unknown): unknown {
   if (tensor instanceof Error) return failure(tensor.message)
   if (!isDimension(size)) return failure("tensor dimension must be a finite number or string")
   return { shape: [...tensor.shape, size], dtype: tensor.dtype }
+}
+
+function tensorFlatten(value: unknown, start: unknown, end: unknown): unknown {
+  const tensor = tensorOrError(value)
+  if (tensor instanceof Error) return failure(tensor.message)
+  const startIndex = dimensionIndex(tensor, start)
+  if (startIndex instanceof Error) return failure(startIndex.message)
+  const endIndex = dimensionIndex(tensor, end)
+  if (endIndex instanceof Error) return failure(endIndex.message)
+  if (startIndex > endIndex) return failure("flatten start dimension must not exceed end dimension")
+  if (startIndex === endIndex) return { shape: [...tensor.shape], dtype: tensor.dtype }
+
+  let product = 1
+  for (let index = startIndex; index <= endIndex; index++) {
+    const dimension = tensor.shape[index]
+    if (typeof dimension !== "number") return failure("flatten requires numeric dimensions")
+    product *= dimension
+  }
+  return {
+    shape: [
+      ...tensor.shape.slice(0, startIndex),
+      product,
+      ...tensor.shape.slice(endIndex + 1),
+    ],
+    dtype: tensor.dtype,
+  }
 }
 
 function tensorDType(value: unknown): unknown {

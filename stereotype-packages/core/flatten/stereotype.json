@@ -1,0 +1,20 @@
+{
+  "name": "Flatten",
+  "description": "NNModelling product-mode dimension-range flattening contract; this package is not copied from the stereotype-lab oracle.",
+  "kind": "layer",
+  "view": {
+    "color": "#a9a9a9",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "start_dim": {
+      "type": "integer",
+      "default": 1
+    },
+    "end_dim": {
+      "type": "integer",
+      "default": -1
+    }
+  }
+}

@@ -119,6 +119,22 @@ end
   runtime.dispose()
 })
 
+test("flattens a tensor range through the package tensor library", async () => {
+  const runtime = await LuaInferenceRuntime.create(`
+return function(context)
+  local output, message = tensor.flatten(context.inputs[1], 1, -1)
+  if not output then return { status = "error", message = message } end
+  return { status = "success", output = output }
+end
+`)
+
+  expect(runtime.inferType({ inputs: [f32(["B", 64, 7, 7])] }, {})).toEqual({
+    status: "success",
+    output: f32(["B", 3136]),
+  })
+  runtime.dispose()
+})
+
 test("bridges granted capabilities without exposing host state", async () => {
   const runtime = await LuaInferenceRuntime.create(`
 return function(context, parameters, services)

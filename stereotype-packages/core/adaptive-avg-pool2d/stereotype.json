@@ -1,0 +1,17 @@
+{
+  "name": "AdaptiveAvgPool2d",
+  "description": "NNModelling product-mode NCHW adaptive average-pooling contract; this package is not copied from the stereotype-lab oracle.",
+  "kind": "layer",
+  "view": {
+    "color": "#48d1cc",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "output_size": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "bottom"
+    }
+  }
+}

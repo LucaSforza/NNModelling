@@ -1,0 +1,36 @@
+{
+  "name": "BatchNorm2d",
+  "description": "NNModelling product-mode rank-4 batch normalization contract; this package is not copied from the stereotype-lab oracle.",
+  "kind": "layer",
+  "view": {
+    "color": "#9370db",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "num_features": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "top"
+    },
+    "eps": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.00001
+    },
+    "momentum": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.1
+    },
+    "affine": {
+      "type": "boolean",
+      "default": true
+    },
+    "track_running_stats": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "name": "Conv2d",
+  "description": "NNModelling product-mode NCHW convolution contract; this package is not copied from the stereotype-lab oracle.",
+  "kind": "layer",
+  "view": {
+    "color": "#20b2aa",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "in_channels": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "top"
+    },
+    "out_channels": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "bottom"
+    },
+    "kernel_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "stride": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "padding": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "dilation": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "groups": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "bias": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

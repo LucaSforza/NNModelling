@@ -1,0 +1,16 @@
+{
+  "name": "ReLU",
+  "description": "NNModelling product-mode shape and dtype identity activation; this package is not copied from the stereotype-lab oracle.",
+  "kind": "layer",
+  "view": {
+    "color": "#f4a460",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "inplace": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
