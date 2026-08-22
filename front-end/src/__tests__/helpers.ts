@@ -68,19 +68,6 @@ export function edge(
 // Type engine test helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { TypeResult } from '../conversion/tensortypes';
-
-/**
- * Assert that a TypeResult is successful (no errors with severity 'error').
- */
-export function expectTypeSuccess(result: TypeResult): void {
-  const hardErrors = result.errors.filter(e => e.severity === 'error');
-  if (hardErrors.length > 0) {
-    throw new Error(
-      `Expected type success but got errors: ${hardErrors.map(e => e.message).join('; ')}`,
-    );
-  }
-}
 
 /**
  * Assert that a node in the TypeResult has the expected output shape.

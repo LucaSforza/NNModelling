@@ -91,13 +91,6 @@ function fallbackNodeSize(node: Node, direction: LayoutDirection): NodeSize {
       : { width: inputSpan, height: AUTO_LAYOUT_GEOMETRY.joinCrossSize };
   }
 
-  if (node.data?.isInput === true) {
-    return {
-      width: AUTO_LAYOUT_GEOMETRY.inputNodeWidth,
-      height: AUTO_LAYOUT_GEOMETRY.inputNodeHeight,
-    };
-  }
-
   return {
     width: AUTO_LAYOUT_GEOMETRY.defaultNodeWidth,
     height: AUTO_LAYOUT_GEOMETRY.defaultNodeHeight,
