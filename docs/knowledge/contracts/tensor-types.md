@@ -1,10 +1,17 @@
 ---
 kind: knowledge
-status: current
-updated: 2026-08-12
+status: deprecated
+updated: 2026-08-22
 ---
 
-# Tensor type-system contract
+# Legacy tensor type-system contract
+
+This document describes the still-present legacy `TypeEngine`. It is
+deprecated and must not receive new semantics. Its replacement boundary and
+deletion requirement are recorded in
+[`../decisions/stereotype-type-system-migration.md`](../decisions/stereotype-type-system-migration.md).
+Keep this document only while the legacy implementation remains in the tree;
+archive it when that implementation is deleted.
 
 The editor performs constraint-based shape and dtype inference before Python
 execution. Stereotype JSON declares contracts; `TypeEngine` interprets generic
