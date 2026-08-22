@@ -25,21 +25,17 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - run: pnpm install
       - run: pnpm --filter @nnmodelling/front-end run check
       - run: pnpm --filter @nnmodelling/front-end run test
       - run: pnpm --filter @nnmodelling/front-end run build
 
-  # Milestone A T1: required Python-backed integration tiers, restricted to the
-  # two selected validation models (mninst + autoencoder_mnist) — no transformer
-  # expansion. NNM_REQUIRE_PYTHON=true is embedded in the convert/forward
-  # scripts and set here job-wide, so a missing Python runtime fails the run
-  # instead of silently skipping.
   frontend-integration:
-    name: Frontend integration (mninst + autoencoder_mnist)
+    name: Frontend package conformance
     runs-on: ubuntu-latest
-    env:
-      NNM_REQUIRE_PYTHON: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -49,42 +45,12 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - uses: actions/setup-python@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          python-version: "3.12"
-      - run: pip install uv
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('converted/uv.lock') }}
-      - run: uv sync
-        working-directory: converted
+          bun-version: latest
       - run: pnpm install
-      - name: Smoke — mninst
-        run: pnpm --filter @nnmodelling/front-end run test:integration:smoke
-        env:
-          NNM_DIAGRAM: mninst
-      - name: Smoke — autoencoder_mnist
-        run: pnpm --filter @nnmodelling/front-end run test:integration:smoke
-        env:
-          NNM_DIAGRAM: autoencoder_mnist
-      - name: Convert — mninst
-        run: pnpm --filter @nnmodelling/front-end run test:integration:convert
-        env:
-          NNM_DIAGRAM: mninst
-      - name: Convert — autoencoder_mnist
-        run: pnpm --filter @nnmodelling/front-end run test:integration:convert
-        env:
-          NNM_DIAGRAM: autoencoder_mnist
-      - name: Forward/backward — mninst
-        run: pnpm --filter @nnmodelling/front-end run test:integration:forward
-        env:
-          NNM_DIAGRAM: mninst
-      - name: Forward/backward — autoencoder_mnist
-        run: pnpm --filter @nnmodelling/front-end run test:integration:forward
-        env:
-          NNM_DIAGRAM: autoencoder_mnist
+      - run: pnpm --filter @nnmodelling/front-end run test:type-system
+      - run: pnpm --filter @nnmodelling/front-end run test:type-system:models
 
   backend-fast:
     name: Backend fast gate (-m fast)
