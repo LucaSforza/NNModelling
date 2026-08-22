@@ -453,15 +453,62 @@ export class BrowserRPCHandler {
   // ── Mutation Handlers ───────────────────────────────────────────────
 
   private handleCreateNode(params: Record<string, unknown>): Record<string, unknown> {
-    const stereotypeName = params.stereotype as string;
-    if (!stereotypeName) throw new Error("Missing required parameter: stereotype");
-    const stereo = this.diagram.getStereotype(stereotypeName);
-    if (!stereo) throw new Error(`Stereotype not found: ${stereotypeName}`);
-
     const position = params.position as { x: number; y: number } | undefined;
     const x = position?.x ?? 0;
     const y = position?.y ?? 0;
     const config = (params.config || {}) as Record<string, unknown>;
+
+    const packageSpec = params.package as {
+      id?: unknown;
+      version?: unknown;
+      name?: unknown;
+      kind?: unknown;
+    } | undefined;
+    if (packageSpec) {
+      if (typeof packageSpec.id !== "string" || typeof packageSpec.version !== "string" ||
+          typeof packageSpec.name !== "string" || typeof packageSpec.kind !== "string") {
+        throw new Error("package requires exact id, version, name and kind");
+      }
+      const metadata = this.diagram.packageCatalog.find((candidate) =>
+        candidate.id === packageSpec.id && candidate.version === packageSpec.version,
+      );
+      if (!metadata) throw new Error(`Package not active: ${packageSpec.id}@${packageSpec.version}`);
+      if (metadata.definition.kind !== packageSpec.kind) {
+        throw new Error(`Package kind mismatch for ${packageSpec.id}: expected ${metadata.definition.kind}`);
+      }
+      if (metadata.definition.name !== packageSpec.name) {
+        throw new Error(`Package name mismatch for ${packageSpec.id}: expected '${metadata.definition.name}'`);
+      }
+      const beforeCount = this.diagram.nodes.length;
+      this.diagram.addPackageNode(
+        { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name },
+        metadata.definition.kind,
+        x,
+        y,
+        {
+          name: config.name as string | undefined,
+          color: (config.color as string | undefined) ?? metadata.definition.view.color,
+          width: (config.width as number | undefined) ?? metadata.definition.view.width,
+          height: (config.height as number | undefined) ?? metadata.definition.view.height,
+          params: (config.params as Record<string, unknown>) ?? {},
+          inputsCount: config.inputsCount as number | undefined,
+          parentId: config.parentId as string | undefined,
+        },
+      );
+      const added = this.diagram.nodes[beforeCount];
+      if (!added) throw new Error("Failed to create package node");
+      return {
+        nodeId: added.id,
+        name: added.data.name ?? packageSpec.name,
+        type: added.type ?? "custom",
+        package: added.data.package,
+      };
+    }
+
+    const stereotypeName = params.stereotype as string;
+    if (!stereotypeName) throw new Error("Missing required parameter: stereotype");
+    const stereo = this.diagram.getStereotype(stereotypeName);
+    if (!stereo) throw new Error(`Stereotype not found: ${stereotypeName}`);
 
     const beforeCount = this.diagram.nodes.length;
 

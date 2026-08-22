@@ -25,7 +25,13 @@ import type { ServerContext } from "../server";
 
 export const create_node = {
   schema: z.object({
-    stereotype: z.string().min(1),
+    stereotype: z.string().min(1).optional(),
+    package: z.object({
+      id: z.string().min(1),
+      version: z.string().min(1),
+      name: z.string().min(1),
+      kind: z.enum(["input", "layer", "loss", "join", "subflow"]),
+    }).optional(),
     position: z.object({ x: z.number(), y: z.number() }),
     config: z
       .object({
@@ -33,11 +39,13 @@ export const create_node = {
         color: z.string().optional(),
         width: z.number().optional(),
         height: z.number().optional(),
-        params: z.record(z.string(), z.string()).optional(),
+        params: z.record(z.string(), z.unknown()).optional(),
         inputsCount: z.number().int().min(1).optional(),
         parentId: z.string().optional(),
       })
       .optional(),
+  }).refine((value) => Boolean(value.stereotype || value.package), {
+    message: "create_node requires stereotype or package",
   }),
 
   async handler(ctx: ServerContext, input: z.infer<typeof this.schema>) {

@@ -1,56 +1,67 @@
-<!--
-NNModelling — DSL for designing neural networks via visual node editor
-Copyright (C) 2026  Luca Sforza
-
-Licensed under the GNU General Public License v3 or later.
-Commercial licenses are available — contact Luca Sforza.
-See the LICENSE file for details.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
--->
-
 <script lang="ts">
   import type { Diagram } from "../Diagram.svelte";
   import type { StereotypeCore } from "../core/StereotypeCore";
+  import type { ActivePackageMetadata } from "../type-system/host";
+  import { groupedPackages } from "../type-system/editor/package-ui";
 
   interface Props {
-    selectedStereotype: StereotypeCore | null;
     diagram: Diagram;
-    onSelectedChange: (stereotype: StereotypeCore | null) => void;
+    selectedStereotype?: StereotypeCore | null;
+    onSelectedChange?: (stereotype: StereotypeCore | null) => void;
+    packageCatalog?: readonly ActivePackageMetadata[];
+    selectedPackage?: ActivePackageMetadata | null;
+    onPackageChange?: (metadata: ActivePackageMetadata | null) => void;
   }
 
-  let { selectedStereotype, diagram, onSelectedChange }: Props = $props();
-  // Funzione che intercetta il cambio nativo della select
+  let {
+    diagram,
+    selectedStereotype = null,
+    onSelectedChange,
+    packageCatalog = [],
+    selectedPackage = null,
+    onPackageChange,
+  }: Props = $props();
+
+  let packageMode = $derived(onPackageChange !== undefined || packageCatalog.length > 0);
+  let packageGroups = $derived(groupedPackages(packageCatalog));
+
   function handleChange(event: Event) {
     const select = event.target as HTMLSelectElement;
-    const selectedName = select.value;
-
-    if (!selectedName) {
-      onSelectedChange(null);
+    const value = select.value;
+    if (packageMode) {
+      const found = packageCatalog.find((metadata) => `${metadata.id}@${metadata.version}` === value);
+      onPackageChange?.(found ?? null);
       return;
     }
-
-    // Cerchiamo l'oggetto Stereotype corretto e lo passiamo al padre
-    const found = diagram.stereotypes.find((s) => s.name === selectedName);
-    onSelectedChange(found || null);
+    const found = diagram.stereotypes.find((stereotype) => stereotype.name === value);
+    onSelectedChange?.(found ?? null);
   }
 </script>
 
 <select
-  name="stereotypes"
-  id="stereotypes"
-  value={selectedStereotype ? selectedStereotype.name : ""}
+  name={packageMode ? "packages" : "stereotypes"}
+  id={packageMode ? "packages" : "stereotypes"}
+  value={packageMode
+    ? (selectedPackage ? `${selectedPackage.id}@${selectedPackage.version}` : "")
+    : (selectedStereotype?.name ?? "")}
   onchange={handleChange}
 >
-  <option value="">-- aggiungi layer --</option>
-
-  {#each diagram.stereotypes as stereotype}
-    <option value={stereotype.name}>
-      {stereotype.name}
-    </option>
-  {/each}
+  <option value="">{packageMode ? "-- aggiungi package --" : "-- aggiungi layer --"}</option>
+  {#if packageMode}
+    {#each packageGroups as group (group.name)}
+      <optgroup label={group.name}>
+        {#each group.packages as metadata (`${metadata.id}@${metadata.version}`)}
+          <option value={`${metadata.id}@${metadata.version}`}>
+            {metadata.definition.name}
+          </option>
+        {/each}
+      </optgroup>
+    {/each}
+  {:else}
+    {#each diagram.stereotypes as stereotype (stereotype.name)}
+      <option value={stereotype.name}>{stereotype.name}</option>
+    {/each}
+  {/if}
 </select>
 
 <style>

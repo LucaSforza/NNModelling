@@ -131,6 +131,41 @@ describe("BrowserRPCHandler", () => {
     expect(graph.packageTypeInfo.nodes[testNode.id].output.shape).toEqual(["B", 16]);
   });
 
+  it("creates an exact package node through the browser RPC", () => {
+    const { handler, diagram, mockSend } = createHandler();
+    diagram.packageCatalog = [{
+      id: "core.linear",
+      version: "0.1.0",
+      definition: {
+        name: "Linear",
+        kind: "layer",
+        view: { color: "#4779c4", width: 180, height: 100 },
+        parameters: {},
+      },
+    }];
+
+    (handler as any).handleMessage({
+      data: JSON.stringify({
+        id: "package-create",
+        method: "create_node",
+        params: {
+          package: { id: "core.linear", version: "0.1.0", name: "Linear", kind: "layer" },
+          position: { x: 20, y: 30 },
+          config: { name: "Projection", params: { in_features: 8, out_features: 4, dtype: "float32" } },
+        },
+      }),
+    });
+
+    const response = JSON.parse(mockSend.mock.calls[0][0]);
+    expect(response.result.package).toEqual({ id: "core.linear", version: "0.1.0", name: "Linear" });
+    const created = diagram.nodes.find((node) => node.id === response.result.nodeId);
+    expect(created?.data.params).toEqual({ in_features: 8, out_features: 4, dtype: "float32" });
+    expect(created?.data.name).toBe("Projection");
+    expect(created?.data.color).toBe("#4779c4");
+    expect(created?.width).toBe(180);
+    expect(created?.height).toBe(100);
+  });
+
   it("recomputes types after RPC mutations and exposes JSON-safe type information", () => {
     const { handler, diagram, mockSend } = createHandler();
 

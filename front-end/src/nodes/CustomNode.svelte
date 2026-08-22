@@ -34,17 +34,25 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   );
 
   // Svelte 5: Filtriamo dinamicamente i parametri per posizione
-  let topParams = $derived(
-    Object.entries(data.params || {}).filter(
-      ([_, p]: any) => p?.position === "top",
-    ),
-  );
+  let packageMetadata = $derived.by(() => {
+    const identity = data.package as { id?: unknown; version?: unknown } | undefined;
+    if (!identity) return null;
+    return diagram?.packageCatalog.find((metadata) => metadata.id === identity.id && metadata.version === identity.version) ?? null;
+  });
 
-  let bottomParams = $derived(
-    Object.entries(data.params || {}).filter(
-      ([_, p]: any) => p?.position === "bottom",
-    ),
-  );
+  function displayParams(position: "top" | "bottom") {
+    const params = (data.params as Record<string, unknown> | undefined) ?? {};
+    if (packageMetadata) {
+      return Object.entries(packageMetadata.definition.parameters)
+        .filter(([, definition]) => definition.position === position)
+        .map(([key]) => [key, params[key]] as const);
+    }
+    return Object.entries(params)
+      .filter(([, value]) => (value as { position?: string } | undefined)?.position === position);
+  }
+
+  let topParams = $derived(displayParams("top"));
+  let bottomParams = $derived(displayParams("bottom"));
 
   function focusInSidebar() {
     diagram.nodes = diagram.nodes.map((n) => ({
@@ -97,7 +105,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       {#each topParams as [key, param]}
         <div class="param-row">
           <span class="param-key">{key}</span>
-          <span class="param-value">{param.value}</span>
+          <span class="param-value">{param && typeof param === "object" && "value" in param ? param.value : String(param ?? "")}</span>
         </div>
       {/each}
     </div>
@@ -110,7 +118,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       {#each bottomParams as [key, param]}
         <div class="param-row">
           <span class="param-key">{key}</span>
-          <span class="param-value">{param.value}</span>
+          <span class="param-value">{param && typeof param === "object" && "value" in param ? param.value : String(param ?? "")}</span>
         </div>
       {/each}
     </div>

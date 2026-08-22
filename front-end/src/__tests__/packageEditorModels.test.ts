@@ -53,4 +53,89 @@ describe("package model editor acceptance", () => {
       return typeof packageIdentity?.id === "string" && typeof packageIdentity.version === "string" && typeof packageIdentity.name === "string"
     })).toBe(true)
   })
+
+  test("infers an atomic multi-head subflow and follows its dynamic join reference", async () => {
+    runtime = await EditorTypeSystemRuntime.create()
+    const identity = (id: string, name: string) => ({ id, version: "0.1.0", name })
+    const packageNode = (id: string, packageId: string, name: string, params: Record<string, unknown>, parentId?: string, type: Node["type"] = "custom"): Node => ({
+      id,
+      type,
+      parentId,
+      position: { x: 0, y: 0 },
+      data: {
+        package: identity(packageId, name),
+        name: id,
+        stereotype: name,
+        params,
+        ...(packageId === "core.input" ? { isInput: true } : {}),
+        ...(packageId === "core.horizontal-repeat" || packageId === "core.repeat" ? { isSubFlow: true } : {}),
+        ...(packageId === "core.add" ? { inputsCount: 2 } : {}),
+      },
+    })
+    const nodes: Node[] = [
+      packageNode("input", "core.input", "Input", { shape: ["B", "T", 128], dtype: "float32" }),
+      packageNode("mha", "core.horizontal-repeat", "Horizontal Repeat", {
+        times: 2,
+        join: { id: "core.concat", version: "^0.1.0", parameters: { dim: -1 } },
+      }, undefined, "subflow"),
+      packageNode("head", "core.repeat", "Repeat", { times: 1 }, "mha", "subflow"),
+      packageNode("fork", "core.fork", "Fork", {}, "head"),
+      packageNode("q", "core.linear", "Linear", { in_features: 128, out_features: 32, dtype: "float32" }, "head"),
+      packageNode("k", "core.linear", "Linear", { in_features: 128, out_features: 32, dtype: "float32" }, "head"),
+      packageNode("v", "core.linear", "Linear", { in_features: 128, out_features: 32, dtype: "float32" }, "head"),
+      packageNode("qk", "core.add", "Add", {}, "head", "join"),
+      packageNode("qkv", "core.add", "Add", {}, "head", "join"),
+    ]
+    const edge = (source: string, target: string, index = 0, parentId?: string): Edge => ({
+      id: `${source}-${target}`,
+      source,
+      target,
+      sourceHandle: "out",
+      targetHandle: index ? `in-${index}` : "in-0",
+      type: "editable",
+      data: { parentId },
+    })
+    const edges: Edge[] = [
+      edge("input", "mha"),
+      edge("fork", "q"), edge("fork", "k"), edge("fork", "v"),
+      edge("q", "qk", 0), edge("k", "qk", 1),
+      edge("qk", "qkv", 0), edge("v", "qkv", 1),
+    ]
+    const concatResult = runtime.infer({ nodes, edges })
+    expect(concatResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: ["B", "T", 64], dtype: "float32" } })
+
+    const addNode = nodes.find((node) => node.id === "mha")!
+    addNode.data = {
+      ...addNode.data,
+      params: { times: 2, join: { id: "core.add", version: "^0.1.0", parameters: {} } },
+    }
+    const addResult = runtime.infer({ nodes, edges })
+    expect(addResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: ["B", "T", 32], dtype: "float32" } })
+  })
+
+  test("refreshes package inference after an editor parameter update", async () => {
+    runtime = await EditorTypeSystemRuntime.create()
+    const source = new MemoryDiagram()
+    const input = source.addPackageNode({ id: "core.input", version: "0.1.0", name: "Input" }, "input", 0, 0, {
+      params: { shape: ["B", 8], dtype: "float32" },
+    })
+    const linear = source.addPackageNode({ id: "core.linear", version: "0.1.0", name: "Linear" }, "layer", 0, 100, {
+      params: { in_features: 8, out_features: 4, dtype: "float32" },
+    })
+    source.addEdge(input.id, linear.id)
+    expect(runtime.infer({ nodes: source.nodes, edges: source.edges }).nodes.get(linear.id)).toEqual({
+      status: "success", output: { shape: ["B", 4], dtype: "float32" },
+    })
+
+    const reactiveParams = new Proxy({ in_features: 8, out_features: 4, dtype: "float16" }, {})
+    source.updatePackageNode(linear.id, { id: "core.linear", version: "0.1.0", name: "Linear" }, "layer", {
+      params: reactiveParams,
+    })
+    expect(source.nodes.find((node) => node.id === linear.id)?.data.params).toEqual({
+      in_features: 8, out_features: 4, dtype: "float16",
+    })
+    expect(runtime.infer({ nodes: source.nodes, edges: source.edges }).nodes.get(linear.id)).toEqual({
+      status: "error", message: "Linear expects dtype float16, got float32",
+    })
+  })
 })

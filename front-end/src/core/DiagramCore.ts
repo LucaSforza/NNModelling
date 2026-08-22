@@ -55,6 +55,12 @@ function sameParams(a: unknown, b: unknown): boolean {
   return true;
 }
 
+/** Convert Svelte's reactive proxy payloads into persisted JSON primitives. */
+function clonePackageParams(value: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!value) return {};
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
 function normalizedLayoutDirection(value: unknown): LayoutDirection {
   return value === "horizontal" ? "horizontal" : "vertical";
 }
@@ -275,7 +281,7 @@ export class DiagramCore {
    */
   public addPackageModule(
     identity: PackageIdentity,
-    kind: "input" | "layer",
+    kind: "input" | "layer" | "loss",
     x: number,
     y: number,
     config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string },
@@ -294,13 +300,160 @@ export class DiagramCore {
         stereotype: identity.name,
         name: finalName,
         color: config?.color ?? "#ffffff",
-        params: structuredClone(config?.params ?? {}),
+        params: clonePackageParams(config?.params),
         isInput: kind === "input",
+        isLoss: kind === "loss",
       },
     };
     this.nodes = [...this.nodes, newNode];
     this.notifyGraphChanged();
     return newNode;
+  }
+
+  /** Create any package kind from declarative metadata, without package-ID cases. */
+  public addPackageNode(
+    identity: PackageIdentity,
+    kind: "input" | "layer" | "loss" | "join" | "subflow",
+    x: number,
+    y: number,
+    config?: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      inputsCount?: number;
+      parentId?: string;
+    },
+  ): Node {
+    if (kind === "join") {
+      return this.addPackageJoin(identity, x, y, config);
+    }
+    if (kind === "subflow") {
+      return this.addPackageSubflow(identity, x, y, config);
+    }
+    return this.addPackageModule(identity, kind, x, y, config);
+  }
+
+  public addPackageJoin(
+    identity: PackageIdentity,
+    x: number,
+    y: number,
+    config?: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      inputsCount?: number;
+      parentId?: string;
+    },
+  ): Node {
+    this._captureUndoState();
+    const node: Node = {
+      id: `join_${crypto.randomUUID()}`,
+      type: "join",
+      position: { x, y },
+      width: config?.width,
+      height: config?.height,
+      parentId: config?.parentId,
+      data: {
+        package: { ...identity },
+        stereotype: identity.name,
+        name: config?.name?.trim() || identity.name,
+        color: config?.color ?? "#4779c4",
+        params: clonePackageParams(config?.params),
+        inputsCount: config?.inputsCount ?? 2,
+      },
+    };
+    this.nodes = [...this.nodes, node];
+    this.notifyGraphChanged();
+    return node;
+  }
+
+  public addPackageSubflow(
+    identity: PackageIdentity,
+    x: number,
+    y: number,
+    config?: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      parentId?: string;
+    },
+  ): Node {
+    this._captureUndoState();
+    const name = config?.name?.trim() || identity.name;
+    const width = config?.width ?? 180;
+    const height = config?.height ?? 100;
+    const node: Node = {
+      id: `subflow_${crypto.randomUUID()}`,
+      type: "subflow",
+      position: { x, y },
+      width,
+      height,
+      parentId: config?.parentId,
+      data: {
+        package: { ...identity },
+        stereotype: identity.name,
+        name,
+        label: name,
+        color: config?.color ?? "#4779c4",
+        params: clonePackageParams(config?.params),
+        isSubFlow: true,
+        isCollapsed: false,
+        oldWidth: width,
+        oldHeight: height,
+      },
+    };
+    this.nodes = [...this.nodes, node];
+    this.notifyGraphChanged();
+    return node;
+  }
+
+  /** Update a package node while preserving its exact identity and primitive params. */
+  public updatePackageNode(
+    id: string,
+    identity: PackageIdentity,
+    kind: "input" | "layer" | "loss" | "join" | "subflow",
+    config: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      inputsCount?: number;
+    },
+  ): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    this._captureUndoState();
+    this.nodes = this.nodes.map((candidate) => {
+      if (candidate.id !== id) return candidate;
+      const data = {
+        ...candidate.data,
+        package: { ...identity },
+        stereotype: identity.name,
+        name: config.name ?? candidate.data.name,
+        label: kind === "subflow" ? (config.name ?? candidate.data.label ?? candidate.data.name) : candidate.data.label,
+        color: config.color ?? candidate.data.color,
+        params: config.params === undefined ? candidate.data.params : clonePackageParams(config.params),
+        isInput: kind === "input",
+        isLoss: kind === "loss",
+        isSubFlow: kind === "subflow",
+        ...(kind === "join" ? { inputsCount: config.inputsCount ?? candidate.data.inputsCount ?? 2 } : {}),
+      };
+      return {
+        ...candidate,
+        type: kind === "join" ? "join" : kind === "subflow" ? "subflow" : "custom",
+        width: config.width ?? candidate.width,
+        height: config.height ?? candidate.height,
+        data,
+      };
+    });
+    this.notifyGraphChanged();
   }
 
   public addJoinNode(

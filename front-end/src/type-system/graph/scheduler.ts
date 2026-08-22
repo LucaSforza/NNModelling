@@ -13,15 +13,34 @@ export class PackageGraphScheduler {
   infer(snapshot: TypeGraphSnapshot): GraphInferenceResult {
     const results = new Map<string, GraphNodeResult>()
     const order: string[] = []
-    const pending = new Map(snapshot.nodes.map(node => [node.id, node]))
-    const incoming = (id: string) => snapshot.edges.filter(edge => edge.target === id)
+    const topLevel = snapshot.nodes.filter((node) => !node.parentId)
+    this.inferScope(topLevel, snapshot, results, order)
+
+    const topLevelIds = new Set(topLevel.map((node) => node.id))
+    const outgoing = new Set(snapshot.edges
+      .filter((edge) => topLevelIds.has(edge.source) && topLevelIds.has(edge.target))
+      .map(edge => edge.source))
+    const terminals = topLevel.filter(node => !outgoing.has(node.id)).map(node => node.id)
+    return { nodes: results, order, terminals, complete: terminals.length === 1 }
+  }
+
+  private inferScope(
+    scope: readonly Node[],
+    snapshot: TypeGraphSnapshot,
+    results: Map<string, GraphNodeResult>,
+    order: string[],
+    boundaryInput?: import("../tensor-type").TensorType,
+  ): GraphNodeResult | undefined {
+    const scopeIds = new Set(scope.map((node) => node.id))
+    const pending = new Map(scope.map(node => [node.id, node]))
+    const incoming = (id: string) => snapshot.edges.filter(edge => edge.target === id && scopeIds.has(edge.source))
 
     while (pending.size > 0) {
       let progressed = false
       for (const node of pending.values()) {
         const dependencies = incoming(node.id).map(edge => edge.source)
         if (dependencies.some(source => pending.has(source))) continue
-        const result = this.inferNode(node, snapshot, results)
+        const result = this.inferNode(node, snapshot, results, boundaryInput, scopeIds)
         results.set(node.id, result)
         order.push(node.id)
         pending.delete(node.id)
@@ -32,16 +51,27 @@ export class PackageGraphScheduler {
           results.set(node.id, { status: "unresolved", reason: "graph contains a cycle" })
           order.push(node.id)
         }
-        break
+        return { status: "error", message: "subflow graph contains a cycle" }
       }
     }
 
-    const outgoing = new Set(snapshot.edges.map(edge => edge.source))
-    const terminals = snapshot.nodes.filter(node => !outgoing.has(node.id)).map(node => node.id)
-    return { nodes: results, order, terminals, complete: terminals.length === 1 }
+    const outgoing = new Set(snapshot.edges
+      .filter((edge) => scopeIds.has(edge.source) && scopeIds.has(edge.target))
+      .map(edge => edge.source))
+    const terminals = scope.filter((node) => !outgoing.has(node.id))
+    if (terminals.length !== 1) {
+      return { status: "error", message: `subflow requires exactly one terminal, got ${terminals.length}` }
+    }
+    return results.get(terminals[0]!.id) as GraphNodeResult
   }
 
-  private inferNode(node: Node, snapshot: TypeGraphSnapshot, results: ReadonlyMap<string, GraphNodeResult>): GraphNodeResult {
+  private inferNode(
+    node: Node,
+    snapshot: TypeGraphSnapshot,
+    results: ReadonlyMap<string, GraphNodeResult>,
+    boundaryInput: import("../tensor-type").TensorType | undefined,
+    scopeIds: ReadonlySet<string>,
+  ): GraphNodeResult {
     const identity = packageIdentity(node)
     if (!identity) return { status: "unresolved", reason: "node has no versioned package identity" }
     if (!this.host.isActive(identity.id)) return { status: "unresolved", reason: `package '${identity.id}' is not active` }
@@ -50,7 +80,9 @@ export class PackageGraphScheduler {
     const definition = this.host.packageDefinition(identity.id)
     if (!definition) return { status: "unresolved", reason: `package '${identity.id}' has no definition` }
 
-    const inputs = inputsFor(node.id, snapshot.edges, results)
+    const nodeEdges = snapshot.edges.filter((edge) => scopeIds.has(edge.source) && scopeIds.has(edge.target))
+    let inputs = inputsFor(node.id, nodeEdges, results)
+    if (inputs && inputs.length === 0 && boundaryInput && definition.kind !== "input") inputs = [boundaryInput]
     if (!inputs) return { status: "unresolved", reason: "one or more input regions are unresolved" }
     let context: TypeContext
     if (definition.kind === "input") {
@@ -63,7 +95,25 @@ export class PackageGraphScheduler {
       if (inputs.length < 2) return { status: "unresolved", reason: `package '${identity.id}' requires two graph inputs` }
       context = { kind: "join", inputs: [inputs[0]!, inputs[1]!, ...inputs.slice(2)] }
     } else {
-      return { status: "unresolved", reason: `package kind '${definition.kind}' requires subflow integration` }
+      context = {
+        kind: "subflow",
+        inputs: [inputs[0]!],
+        inferSubflow: (input) => {
+          const children = snapshot.nodes.filter((candidate) => candidate.parentId === node.id)
+          if (children.length === 0) return { status: "error", message: "subflow has no child graph" }
+          const childOrder: string[] = []
+          const childResult = this.inferScope(children, snapshot, results as Map<string, GraphNodeResult>, childOrder, input)
+          if (!childResult) return { status: "error", message: "subflow produced no result" }
+          if (childResult.status === "success") return childResult
+          if (childResult.status === "error") return childResult
+          if (childResult.status === "fault") return { status: "error", message: childResult.fault.message }
+          if (childResult.status === "unresolved") return {
+            status: "error",
+            message: "reason" in childResult ? childResult.reason : `missing parameters: ${childResult.missingParameters.join(", ")}`,
+          }
+          return { status: "error", message: "subflow result is unresolved" }
+        },
+      }
     }
     return this.host.inferForEditor(identity.id, context, nodeParameters(node))
   }
