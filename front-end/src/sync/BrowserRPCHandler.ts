@@ -28,6 +28,7 @@ import {
   serializeTypeResult,
 } from "../conversion/typeDiagnostics";
 import type { Node, Edge } from "@xyflow/svelte";
+import type { GraphInferenceResult } from "../type-system/graph/types";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -47,6 +48,16 @@ interface RPCResponse {
 // local makes response dispatch independent of a global WebSocket constructor,
 // which is absent in Node 20 test environments.
 const WEBSOCKET_OPEN = 1;
+
+function serializePackageTypeResult(result: GraphInferenceResult | null): unknown {
+  if (!result) return null;
+  return {
+    complete: result.complete,
+    terminals: [...result.terminals],
+    order: [...result.order],
+    nodes: Object.fromEntries(result.nodes),
+  };
+}
 
 // ── Viewport Controller Interface ────────────────────────────────────────
 
@@ -173,6 +184,9 @@ export class BrowserRPCHandler {
           break;
         case "get_type_info":
           result = this.handleGetTypeInfo(params);
+          break;
+        case "get_package_type_info":
+          result = this.handleGetPackageTypeInfo(params);
           break;
         case "get_edges":
           result = this.handleGetEdges(params);
@@ -319,6 +333,7 @@ export class BrowserRPCHandler {
       nodes: this.diagram.nodes,
       edges: this.diagram.edges,
       typeInfo: serializeTypeResult(typeResult),
+      packageTypeInfo: serializePackageTypeResult(this.diagram.packageTypeResult),
     };
   }
 
@@ -345,6 +360,15 @@ export class BrowserRPCHandler {
     return nodeId
       ? getNodeTypeInfo(typeResult, nodeId)
       : serializeTypeResult(typeResult);
+  }
+
+  private handleGetPackageTypeInfo(params: Record<string, unknown>): unknown {
+    this.diagram.refreshTypes();
+    const result = this.diagram.packageTypeResult;
+    const nodeId = params.nodeId as string | undefined;
+    if (!nodeId) return serializePackageTypeResult(result);
+    if (!this.diagram.getNodeById(nodeId)) throw new Error(`Node not found: ${nodeId}`);
+    return result?.nodes.get(nodeId) ?? { status: "unresolved", reason: "package type-system is initializing" };
   }
 
   private handleGetEdges(params: Record<string, unknown>): { edges: Edge[] } {

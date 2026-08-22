@@ -22,6 +22,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { getContext, tick } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
+  import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
 
   let { id, data, selected, isConnectable }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
@@ -50,6 +51,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   });
 
   let outputShape = $derived.by(() => {
+    if (data.package) return packageOutputLabel(diagram?.packageTypeResult ?? null, id);
     const ann = diagram?.typeResult?.annotations.get(id);
     if (!ann) return null;
     return ann.outputType.shape.map(d => d.kind === 'const' ? String(d.value) : d.kind === 'symbolic' ? d.name : d.kind).join(',');
@@ -63,7 +65,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   let nodeDiagnostic = $derived(
-    getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
+    data.package
+      ? packageDiagnostic(diagram?.packageTypeResult ?? null, id)
+      : getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
   );
 
   function increase(e: Event) {
@@ -106,7 +110,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     <div class="output-handle-wrapper">
       <Handle type="source" position={sourcePosition} id="out" {isConnectable} />
       {#if isNodeHovered && outputShape}
-        <div class="shape-tooltip">[{outputShape}]</div>
+        <div class="shape-tooltip">{data.package ? outputShape : `[${outputShape}]`}</div>
       {/if}
     </div>
   </div>

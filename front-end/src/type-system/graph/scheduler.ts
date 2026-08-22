@@ -59,8 +59,11 @@ export class PackageGraphScheduler {
     } else if (definition.kind === "layer" || definition.kind === "loss") {
       if (inputs.length !== 1) return { status: "unresolved", reason: `package '${identity.id}' requires one graph input` }
       context = { kind: definition.kind, inputs: [inputs[0]!] }
+    } else if (definition.kind === "join") {
+      if (inputs.length < 2) return { status: "unresolved", reason: `package '${identity.id}' requires two graph inputs` }
+      context = { kind: "join", inputs: [inputs[0]!, inputs[1]!, ...inputs.slice(2)] }
     } else {
-      return { status: "unresolved", reason: `package kind '${definition.kind}' is not implemented by T02` }
+      return { status: "unresolved", reason: `package kind '${definition.kind}' requires subflow integration` }
     }
     return this.host.inferForEditor(identity.id, context, nodeParameters(node))
   }

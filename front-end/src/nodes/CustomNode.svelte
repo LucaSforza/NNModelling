@@ -21,6 +21,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
+  import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
 
   let { data, selected, isConnectable, id }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
@@ -54,11 +55,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   // --- Type error indicator ---
   let nodeDiagnostic = $derived(
-    getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
+    data.package
+      ? packageDiagnostic(diagram?.packageTypeResult ?? null, id)
+      : getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
   );
 
   // --- Shape tooltip on output handle ---
   let outputShape = $derived.by(() => {
+    if (data.package) return packageOutputLabel(diagram?.packageTypeResult ?? null, id);
     const ann = diagram?.typeResult?.annotations.get(id);
     if (!ann) return null;
     return ann.outputType.shape.map(d => d.kind === 'const' ? String(d.value) : d.kind === 'symbolic' ? d.name : d.kind).join(',');
@@ -125,7 +129,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 <div class="output-handle-wrapper" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
   <Handle type="source" id="out" position={sourcePosition} {isConnectable} />
   {#if isNodeHovered && outputShape}
-    <div class="shape-tooltip">[{outputShape}]</div>
+    <div class="shape-tooltip">{data.package ? outputShape : `[${outputShape}]`}</div>
   {/if}
 </div>
 <style>

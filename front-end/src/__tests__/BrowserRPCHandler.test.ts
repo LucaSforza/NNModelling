@@ -103,6 +103,34 @@ describe("BrowserRPCHandler", () => {
     expect(response.result.id).toBe("n42");
   });
 
+  it("exposes JSON-safe package type information", () => {
+    const { handler, diagram, mockSend } = createHandler();
+    const testNode = { id: "package-node", type: "custom", position: { x: 0, y: 0 }, data: {} } as Node;
+    diagram.nodes = [testNode];
+    diagram.packageTypeResult = {
+      complete: true,
+      terminals: [testNode.id],
+      order: [testNode.id],
+      nodes: new Map([[testNode.id, {
+        status: "success",
+        output: { shape: ["B", 16], dtype: "float32" },
+      }]]),
+    };
+
+    (handler as any).handleMessage({
+      data: JSON.stringify({ id: "package-types", method: "get_package_type_info", params: { nodeId: testNode.id } }),
+    });
+    expect(JSON.parse(mockSend.mock.calls[0][0]).result).toEqual({
+      status: "success",
+      output: { shape: ["B", 16], dtype: "float32" },
+    });
+
+    mockSend.mockClear();
+    (handler as any).handleMessage({ data: JSON.stringify({ id: "graph", method: "get_graph" }) });
+    const graph = JSON.parse(mockSend.mock.calls[0][0]).result;
+    expect(graph.packageTypeInfo.nodes[testNode.id].output.shape).toEqual(["B", 16]);
+  });
+
   it("recomputes types after RPC mutations and exposes JSON-safe type information", () => {
     const { handler, diagram, mockSend } = createHandler();
 

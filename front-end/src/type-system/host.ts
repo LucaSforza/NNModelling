@@ -16,6 +16,12 @@ export type PackageSelection = {
   readonly directory?: string
 }
 
+export type ActivePackageMetadata = {
+  readonly id: string
+  readonly version: string
+  readonly definition: Definition
+}
+
 export type EditorInferenceState =
   | { readonly status: "unresolved"; readonly missingParameters: readonly string[] }
   | { readonly status: "success"; readonly output: TensorType }
@@ -66,6 +72,14 @@ export class TypeSystemHost {
 
   packageVersion(packageId: string): string | undefined {
     return this.registry.get(packageId)?.packageInfo.manifest.version
+  }
+
+  activePackages(): ActivePackageMetadata[] {
+    return [...this.registry.values()].map(({ packageInfo }) => ({
+      id: packageInfo.manifest.id,
+      version: packageInfo.manifest.version,
+      definition: packageInfo.definition,
+    }))
   }
 
   /**

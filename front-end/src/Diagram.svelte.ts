@@ -21,6 +21,9 @@ import { StereotypeCore } from "./core/StereotypeCore";
 import { TypeEngine } from "./conversion/typeEngine";
 import type { TypeResult } from "./conversion/tensortypes";
 import type { LayoutDirection } from "./layout/autoLayout";
+import type { GraphInferenceResult } from "./type-system/graph/types";
+import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
+import type { ActivePackageMetadata } from "./type-system/host";
 
 export const DIAGRAM_CONTEXT_KEY = Symbol("diagram-context");
 
@@ -29,6 +32,9 @@ export class Diagram extends DiagramCore {
   public edges: Edge[] = $state.raw<Edge[]>([]);
   private reactiveLayoutDirection: LayoutDirection = $state("vertical");
   public typeResult: TypeResult | null = $state.raw(null);
+  public packageTypeResult: GraphInferenceResult | null = $state.raw(null);
+  public packageCatalog: ActivePackageMetadata[] = $state.raw([]);
+  private packageTypeRuntime: EditorTypeSystemRuntime | null = null;
 
   public override get layoutDirection(): LayoutDirection {
     return this.reactiveLayoutDirection;
@@ -61,12 +67,26 @@ export class Diagram extends DiagramCore {
     });
 
     this.refreshTypes();
+    void this.initializePackageTypes();
   }
 
   /** Recompute tensor annotations and diagnostics for the current graph. */
   public refreshTypes(): TypeResult {
     const result = TypeEngine.infer(this);
     this.typeResult = result;
+    if (this.packageTypeRuntime) {
+      this.packageTypeResult = this.packageTypeRuntime.infer({ nodes: this.nodes, edges: this.edges });
+    }
     return result;
+  }
+
+  private async initializePackageTypes(): Promise<void> {
+    try {
+      this.packageTypeRuntime = await EditorTypeSystemRuntime.create();
+      this.packageCatalog = this.packageTypeRuntime.packages();
+      this.packageTypeResult = this.packageTypeRuntime.infer({ nodes: this.nodes, edges: this.edges });
+    } catch (error) {
+      console.error("[Diagram] package type-system initialization failed:", error);
+    }
   }
 }

@@ -20,5 +20,6 @@ export class PackageRegistry {
 
   get(id: string): ActivePackage | undefined { return this.active.get(id) }
   has(id: string): boolean { return this.active.has(id) }
+  values(): IterableIterator<ActivePackage> { return this.active.values() }
   clear(): void { this.active.clear() }
 }
