@@ -54,6 +54,11 @@ dependency.
   by that package. All other parameter controls are derived from the same
   definition schema and persist primitive semantic values rather than legacy
   `{value, position}` wrappers.
+- Parameters of type `stereotype` are dynamic package references. The editor
+  filters their selector by the declared package kind and persists the selected
+  package ID, version and nested parameters. In particular, Horizontal Repeat
+  exposes its final join this way; selecting Concat, Add, or another compatible
+  join must change the semantic invocation rather than only its presentation.
 - There is no `unknown` dtype and no implicit cast or promotion. `core.cast` is
   the explicit conversion operation.
 - Editor state is separate from semantic tensor data. A node or edge may be

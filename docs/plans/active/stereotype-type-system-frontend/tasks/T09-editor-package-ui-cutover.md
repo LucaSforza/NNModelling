@@ -32,6 +32,13 @@ This task owns both the visual implementation and its integration logic. It
 must preserve the established sidebar layout and styling while replacing its
 legacy stereotype assumptions for package nodes.
 
+The visible proof model must also replace the intentionally shallow Transformer
+fixture. Reconstruct one attention head from the atomic packages available in
+NNModelling, place that head inside a `Horizontal Repeat` subflow, and use its
+dynamic join reference to form multi-head attention as the legacy Transformer
+diagram does. A single `Linear` standing in for QKV/multi-head attention is not
+an acceptable final fixture.
+
 ## Evidence and current defect
 
 - `CustomNode.svelte` and `JoinNode.svelte` already use the package result for
@@ -113,6 +120,35 @@ legacy stereotype assumptions for package nodes.
 - Do not add behavior to `TypeEngine`, modify backend/PyTorch conversion, or
   attempt legacy project migration.
 
+### Transformer and Horizontal Repeat proof
+
+- Inspect `examples/diagrams/transformer_classifier.json` for the old model's
+  containment, residual and multi-head structure. Recreate the semantic intent
+  with new package nodes rather than copying its legacy parameter wrappers.
+- Build a single attention head as a real nested subflow from the smallest
+  compatible atomic package graph available in the current package catalog.
+  If an essential atomic primitive is missing, add only the minimal generic
+  Lua package(s), using `stereotype-lab` contracts when available; do not hide
+  the head behind one monolithic `Linear` or a package-specific scheduler case.
+- `core.horizontal-repeat` owns the parallel head composition. Its `times`
+  parameter is the head count and its `join` parameter is a dynamic stereotype
+  reference of kind `join`.
+- The sidebar must render the `join` parameter as a package selector filtered
+  to active `join` packages. The selected join's own parameter values must be
+  editable and persisted as part of the stereotype reference. At minimum the
+  user can select `core.concat` with `dim: -1` or `core.add`; inference must use
+  the selected reference, never a UI-only hardcoded join.
+- Nested subflow inference must be real: every head receives the same input,
+  the head subflow is inferred independently for every branch, and the selected
+  join combines the branch outputs. The terminal multi-head shape/dtype must
+  follow from these operations.
+- Create the finished Transformer through NNModelling's live editor using the
+  `.agents/skills/nnmodelling-mcp/SKILL.md` workflow. The agent must operate the
+  project via DiagramCore/browser tools, inspect containment and selected-node
+  controls, save/export the resulting model, and retain it as the checked-in
+  package Transformer fixture. Direct JSON generation alone does not satisfy
+  this acceptance path.
+
 ## Acceptance criteria
 
 - [ ] Loading each checked-in package model and selecting every node shows its
@@ -132,6 +168,13 @@ legacy stereotype assumptions for package nodes.
   coexistence.
 - [ ] Export/import round-trips exact package identity and primitive parameter
   types after UI editing.
+- [ ] The checked-in Transformer contains an atomic attention-head subflow
+  composed through `core.horizontal-repeat`; it does not use a single Linear as
+  a placeholder for multi-head attention.
+- [ ] Changing Horizontal Repeat's join in the sidebar changes the stored
+  dynamic stereotype reference and the actual inferred join result.
+- [ ] The Transformer is constructed and saved through live NNModelling using
+  the `nnmodelling-mcp` skill, with visible containment and sidebar QA.
 
 ## Required tests
 
@@ -143,6 +186,9 @@ legacy stereotype assumptions for package nodes.
 - Browser QA using the checked-in VAE plus one model built from the UI: select
   nodes, change dtype, save/reload, inspect diagnostics, hover the output, and
   capture the final sidebar state.
+- Browser/MCP construction test for the atomic-head Transformer: create the
+  nested head, configure Horizontal Repeat, choose Concat, save/reload, then
+  switch to another compatible join and prove that inference follows it.
 
 ## Validation
 
