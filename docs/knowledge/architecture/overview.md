@@ -1,79 +1,84 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-22
 ---
 
 # System architecture
 
-NNModelling is a visual DSL that turns a browser diagram into executable
-PyTorch/Lightning configuration. This document is the internal architectural
-map; public user documentation lives under `docs2/`.
+NNModelling is a browser-owned visual DSL. The current editor builds package
+graphs and infers their tensor semantics locally. Public user documentation
+lives under `docs2/`.
 
 ## Components
 
 | Area | Responsibility | State authority |
 | --- | --- | --- |
-| `front-end/` | Svelte editor, graph mutations, type inference, NNTree compilation | Browser `DiagramCore` |
-| `Stereotypes/` | Declarative node presentation, parameters, tensor contracts and operations | JSON definitions |
-| `mcp-server/` | MCP tools, browser WebSocket routing, Python subprocess boundary | No diagram state |
-| `converted/` | NNTree conversion, Hydra configuration, runtime, training, inference and remote backend | Python configs and backend stores |
-| `examples/` | Editable diagrams, compiled fixtures and integration metadata | Format-specific fixtures |
+| `front-end/` | Svelte editor, graph mutations, package catalog, Lua type inference and browser RPC | Browser `DiagramCore` |
+| `stereotype-packages/` | Independently identified definitions, Lua inference and future PyTorch entrypoints | Package manifest and resources |
+| `mcp-server/` | Thin proxy to the selected browser tab | No diagram or type state |
+| `converted/` | Existing Python conversion, runtime, training and remote backend | Python configs and backend stores |
+| `examples/` | Package-format editable diagrams and historical compiled fixtures | Format-specific fixtures |
 
-## Primary data flow
+## Current frontend flow
 
 ```text
-Stereotypes JSON
-    -> DiagramCore in the browser
-    -> NNTree compilation
-    -> convert.py
-    -> Hydra configuration
-    -> PyTorch/Lightning runtime
+bundled stereotype packages
+        |
+        v
+browser package catalog -> TypeSystemHost / Cordis -> isolated Lua inference
+        |                                             |
+        v                                             v
+DiagramCore graph <---------------------------- semantic type state
+        |
+        v
+visible editor and browser-backed MCP
 ```
 
 The browser is the only source of truth for a live diagram. The MCP server
-routes request/response RPC to the selected browser tab and must not mirror the
-graph. See [Browser-backed MCP](browser-mcp.md).
+routes request/response RPC and must not mirror the graph, catalog or inferred
+types. See [Browser-backed MCP](browser-mcp.md).
 
-`DiagramCore` also owns the diagram's presentation direction (`vertical` or
-`horizontal`). Automatic layout validates and computes the complete recursive
-geometry off-state, then applies node positions, expanded subflow dimensions
-and direction as one snapshot-based mutation. Editable diagram JSON persists
-the optional `layoutDirection` field; missing or unknown values default to
-vertical. This presentation metadata is not part of NNTree output.
+Every frontend node stores exact package ID, version and display name.
+Definition metadata drives topology, parameters, presentation and dtype
+controls; package-owned Lua drives inference. The frontend contains no central
+package-ID inference switch.
 
-Remote training is an optional second boundary:
+## Backend boundary
+
+The existing Python code still supports historical NNTree-based runtime and
+backend concerns, but package-format diagrams currently stop at the frontend:
 
 ```text
-compiled NNTree + training request
-    -> FastAPI
-    -> Valkey queue
-    -> Local or Slurm executor
-    -> training artifacts and inference wheel
+package diagram -X-> compile / convert / train / infer
 ```
 
-See [Remote training](remote-training.md), the
+The future backend will independently load trusted package `pytorch.py`
+entrypoints. Its concrete NNModelling design is intentionally deferred until
+that work begins; the frontend must never call Python as a type-inference
+fallback. See [`../../TODO.md`](../../TODO.md).
+
+Remote training remains an independent existing subsystem. See
+[Remote training](remote-training.md), the
 [pairing contract](../contracts/pairing.md), and the
 [model-package contract](../contracts/model-package.md).
 
 ## Durable invariants
 
-- Top-level graphs have exactly one `Input`; subflows have separate boundary
-  rules documented in `Stereotypes/AGENTS.md`.
-- Join inputs retain target-handle order, which is semantically significant for
-  non-commutative operations.
-- Every edge connects endpoints in the same immediate containment scope. A
-  subflow is an atomic node in its parent's scope, and its children cannot
-  connect directly outside it.
-- Hidden children of collapsed subflows still compile.
-- Automatic layout retains hidden children and computes every containment
-  scope bottom-up. Svelte Flow handle internals and viewport fitting are
-  browser-only synchronization performed after the reactive DOM update.
-- Tensor behavior is selected by stereotype data. The engine implements
-  generic semantics without branching on stereotype names.
-- Source Svelte Flow diagrams and compiled NNTree fixtures are different
-  formats and are never interchangeable.
+- `DiagramCore` owns every live graph mutation and snapshot.
+- Every frontend node has exact package identity and primitive parameter data.
+- Type semantics come from activated package definitions and Lua rules.
+- Expected semantic errors, unresolved editor state and runtime faults remain
+  distinct.
+- Join inputs retain `targetHandle` order.
+- Every edge connects endpoints in the same immediate containment scope.
+- Hidden children of collapsed subflows remain part of graph semantics.
+- Editable package diagrams and historical compiled NNTree fixtures are
+  different formats and are never interchangeable.
+- Presentation metadata, including automatic layout and editable edge routes,
+  does not affect package semantics.
 
-Package-local implementation rules live in the nearest `AGENTS.md`. Historical
-designs and implementation reports live under `docs/archive/` and are not
+The current type boundary is documented in
+[Frontend package type system](../contracts/package-type-system.md).
+Historical designs and implementation reports under `docs/archive/` are not
 authoritative.

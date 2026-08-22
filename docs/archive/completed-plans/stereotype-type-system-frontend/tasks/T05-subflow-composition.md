@@ -1,7 +1,7 @@
 ---
 id: T05
 kind: task
-status: draft
+status: done
 plan: ../plan.md
 role: frontend
 depends_on: [T04]

@@ -1,54 +1,66 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-22
 ---
 
 # Testing strategy
 
-Verification is layered so agents can start narrowly and expand only when a
-change crosses a boundary. Never copy historical test counts into current
-status; run the applicable command.
+Verification is layered. Run the narrowest relevant test first, followed by
+the package gate named in the nearest `AGENTS.md`. Never reuse historical test
+counts as current evidence.
 
-## Frontend
+## Frontend package system
 
-- Vitest unit tests cover pure TypeScript, Svelte-compiled state, type inference,
-  graph mutations and browser RPC.
-- `pnpm --dir front-end check` is the Svelte/TypeScript gate.
-- Integration tiers are `smoke`, `convert`, `forward`, `train` and `infer`.
-  Tiers beyond smoke invoke real Python and accept selectors such as
-  `NNM_DIAGRAM` and `NNM_DEVICE`.
-- `examples/manifest.json` defines cross-language fixture metadata.
+Four complementary layers cover different contracts:
+
+1. Vitest tests package validation, Lua isolation, lifecycle, graph scheduling,
+   editor state, persistence, UI behavior and browser RPC.
+2. The package-only guard rejects legacy `TypeEngine`, `StereotypeCore`,
+   `Stereotypes/`, nodes without exact package identity and wrapped parameters.
+3. Independent candidate and pinned `stereotype-lab` processes compare the
+   same versioned semantic requests and canonical results.
+4. Browser QA exercises the visible editor through its real `DiagramCore` and
+   verifies that UI and RPC observations agree.
+
+Type-semantic equality belongs to cross-validation against the independent
+oracle. Candidate-only tests remain authoritative for NNModelling-owned graph,
+editor, persistence, transport and host behavior.
+
+The current suite contains deterministic package-model scenarios and bounded
+property-based graph comparisons. Broader realistic models, schema-aware
+generation, nested composition, shrinking and a retained divergence corpus are
+future work, not unfinished requirements of the completed frontend cutover.
+See [`../../TODO.md`](../../TODO.md).
 
 ## Python
 
-Pytest markers define increasing boundaries:
+Pytest markers define increasing backend boundaries:
 
 | Marker | Boundary |
 | --- | --- |
 | `fast` | deterministic tests without real services or training |
 | `service` | real infrastructure such as Valkey |
-| `e2e` | full canonical backend jobs with real API/store/scheduler/executor |
-| `legacy_e2e` | optional training/inference that may download MNIST |
+| `e2e` | full backend jobs with real API/store/scheduler/executor |
+| `legacy_e2e` | optional historical training/inference that may download MNIST |
 
-The default pytest configuration excludes service and E2E markers. Use the
-smallest focused file while iterating, then the package gate.
+These tests cover the existing Python system. They do not prove package-format
+compilation, which is not implemented yet.
 
 ## MCP
 
-MCP Vitest suites cover tool schemas, proxy behavior, multi-tab routing,
-pipeline errors and authenticated parity with the browser remote-training
-client. An RPC contract change also requires the matching frontend
-`BrowserRPCHandler` test.
+MCP Vitest suites cover tool schemas, thin-proxy behavior, multi-tab routing,
+errors and authenticated parity with browser-owned operations. An RPC contract
+change requires matching frontend handler and MCP proxy coverage.
 
 ## Cross-boundary rule
 
-- Stereotype or NNTree changes: type-engine tests plus convert/forward tier.
-- RPC payload changes: frontend handler and MCP tool tests.
-- Generated Hydra/runtime changes: focused Python tests plus relevant frontend
-  integration tier.
-- Persistence or scheduling changes: fast tests first, then real-Valkey service
-  tests and E2E when lifecycle behavior changes.
-- Model-package changes: exporter tests plus download/install/load/predict E2E.
-
-Commands and package-specific expectations live in the nearest `AGENTS.md`.
+- Package/type change: focused host or package tests plus candidate/oracle
+  comparison when observable semantics change.
+- Graph or persistence change: DiagramCore tests, package-only guard and
+  browser save/load QA.
+- RPC payload change: frontend handler and MCP tool tests.
+- Remote backend lifecycle change: fast tests, then service/E2E tests in
+  proportion to the boundary changed.
+- Portable inference-wheel change: exporter tests plus the relevant
+  download/install/load/predict E2E.

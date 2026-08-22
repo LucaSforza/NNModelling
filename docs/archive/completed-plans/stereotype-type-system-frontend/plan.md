@@ -1,7 +1,7 @@
 ---
 id: stereotype-type-system-frontend
 kind: plan
-status: in_progress
+status: done
 updated: 2026-08-22
 areas:
   - frontend
@@ -11,6 +11,10 @@ areas:
 ---
 
 # Reference-compatible frontend stereotype type system
+
+> Completed frontend cutover. Broader deterministic-model coverage and
+> property-based differential testing were deferred to `docs/TODO.md` and are
+> not part of this initiative's completion boundary.
 
 ## Goal
 

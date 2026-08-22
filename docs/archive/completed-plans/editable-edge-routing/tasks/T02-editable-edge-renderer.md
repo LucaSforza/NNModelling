@@ -1,7 +1,7 @@
 ---
 id: T02
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: frontend
 depends_on:

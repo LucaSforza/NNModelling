@@ -77,6 +77,6 @@ reference or the `nnmodelling-mcp` skill rather than improvising port cleanup.
 
 Current contracts are documented in
 `../docs/knowledge/architecture/remote-training.md`,
-`../docs/knowledge/contracts/nntree.md`, and
+`../docs/archive/superseded/contracts/nntree.md` (historical NNTree boundary), and
 `../docs/knowledge/contracts/model-package.md`. Historical implementation
 evidence is preserved under `../docs/archive/`.

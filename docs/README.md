@@ -14,6 +14,7 @@ project knowledge.
 
 ```text
 docs/
+├── TODO.md
 ├── plans/
 │   ├── active/<initiative>/
 │   │   ├── plan.md
@@ -45,6 +46,8 @@ docs/
   policy that must not leak into canonical plans.
 - `archive/` preserves completed plans, historical reports, and superseded
   descriptions. Archived material is evidence, not current guidance.
+- `TODO.md` is a non-normative backlog. An item becomes executable only after
+  it is inspected and promoted into a bounded active plan.
 - `docs2/` is separate: it builds the public Sphinx documentation for users and
   operators. Internal agent notes do not belong there, and user-facing product
   documentation does not belong in `docs/`.

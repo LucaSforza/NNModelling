@@ -24,16 +24,16 @@ geometry and immediate scope may no longer apply.
 ## Consequences
 
 Route edits remain presentational metadata: they do not alter endpoints,
-handles, containment validation, join ordering, or NNTree compilation. Legacy
+handles, containment validation, join ordering, or package inference. Imported
 edges without route metadata render automatically. PNG export keeps the final
 route SVG path but filters pointer hit targets and selected editing controls.
 
 ## Status
 
-Accepted.
+Implemented and current.
 
 ## Links
 
 - [Edge route core contract](../../../front-end/src/core/edgeRoute.ts)
 - [Editable edge renderer](../../../front-end/src/edges/EditableEdge.svelte)
-- [Editable-edge routing plan](../../plans/active/editable-edge-routing/plan.md)
+- [Completed editable-edge routing plan](../../archive/completed-plans/editable-edge-routing/plan.md)

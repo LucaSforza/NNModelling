@@ -1,10 +1,14 @@
 ---
 kind: knowledge
-status: current
-updated: 2026-08-12
+status: superseded
+updated: 2026-08-22
 ---
 
 # NNTree contract
+
+> Historical contract retained for the existing Python/NNTree runtime. It is
+> not the current frontend package-graph contract and does not enable package
+> compilation.
 
 NNTree is the compiled boundary between the visual editor and Python
 configuration generation. It is not the same format as an editable Svelte Flow

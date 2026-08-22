@@ -1,7 +1,7 @@
 ---
 id: T03
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: integration
 depends_on:

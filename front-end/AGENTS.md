@@ -14,17 +14,15 @@ Use pnpm commands from the repository root:
 pnpm --dir front-end check
 pnpm --dir front-end test
 pnpm --dir front-end test:watch
-pnpm --dir front-end test:integration:smoke
-pnpm --dir front-end test:integration:convert
-pnpm --dir front-end test:integration:forward
-pnpm --dir front-end test:integration:train
-pnpm --dir front-end test:integration:infer
+pnpm --dir front-end test:type-system
+pnpm --dir front-end test:type-system:models
+pnpm --dir front-end guard:package-only
+pnpm --dir front-end build
 ```
 
-Run `check` and the focused Vitest suite for frontend changes. Integration tiers
-spawn Python through `uv`; training and inference tiers are slow and should be
-run only when relevant. Useful variables include `NNM_DIAGRAM`, `NNM_DEVICE`,
-`NNM_TIER`, `NNM_WANDB_MODE`, and `NNM_KEEP_TEMP`.
+Run `check` and the focused Vitest suite for frontend changes. Package type
+semantics use the pinned independent oracle through the differential tests.
+Package-format compilation, training and backend inference are unavailable.
 
 For final QA, follow `../.agents/skills/verify-task/SKILL.md`. UI, layout,
 interaction, browser RPC, import/export, and rendered-diagnostic changes must be
@@ -51,40 +49,31 @@ Node components are `CustomNode.svelte`, `JoinNode.svelte`, and
 ordered IDs such as `in-0`. Target handles accept one connection, while source
 handles may fan out. Reparenting must preserve ancestry-loop protection.
 
-## Compilation and type engine
+## Package type system
 
-- `src/conversion/nnTree.ts` compiles the graph with topological ordering and
-  recursively preserves subflows as `type: "subflow"` nodes.
-- Joins retain parents in target-handle order. Hidden subflow children compile.
-- `src/conversion/typeEngine.ts` interprets stereotype JSON declarations. Keep
-  formulas in expression strings and join/subflow behavior in declarative config.
-- Dimension kinds include constants, symbolic bindings, parameter references,
-  wildcards, computed expressions, and parameter spreads.
-- Invalid parameter values are errors; unset compatible values may produce
-  suggestions. Dtype and advisory diagnostics are warnings where declared.
-- Primary errors own diagnostics; downstream nodes should use `blockedBy` rather
-  than duplicate the same failure.
-- Subflow inference is recursive. Repeat composes its internal transform and
-  HorizontalRepeat applies its declared final-dimension transform.
-- Einsum inference uses the declarative equation and rejects unsupported ellipsis.
-
-The expression language lives in `src/expr/` and supports symbolic variables,
-wildcard products, arithmetic, grouping, and the documented built-ins. Extend it
-through parser/evaluator tests, not through module-specific branches.
+- Every node stores exact package ID, version and display name.
+- `src/type-system/` owns package validation, Cordis activation, isolated Lua
+  inference, graph scheduling and editor result adaptation.
+- Definitions drive kind, parameters, defaults, dtype controls and presentation;
+  inference code must not switch on package IDs.
+- Tensor types contain nominal string/number dimensions and one canonical dtype.
+  Do not recreate legacy constraint solving, `unknown` dtype or implicit casts.
+- Missing inputs or required parameters are unresolved editor state. Expected
+  semantic errors and host/Lua faults remain distinct.
+- Joins retain parents in target-handle order. Subflow composition must preserve
+  the innermost diagnostic cause and add semantic context.
+- `stereotype-lab` is a pinned independent test oracle, never a production
+  dependency.
 
 ## Tests and fixtures
 
 - Construct real `Diagram` instances in tests and stub `globalThis.window`
   before construction.
-- Prefer helpers from `src/__tests__/helpers.ts` for nodes and edges.
-- Integration fixtures come from `../examples/manifest.json`, editable diagrams
-  from `../examples/diagrams/`, and compiled fixtures from
-  `../examples/nntrees/`.
+- Package editor fixtures live under `../examples/diagrams/package/`.
 - Add regression coverage for graph mutations, connection validation, type
   inference, RPC serialization, and undo/redo at the narrowest applicable level.
 
 Current cross-package contracts are documented in
 `../docs/knowledge/architecture/browser-mcp.md`,
-`../docs/knowledge/contracts/nntree.md`, and
-`../docs/knowledge/contracts/tensor-types.md`. Historical implementation plans
+`../docs/knowledge/contracts/package-type-system.md`. Historical implementation plans
 are preserved under `../docs/archive/completed-plans/`.

@@ -5,7 +5,8 @@ This file contains repository-wide rules. More specific instructions live in:
 - `front-end/AGENTS.md` — Svelte editor, diagram core, type engine, browser RPC.
 - `converted/AGENTS.md` — Python conversion, runtime, training, inference, backend.
 - `mcp-server/AGENTS.md` — MCP thin proxy and browser WebSocket client.
-- `Stereotypes/AGENTS.md` — stereotype schemas and tensor type contracts.
+- `stereotype-packages/` contains the package definitions and runtime
+  entrypoints used by the frontend type system.
 
 Codex combines this file with the nearest package-local file. Current internal
 architecture and contracts are indexed by `docs/README.md`; historical guidance
@@ -43,19 +44,24 @@ to PyTorch/Lightning code. It is a pnpm workspace with three main packages:
 
 Shared inputs and fixtures:
 
-- `Stereotypes/` contains JSON definitions for modules, joins and subflows.
-- `examples/diagrams/` contains editable Svelte Flow diagrams.
+- `stereotype-packages/` contains versioned definitions and Lua/PyTorch
+  entrypoints.
+- `examples/diagrams/package/` contains editable package-format diagrams.
 - `examples/nntrees/` contains compiled NNTree fixtures.
-- `examples/manifest.json` drives cross-language integration tests.
+- `examples/nntrees/` and historical manifest data belong to the existing
+  Python/NNTree runtime, not the current package frontend.
 - `docs2/` contains public Sphinx documentation. `docs/` contains tool-neutral
   agent plans and internal project knowledge; see `docs/README.md`.
 
-The principal flow is:
+The current frontend flow is:
 
 ```text
-Stereotypes JSON -> browser DiagramCore -> NNTree JSON -> convert.py
-                 -> Hydra configs -> PyTorch/Lightning runtime
+stereotype-packages -> browser package catalog -> Cordis/Lua type inference
+                    -> DiagramCore -> visible editor and browser-backed MCP
 ```
+
+Package-format compilation, training and backend inference are not implemented
+yet. See `docs/knowledge/architecture/overview.md` and `docs/TODO.md`.
 
 ## Browser-backed work
 
@@ -78,8 +84,8 @@ commands manually.
 
 - The browser's `DiagramCore` is the only authority for live diagram state.
   The MCP server must remain a thin proxy and must not introduce a second graph.
-- Stereotype behavior and tensor contracts are data-driven. Avoid hardcoded
-  module names, formula bodies, or join/subflow rules in the type engine.
+- Package behavior and tensor contracts are data-driven. Avoid package-ID
+  switches in inference, topology, parameter or dtype behavior.
 - A top-level model requires exactly one `Input`. An internal subflow may use an
   `Input` only as its declared boundary entry; `Fork` is the canonical internal
   pass-through and cannot replace the required top-level `Input`.

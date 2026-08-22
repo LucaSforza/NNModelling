@@ -37,8 +37,9 @@ MCP stdio client -> server tools -> browser-client WebSocket RPC
   fallback projection that could drift from the live editor.
 - `src/pipeline.ts` is the Python subprocess boundary. Keep pipeline failures in
   the small dedicated error hierarchy rather than rebuilding domain errors.
-- Conversion tools query the browser for current NNTree JSON before invoking
-  Python; they must not rely on stale local state.
+- Package-format compilation and conversion are currently unavailable.
+  Conversion tools must report that boundary rather than reconstruct NNTree or
+  fall back to legacy behavior.
 - Optional HTTP training proxy tools must reuse FastAPI job state rather than
   create a second scheduler or persistence layer.
 

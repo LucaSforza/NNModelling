@@ -1,7 +1,7 @@
 ---
 id: T07
 kind: task
-status: draft
+status: done
 plan: ../plan.md
 role: testing
 depends_on: [T06]

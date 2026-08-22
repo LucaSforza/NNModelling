@@ -1,7 +1,7 @@
 ---
 id: editable-edge-routing
 kind: plan
-status: ready
+status: done
 updated: 2026-08-16
 areas:
   - frontend
@@ -10,6 +10,10 @@ areas:
 ---
 
 # Editable UML-style edge routing
+
+> Implementation completed. This plan is retained as historical delivery
+> context; the current invariant is recorded in
+> `docs/knowledge/decisions/editable-edge-routing.md`.
 
 ## Goal
 
