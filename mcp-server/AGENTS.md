@@ -32,8 +32,9 @@ MCP stdio client -> server tools -> browser-client WebSocket RPC
   canvas, validation, conversion, inspection, connection and lifecycle actions.
 - The first browser tab is auto-selected. Preserve explicit `list_browser_tabs`
   and `select_browser_tab` behavior for multiple tabs.
-- `src/server.ts` keeps an ESM-safe local projection of stereotype JSON because
-  the MCP server must not import the Vite frontend loader.
+- Package discovery and definitions stay in the browser frontend. The MCP
+  server delegates catalog inspection through browser RPC and keeps no local
+  fallback projection that could drift from the live editor.
 - `src/pipeline.ts` is the Python subprocess boundary. Keep pipeline failures in
   the small dedicated error hierarchy rather than rebuilding domain errors.
 - Conversion tools query the browser for current NNTree JSON before invoking

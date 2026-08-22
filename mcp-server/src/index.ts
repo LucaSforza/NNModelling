@@ -22,13 +22,11 @@
  *
  * Environment variables:
  *   NNM_WS_PORT    — WebSocket server port (default: 9339)
- *   NNM_STEREOTYPES — Override path to Stereotypes directory
  *   NNM_CDP_URL     — Chromium DevTools HTTP URL (default: http://127.0.0.1:9223)
  *   NNM_FRONTEND_URL — Preferred frontend page URL for screenshots
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { resolve } from "path";
 import { createServer } from "./server.js";
 
 function parseWebSocketPort(value: string | undefined): number | undefined {
@@ -43,17 +41,11 @@ function parseWebSocketPort(value: string | undefined): number | undefined {
 }
 
 async function main(): Promise<void> {
-  // Resolve the Stereotypes directory relative to this source file
-  // (import.meta.dirname → mcp-server/src/ → up 2 levels → repo root)
-  const stereotypesDir =
-    process.env.NNM_STEREOTYPES ?? resolve(import.meta.dirname, "..", "..", "Stereotypes");
-
   console.error("[nnmodelling-mcp] Starting server...");
-  console.error(`[nnmodelling-mcp] Stereotypes dir: ${stereotypesDir}`);
 
   // ── Create the MCP server with full tool/resource registration ──────
   const wsPort = parseWebSocketPort(process.env.NNM_WS_PORT);
-  const { server, browser } = await createServer(stereotypesDir, { wsPort });
+  const { server, browser } = await createServer({ wsPort });
 
   // ── Connect stdio transport (MCP protocol) ─────────────────────────
   const transport = new StdioServerTransport();

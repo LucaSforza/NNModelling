@@ -43,7 +43,6 @@ function createTestContext(): ServerContext {
   return {
     browser: createMockBrowser(),
     pipeline: null as unknown as ServerContext["pipeline"],
-    stereotypes: [],
   };
 }
 

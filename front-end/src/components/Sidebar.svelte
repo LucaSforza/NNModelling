@@ -217,14 +217,35 @@ Licensed under the GNU General Public License v3 or later.
     diagram.selectNodes([nodeId]);
   }
 
+  type VisibleDiagnostic = {
+    nodeId: string;
+    severity: "unresolved" | "error" | "fault";
+    title: string;
+    message: string;
+  };
+
   let packageDiagnostics = $derived.by(() => {
     const result = diagram.typeResult;
-    if (!result) return [] as Array<{ nodeId: string; severity: string; message: string }>;
+    if (!result) return [] as VisibleDiagnostic[];
     const nodes = isPackageNode && selectedNode ? [selectedNode] : diagram.nodes.filter((node) => nodePackageIdentity(node));
-    return nodes.flatMap((node) => {
-      const diagnostic = packageDiagnostic(result, node.id);
-      return diagnostic ? [{ nodeId: node.id, severity: diagnostic.severity, message: diagnostic.message }] : [];
-    });
+    const diagnostics: VisibleDiagnostic[] = [];
+    for (const node of nodes) {
+      const state = result.nodes.get(node.id);
+      if (!state || state.status === "success") continue;
+      if (state.status === "fault") diagnostics.push({
+        nodeId: node.id, severity: "fault", title: "Runtime fault", message: state.fault.message,
+      });
+      else if (state.status === "error") diagnostics.push({
+        nodeId: node.id, severity: "error", title: "Type error", message: state.message,
+      });
+      else diagnostics.push({
+        nodeId: node.id,
+        severity: "unresolved",
+        title: "Incomplete",
+        message: "reason" in state ? state.reason : `Missing: ${state.missingParameters.join(", ")}`,
+      });
+    }
+    return diagnostics;
   });
 
   let diagnosticCount = $derived(packageDiagnostics.length);
@@ -324,34 +345,47 @@ Licensed under the GNU General Public License v3 or later.
         </div>
       {/if}
 
-      <div class="type-error-panel">
-        <div class="type-error-panel-header">Type Check ({diagnosticCount} issues)</div>
-        {#if diagnosticCount === 0}<div class="type-errors-empty">No type errors or warnings.</div>{/if}
-        {#if isPackageNode}
+      <section class="type-error-panel" aria-labelledby="type-check-heading">
+        <div class="type-error-panel-header" id="type-check-heading">
+          <span>Type Check</span>
+          <span class:has-issues={diagnosticCount > 0} class="diagnostic-count">{diagnosticCount}</span>
+        </div>
+        {#if diagnosticCount === 0}
+          <div class="type-errors-empty">No type issues.</div>
+        {:else}
           {#each packageDiagnostics as diagnostic (`${diagnostic.nodeId}-${diagnostic.message}`)}
             <div class="type-error-item {diagnostic.severity}" role="button" tabindex="0" onclick={() => selectDiagnosticNode(diagnostic.nodeId)} onkeydown={(event) => { if (event.key === "Enter") selectDiagnosticNode(diagnostic.nodeId); }}>
-              <span class="type-error-icon">{diagnostic.severity === "error" ? "❌" : "⚠️"}</span><div class="type-error-text"><span class="type-error-node">{getNodeLabel(diagnostic.nodeId)}</span><span class="type-error-msg">{diagnostic.message}</span></div>
+              <span class="type-error-icon" aria-hidden="true">{diagnostic.severity === "fault" ? "⚡" : diagnostic.severity === "error" ? "×" : "!"}</span>
+              <div class="type-error-text">
+                <div class="type-error-heading"><span class="type-error-node">{getNodeLabel(diagnostic.nodeId)}</span><span class="type-error-kind">{diagnostic.title}</span></div>
+                <span class="type-error-msg">{diagnostic.message}</span>
+              </div>
             </div>
           {/each}
         {/if}
-      </div>
+      </section>
     </div>
   </aside>
 {/if}
 
 <style>
   @import "../styles/sidebar.css";
-  .type-error-panel { margin-top: 16px; border-top: 1px solid #e5e7eb; padding: 8px; }
-  .type-error-panel-header { font-weight: 600; font-size: .85rem; margin-bottom: 6px; }
-  .type-errors-empty { font-style: italic; color: #6b7280; font-size: .8rem; }
-  .type-error-item { display: flex; align-items: flex-start; gap: 6px; padding: 3px 0; cursor: pointer; font-size: .8rem; }
-  .type-error-item:hover { background: #f3f4f6; }
-  .type-error-item.error .type-error-msg { color: #dc2626; }
-  .type-error-item.warning .type-error-msg { color: #f59e0b; }
-  .type-error-item.suggestion .type-error-msg { color: #2563eb; }
-  .type-error-text { display: flex; flex-direction: column; }
-  .type-error-node { font-weight: 600; }
-  .type-error-icon { flex-shrink: 0; }
+  .type-error-panel { margin-top: 16px; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+  .type-error-panel-header { display: flex; justify-content: space-between; align-items: center; font-weight: 650; font-size: .85rem; margin-bottom: 8px; }
+  .diagnostic-count { min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; background: #e5e7eb; color: #4b5563; font-size: .72rem; }
+  .diagnostic-count.has-issues { background: #fef3c7; color: #92400e; }
+  .type-errors-empty { color: #6b7280; font-size: .8rem; }
+  .type-error-item { display: flex; align-items: flex-start; gap: 9px; padding: 9px; margin-top: 6px; cursor: pointer; font-size: .8rem; border: 1px solid; border-radius: 6px; }
+  .type-error-item:hover { filter: brightness(.98); }
+  .type-error-item.unresolved { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .type-error-item.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+  .type-error-item.fault { background: #fff7ed; border-color: #fdba74; color: #9a3412; }
+  .type-error-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .type-error-heading { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .type-error-node { font-weight: 700; color: #1f2937; }
+  .type-error-kind { font-size: .68rem; font-weight: 650; letter-spacing: .02em; text-transform: uppercase; opacity: .78; }
+  .type-error-msg { color: inherit; font-size: .78rem; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .type-error-icon { flex: 0 0 20px; width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; display: inline-grid; place-items: center; font-weight: 800; line-height: 1; }
   .apply-suggestion-btn { align-self: flex-start; margin-top: 4px; padding: 3px 8px; border: 1px solid #2563eb; border-radius: 4px; background: #eff6ff; color: #1d4ed8; cursor: pointer; }
   .package-kind { color: #6b7280; font-size: .8rem; margin-top: -8px; }
   .package-type-summary { border-top: 1px solid #e5e7eb; padding-top: 8px; }

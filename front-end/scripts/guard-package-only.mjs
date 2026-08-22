@@ -22,7 +22,7 @@ function walk(directory) {
   })
 }
 
-for (const path of walk(join(frontendRoot, "src"))) {
+for (const path of [...walk(join(frontendRoot, "src")), ...walk(join(repositoryRoot, "mcp-server", "src"))]) {
   const text = readFileSync(path, "utf8")
   for (const token of ["TypeEngine", "StereotypeCore", "Stereotypes/"]) {
     if (text.includes(token)) failures.push(`${path} references forbidden legacy symbol ${token}`)
