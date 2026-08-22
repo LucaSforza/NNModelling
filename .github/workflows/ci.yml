@@ -28,6 +28,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Checkout pinned type-system oracle
+        uses: actions/checkout@v4
+        with:
+          repository: LucaSforza/stereotype-lab
+          ref: ef3efb1859b4a9c19227dd55aade65767fd4b1f5
+          path: .cache/stereotype-lab
       - run: pnpm install
       - run: pnpm --filter @nnmodelling/front-end run check
       - run: pnpm --filter @nnmodelling/front-end run test
@@ -48,6 +54,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Checkout pinned type-system oracle
+        uses: actions/checkout@v4
+        with:
+          repository: LucaSforza/stereotype-lab
+          ref: ef3efb1859b4a9c19227dd55aade65767fd4b1f5
+          path: .cache/stereotype-lab
       - run: pnpm install
       - run: pnpm --filter @nnmodelling/front-end run test:type-system
       - run: pnpm --filter @nnmodelling/front-end run test:type-system:models
