@@ -10,6 +10,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:type-system": "vitest run src/__tests__/newTypeSystemLua.test.ts src/__tests__/newTypeSystemInput.test.ts",
+    "test:type-system:models": "vitest run src/__tests__/modelConformance.test.ts",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:smoke": "NNM_TIER=smoke vitest run --config vitest.integration.config.ts",

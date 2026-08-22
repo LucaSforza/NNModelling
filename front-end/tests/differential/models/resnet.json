@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 2,
+  "operation": "infer-model",
+  "modelId": "resnet",
+  "packages": ["core.input", "core.linear", "core.fork", "core.add"],
+  "nodes": [
+    {"id": "feature_map", "packageId": "core.input", "parameters": {"shape": ["B", 224, 224, 64], "dtype": "float32"}, "inputs": []},
+    {"id": "block1_transform", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 64}, "inputs": ["feature_map"]},
+    {"id": "block1_output", "packageId": "core.add", "parameters": {}, "inputs": ["feature_map", "block1_transform"]},
+    {"id": "block2_transform", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 64}, "inputs": ["block1_output"]},
+    {"id": "block2_output", "packageId": "core.add", "parameters": {}, "inputs": ["block1_output", "block2_transform"]},
+    {"id": "block3_transform", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 64}, "inputs": ["block2_output"]},
+    {"id": "block3_output", "packageId": "core.add", "parameters": {}, "inputs": ["block2_output", "block3_transform"]},
+    {"id": "classifier", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 1000}, "inputs": ["block3_output"]}
+  ],
+  "output": "classifier"
+}
