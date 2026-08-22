@@ -1,0 +1,15 @@
+{
+  "name": "Concat",
+  "description": "Concatenates tensors along one dimension.",
+  "kind": "join",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "dim": {
+      "type": "integer"
+    }
+  }
+}

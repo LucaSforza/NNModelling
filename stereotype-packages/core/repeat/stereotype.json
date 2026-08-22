@@ -1,0 +1,16 @@
+{
+  "name": "Repeat",
+  "description": "Applies independent copies of a subflow in sequence.",
+  "kind": "subflow",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "times": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

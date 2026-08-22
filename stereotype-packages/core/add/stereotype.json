@@ -1,0 +1,11 @@
+{
+  "name": "Add",
+  "description": "Adds two or more tensors with identical shapes.",
+  "kind": "join",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {}
+}

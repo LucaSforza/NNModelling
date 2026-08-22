@@ -1,0 +1,27 @@
+{
+  "name": "Horizontal Repeat",
+  "description": "Applies independent copies of a subflow in parallel.",
+  "kind": "subflow",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "times": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "join": {
+      "type": "stereotype",
+      "kind": "join",
+      "default": {
+        "id": "core.concat",
+        "version": "^0.1.0",
+        "parameters": {
+          "dim": -1
+        }
+      }
+    }
+  }
+}
