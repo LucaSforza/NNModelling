@@ -1,14 +1,17 @@
 ---
 id: T01
 kind: task
-status: draft
+status: done
 plan: ../plan.md
 role: frontend
 depends_on: []
 parallel_with: []
 write_scope:
+  - .gitignore
   - front-end/package.json
-  - pnpm-lock.yaml
+  - front-end/pnpm-lock.yaml
+  - front-end/src/__tests__/newTypeSystemLua.test.ts
+  - front-end/src/__tests__/newTypeSystemInput.test.ts
   - front-end/src/type-system/
   - front-end/tests/differential/
   - stereotype-packages/core/input/

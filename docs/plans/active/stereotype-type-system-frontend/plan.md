@@ -1,7 +1,7 @@
 ---
 id: stereotype-type-system-frontend
 kind: plan
-status: draft
+status: in_progress
 updated: 2026-08-22
 areas:
   - frontend
