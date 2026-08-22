@@ -36,6 +36,11 @@ dependency.
   phase.
 - The frontend receives bundled package resources through a browser adapter;
   filesystem discovery must not leak into Lua or the semantic inference API.
+- The editor's package picker groups active packages as `Layers`, `Loss`,
+  `Subflow`, `Join`, and `Other`. Grouping follows package `kind`; `Input`,
+  `Fork`, and `Cast` are placed in `Other` as a presentation-only exception.
+  Selection and persistence still use exact package ID/version, never a group
+  or display name.
 
 ## Type and editor states
 
@@ -45,6 +50,10 @@ dependency.
 - Dtype is intrinsic to `TensorType`. A package that lets the user select a
   dtype uses the dedicated declarative `type: "dtype"` control from the
   package schema, not NNModelling's legacy free-form parameter semantics.
+- The editor renders dtype as a select containing exactly the choices declared
+  by that package. All other parameter controls are derived from the same
+  definition schema and persist primitive semantic values rather than legacy
+  `{value, position}` wrappers.
 - There is no `unknown` dtype and no implicit cast or promotion. `core.cast` is
   the explicit conversion operation.
 - Editor state is separate from semantic tensor data. A node or edge may be
@@ -67,6 +76,9 @@ dependency.
   causes, and source spans remain out of scope until required by evidence.
 - Editor node IDs and presentation locations are adapter metadata, not part of
   the oracle's semantic diagnostic.
+- During temporary coexistence, `data.package` selects the new UI path. Such a
+  node must never display legacy `TypeEngine` parameters or diagnostics; a
+  legacy node may continue using the old surface until final cutover.
 
 ## Cross-validation
 

@@ -188,6 +188,7 @@ wire data.
 | [T06](tasks/T06-dtype-and-loss.md) | `frontend` | `T05` | — | dtype controls/display, loss handling, remaining reference core packages | Canonical dtype and `loss` semantics are schema-driven and oracle-compatible. |
 | [T07](tasks/T07-differential-gate.md) | `testing` | `T06` | — | reference-suite port and test-only black-box protocol | The reference suite is run and a versioned independent-process protocol compares candidate and oracle. |
 | [T08](tasks/T08-graph-differential-fuzzing.md) | `testing` | `T07` | — | three deterministic model scenarios and editor fixtures | Transformer, variational-autoencoder and ResNet graphs produce identical canonical observations; generative fuzzing is deferred. |
+| [T09](tasks/T09-editor-package-ui-cutover.md) | `frontend` | `T08` | — | sidebar, package picker, schema controls and editor diagnostics | Package nodes are created and edited from active definitions; dtype choices, output types and diagnostics come only from the new engine. |
 
 Tasks remain sequential because each extends the same semantic host and graph
 adapter. Every task is a reviewable vertical slice and must leave the previous
