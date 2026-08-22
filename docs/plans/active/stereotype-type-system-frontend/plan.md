@@ -124,8 +124,9 @@ properties because copied code can preserve correlated bugs.
 - Differential-fuzz complete graph semantics, including topology, ordered
   handles, package selections, parameters, dtypes, nested subflows and
   structured failure context.
-- Keep the deprecated engine frozen during coexistence. Do not delete it until
-  the later backend/cutover phase can remove every legacy stereotype and seam.
+- End frontend coexistence before backend work: require package identity for
+  every frontend node, remove the deprecated engine and legacy stereotypes,
+  and make compilation explicitly unavailable until the package backend exists.
 
 ## Non-goals
 
@@ -189,6 +190,9 @@ wire data.
 | [T07](tasks/T07-differential-gate.md) | `testing` | `T06` | — | reference-suite port and test-only black-box protocol | The reference suite is run and a versioned independent-process protocol compares candidate and oracle. |
 | [T08](tasks/T08-graph-differential-fuzzing.md) | `testing` | `T07` | — | three deterministic model scenarios and editor fixtures | Transformer, variational-autoencoder and ResNet graphs produce identical canonical observations; generative fuzzing is deferred. |
 | [T09](tasks/T09-editor-package-ui-cutover.md) | `frontend` | `T08` | — | sidebar, package picker, schema controls and editor diagnostics | Package nodes are created and edited from active definitions; dtype choices, output types and diagnostics come only from the new engine. |
+| [T10](tasks/T10-package-only-frontend-contract.md) | `frontend` | `T09` | — | graph types, Diagram, UI, import/export | Every frontend node and editor path is package-only; no coexistence discriminator remains. |
+| [T11](tasks/T11-browser-rpc-and-fixture-cutover.md) | `frontend` | `T10` | — | Browser RPC, examples, fixtures, manifests | Automation, persistence and validation use the same package contract; compilation is explicitly unavailable. |
+| [T12](tasks/T12-delete-legacy-type-system.md) | `frontend-testing` | `T11` | — | legacy deletion, CI guard, differential gate | Deprecated code/data/tests are physically gone and the pinned oracle is the only type-semantic authority. |
 
 Tasks remain sequential because each extends the same semantic host and graph
 adapter. Every task is a reviewable vertical slice and must leave the previous
@@ -262,8 +266,12 @@ traversal or composition.
 - [ ] New-format nodes persist exact package ID/version and display name.
 - [ ] The live editor shows inferred shape and dtype and renders structured
   diagnostic context without package-specific UI switches.
-- [ ] The deprecated `TypeEngine` receives no new behavior and is not used for
-  new package nodes.
+- [ ] The deprecated `TypeEngine`, `StereotypeCore`, `Stereotypes/`, legacy
+  wrappers, and their semantic tests no longer exist.
+- [ ] A repository guard rejects reintroduction of legacy symbols or saved
+  frontend nodes without exact package identity.
+- [ ] The pinned independent oracle is the sole type-semantic acceptance
+  authority; differential fuzzing and shrinking pass before frontend completion.
 - [ ] No backend implementation has begun.
 
 ## Final verification

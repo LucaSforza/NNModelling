@@ -15,14 +15,17 @@ dependency.
 
 - Type inference, the Cordis host, package-plugin lifecycle, Lua runtime, graph
   scheduling, and editor diagnostics belong to the frontend.
-- The new engine is developed beside the deprecated engine only while the
-  migration is incomplete. New semantics must never be added to the deprecated
-  engine, and the coexistence seam must not become a permanent feature flag.
+- The new engine was developed beside the deprecated engine only long enough
+  to establish package-driven editor parity. The frontend now cuts over
+  completely: every frontend node requires `data.package`, the deprecated
+  engine and its tests are deleted, and no coexistence discriminator remains.
 - Backend package loading is designed only after frontend semantic
   cross-validation passes. PyTorch is never an inference fallback.
-- At the end of the overall frontend-and-backend migration, the deprecated
-  engine and legacy stereotypes are deleted. Existing diagrams may be redrawn;
-  no legacy project-format migration is required.
+- The deprecated frontend engine and legacy stereotypes are deleted before the
+  backend package implementation begins. Existing diagrams may be redrawn; no
+  legacy project-format migration is required. Compilation, conversion,
+  training, and inference of package graphs remain explicitly unavailable
+  until the backend independently loads trusted package `pytorch.py` files.
 
 ## Package and project identity
 
@@ -81,9 +84,9 @@ dependency.
   causes, and source spans remain out of scope until required by evidence.
 - Editor node IDs and presentation locations are adapter metadata, not part of
   the oracle's semantic diagnostic.
-- During temporary coexistence, `data.package` selects the new UI path. Such a
-  node must never display legacy `TypeEngine` parameters or diagnostics; a
-  legacy node may continue using the old surface until final cutover.
+- `data.package` is mandatory for every frontend node. It is package identity,
+  not a temporary UI discriminator. The editor has one parameter, inference,
+  and diagnostic path, all driven by the active package definition.
 
 ## Cross-validation
 
@@ -108,6 +111,14 @@ Cross-validation is built in three cumulative layers:
    DAGs and nested subflows, run the same graph-semantic scenario through both
    adapters, shrink every divergence, and retain the minimized case. Generation
    covers valid graphs and one targeted invalid mutation at a time.
+
+Tests whose only subject is the deprecated `TypeEngine`, legacy parameter
+wrappers, or `Stereotypes/` declarations are deleted with that implementation.
+They are not a semantic authority and must not be kept as compatibility gates.
+Candidate structural tests remain appropriate for editor state, topology,
+transport, and persistence, but observable type semantics are accepted only by
+cross-validation against the pinned `stereotype-lab` oracle plus the independent
+properties required by its testing specification.
 
 The version 1 whole-graph oracle covers complete DAGs with exactly one terminal
 node. Incomplete editor graphs are fuzzed separately: NNModelling's local graph
