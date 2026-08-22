@@ -1,7 +1,7 @@
 import { LuaFactory, LuaMultiReturn } from "wasmoon"
 
-import { isDType, type TensorType } from "../tensor-type.ts"
-import type { TypeResult } from "../type-inference.ts"
+import { isDType, type TensorType } from "../tensor-type"
+import type { TypeResult } from "../type-inference"
 
 export type LuaInferenceContext = {
   readonly inputs: readonly TensorType[]

@@ -1,0 +1,7 @@
+{
+  "protocolVersion": 1,
+  "operation": "infer",
+  "packageId": "core.input",
+  "context": { "kind": "input", "inputs": [] },
+  "parameters": {}
+}

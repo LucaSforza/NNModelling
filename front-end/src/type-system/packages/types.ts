@@ -74,16 +74,3 @@ export type LoadedInferenceRule = {
 export type InferenceRuntime = {
   load(packageInfo: Package, inferenceFile: string): Promise<LoadedInferenceRule>
 }
-
-/** Structural subset of Cordis used by the loader, avoiding a production dependency. */
-export type CordisPluginContext = {
-  readonly effect: (execute: () => void | (() => void | Promise<void>) | Promise<() => void | Promise<void>>) => unknown
-}
-
-export type CordisFiber = { readonly dispose: () => void | Promise<void> }
-
-export type CordisContext = {
-  readonly plugin: (
-    plugin: { readonly name?: string; readonly apply: (context: CordisPluginContext) => void },
-  ) => CordisFiber | PromiseLike<CordisFiber>
-}

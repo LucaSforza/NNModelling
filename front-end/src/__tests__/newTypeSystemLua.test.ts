@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 
-import { LuaInferenceRuntime } from "../type-system/lua/lua-inference-runtime.ts"
+import { LuaInferenceRuntime } from "../type-system/lua/lua-inference-runtime"
 
 const f32 = (shape: readonly (string | number)[]) => ({ shape, dtype: "float32" as const })
 

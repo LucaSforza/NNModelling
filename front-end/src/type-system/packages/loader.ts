@@ -1,3 +1,5 @@
+import type { Context } from "@deepseek-ai/cordis"
+
 import { PackageCatalog } from "./catalog"
 import { PackageRegistry } from "./registry"
 import { satisfies } from "./semver"
@@ -5,7 +7,6 @@ import { resolveParameters } from "./validation"
 import type { TensorType } from "../tensor-type"
 import type { TypeContext, TypeResult } from "../type-inference"
 import type {
-  CordisContext,
   InferenceRule,
   InferenceRuntime,
   LoadedInferenceRule,
@@ -34,7 +35,7 @@ export class PackageLoader {
   private readonly maximumInferenceDepth = 32
 
   constructor(
-    private readonly context: CordisContext,
+    private readonly context: Context,
     private readonly catalog: PackageCatalog,
     private readonly registry: PackageRegistry,
     private readonly runtime: InferenceRuntime,
