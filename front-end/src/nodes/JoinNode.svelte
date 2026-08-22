@@ -21,7 +21,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   } from "@xyflow/svelte";
   import { getContext, tick } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
-  import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
   import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
 
   let { id, data, selected, isConnectable }: NodeProps = $props();
@@ -51,10 +50,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   });
 
   let outputShape = $derived.by(() => {
-    if (data.package) return packageOutputLabel(diagram?.packageTypeResult ?? null, id);
-    const ann = diagram?.typeResult?.annotations.get(id);
-    if (!ann) return null;
-    return ann.outputType.shape.map(d => d.kind === 'const' ? String(d.value) : d.kind === 'symbolic' ? d.name : d.kind).join(',');
+    return packageOutputLabel(diagram?.typeResult ?? null, id);
   });
 
   function focusInSidebar() {
@@ -65,9 +61,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   let nodeDiagnostic = $derived(
-    data.package
-      ? packageDiagnostic(diagram?.packageTypeResult ?? null, id)
-      : getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
+    packageDiagnostic(diagram?.typeResult ?? null, id),
   );
 
   function increase(e: Event) {
@@ -110,7 +104,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     <div class="output-handle-wrapper">
       <Handle type="source" position={sourcePosition} id="out" {isConnectable} />
       {#if isNodeHovered && outputShape}
-        <div class="shape-tooltip">{data.package ? outputShape : `[${outputShape}]`}</div>
+        <div class="shape-tooltip">{outputShape}</div>
       {/if}
     </div>
   </div>
@@ -123,7 +117,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   {#if nodeDiagnostic}
     <div class="node-indicator {nodeDiagnostic.severity}" title={nodeDiagnostic.message}>
-      {nodeDiagnostic.severity === "suggestion" ? "?" : "!"}
+      !
     </div>
   {/if}
 </div>

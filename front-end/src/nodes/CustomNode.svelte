@@ -20,7 +20,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   } from "@xyflow/svelte";
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
-  import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
   import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
 
   let { data, selected, isConnectable, id }: NodeProps = $props();
@@ -39,6 +38,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     if (!identity) return null;
     return diagram?.packageCatalog.find((metadata) => metadata.id === identity.id && metadata.version === identity.version) ?? null;
   });
+  let isInput = $derived(packageMetadata?.definition.kind === "input");
 
   function displayParams(position: "top" | "bottom") {
     const params = (data.params as Record<string, unknown> | undefined) ?? {};
@@ -47,8 +47,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         .filter(([, definition]) => definition.position === position)
         .map(([key]) => [key, params[key]] as const);
     }
-    return Object.entries(params)
-      .filter(([, value]) => (value as { position?: string } | undefined)?.position === position);
+    return [];
   }
 
   let topParams = $derived(displayParams("top"));
@@ -63,37 +62,29 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   // --- Type error indicator ---
   let nodeDiagnostic = $derived(
-    data.package
-      ? packageDiagnostic(diagram?.packageTypeResult ?? null, id)
-      : getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
+    packageDiagnostic(diagram?.typeResult ?? null, id),
   );
 
   // --- Shape tooltip on output handle ---
   let outputShape = $derived.by(() => {
-    if (data.package) return packageOutputLabel(diagram?.packageTypeResult ?? null, id);
-    const ann = diagram?.typeResult?.annotations.get(id);
-    if (!ann) return null;
-    return ann.outputType.shape.map(d => d.kind === 'const' ? String(d.value) : d.kind === 'symbolic' ? d.name : d.kind).join(',');
+    return packageOutputLabel(diagram?.typeResult ?? null, id);
   });
 </script>
 
 <NodeResizer
   minWidth={140}
   minHeight={80}
-  isVisible={selected && !data.isInput}
+  isVisible={selected && !isInput}
 />
 
-{#if !data.isInput}
+{#if !isInput}
   <Handle type="target" id="in" position={targetPosition} {isConnectable} />
 {/if}
 
-{#if data.isInput}
-  <div class="input-circle" style="position: relative;">
-    <div class="input-label">{data.name}</div>
-  </div>
+{#if isInput}
+  <div class="input-circle" style="position: relative;"><div class="input-label">{data.name}</div></div>
 {:else}
-   <div
-     class="node-body"
+  <div class="node-body"
      style="background-color: {(data.color as string) || 'white'};
             color: {(data.color as string) ? 'white' : 'black'};
             text-shadow: {(data.color as string) ? '1px 1px 2px rgba(0,0,0,0.8)' : 'none'};
@@ -103,23 +94,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
    >
     <div class="params-container top-params">
       {#each topParams as [key, param]}
-        <div class="param-row">
-          <span class="param-key">{key}</span>
-          <span class="param-value">{param && typeof param === "object" && "value" in param ? param.value : String(param ?? "")}</span>
-        </div>
+        <div class="param-row"><span class="param-key">{key}</span><span class="param-value">{String(param ?? "")}</span></div>
       {/each}
     </div>
-
-    <div class="node-title">
-      {data.name || "Senza Nome"}
-    </div>
-
+    <div class="node-title">{data.name || "Senza Nome"}</div>
     <div class="params-container bottom-params">
       {#each bottomParams as [key, param]}
-        <div class="param-row">
-          <span class="param-key">{key}</span>
-          <span class="param-value">{param && typeof param === "object" && "value" in param ? param.value : String(param ?? "")}</span>
-        </div>
+        <div class="param-row"><span class="param-key">{key}</span><span class="param-value">{String(param ?? "")}</span></div>
       {/each}
     </div>
   </div>
@@ -127,7 +108,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 {#if nodeDiagnostic}
   <div class="node-indicator {nodeDiagnostic.severity}" title={nodeDiagnostic.message}>
-    {nodeDiagnostic.severity === "suggestion" ? "?" : "!"}
+    !
   </div>
 {/if}
 
@@ -137,7 +118,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 <div class="output-handle-wrapper" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
   <Handle type="source" id="out" position={sourcePosition} {isConnectable} />
   {#if isNodeHovered && outputShape}
-    <div class="shape-tooltip">{data.package ? outputShape : `[${outputShape}]`}</div>
+    <div class="shape-tooltip">{outputShape}</div>
   {/if}
 </div>
 <style>

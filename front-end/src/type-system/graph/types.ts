@@ -22,13 +22,12 @@ export type GraphInferenceResult = {
 
 export type PackageNodeData = {
   readonly package?: PackageIdentity
-  readonly stereotypePackage?: PackageIdentity
   readonly params?: Readonly<Record<string, unknown>>
 }
 
 export function packageIdentity(node: Node): PackageIdentity | undefined {
   const data = node.data as PackageNodeData | undefined
-  const candidate = data?.package ?? data?.stereotypePackage
+  const candidate = data?.package
   if (!candidate || typeof candidate !== "object") return undefined
   if (typeof candidate.id !== "string" || typeof candidate.version !== "string" || typeof candidate.name !== "string") return undefined
   return { id: candidate.id, version: candidate.version, name: candidate.name }

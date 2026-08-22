@@ -8,9 +8,7 @@ Licensed under the GNU General Public License v3 or later.
 <script lang="ts">
   import SDropdown from "./SDropdown.svelte";
   import type { Diagram } from "../Diagram.svelte";
-  import type { StereotypeCore } from "../core/StereotypeCore";
   import type { Node } from "@xyflow/svelte";
-  import type { TypeSuggestion } from "../conversion/tensortypes";
   import type { ActivePackageMetadata, EditorInferenceState } from "../type-system/host";
   import type { ParameterDefinition } from "../type-system/packages/types";
   import {
@@ -42,7 +40,6 @@ Licensed under the GNU General Public License v3 or later.
     height: 60,
     params: {} as Record<string, unknown>,
   });
-  let legacySelection = $state<StereotypeCore | null>(null);
   let packageSelection = $state<ActivePackageMetadata | null>(null);
   let sidebarWidth = $state(320);
   let isDragging = $state(false);
@@ -54,10 +51,10 @@ Licensed under the GNU General Public License v3 or later.
   let packageDefinition = $derived(packageSelection?.definition ?? null);
   let packageParameters = $derived(packageDefinition ? Object.entries(packageDefinition.parameters) : []);
   let packageOutput = $derived(selectedNode && isPackageNode
-    ? packageOutputLabel(diagram.packageTypeResult, selectedNode.id)
+    ? packageOutputLabel(diagram.typeResult, selectedNode.id)
     : null);
   let packageState = $derived(selectedNode && isPackageNode
-    ? diagram.packageTypeResult?.nodes.get(selectedNode.id)
+    ? diagram.typeResult?.nodes.get(selectedNode.id)
     : undefined);
 
   function startResize(event: MouseEvent) {
@@ -92,7 +89,6 @@ Licensed under the GNU General Public License v3 or later.
     const identity = nodePackageIdentity(node);
     if (identity) {
       packageSelection = diagram.packageCatalog.find((metadata) => packageMatches(metadata, identity)) ?? null;
-      legacySelection = null;
       form.name = String(node.data.name ?? node.data.label ?? packageSelection?.definition.name ?? "");
       form.color = String(node.data.color ?? packageSelection?.definition.view.color ?? "#4779c4");
       form.width = node.width ?? packageSelection?.definition.view.width ?? 140;
@@ -103,23 +99,11 @@ Licensed under the GNU General Public License v3 or later.
       return;
     }
 
-    packageSelection = null;
-    const stereotypeName = String(node.data.stereotype ?? "");
-    legacySelection = diagram.stereotypes.find((stereotype) => stereotype.name === stereotypeName) ?? null;
-    form.name = String(node.data.name ?? node.data.label ?? "");
-    form.color = String(node.data.color ?? (node.type === "subflow" ? "#9b59b6" : "#4779c4"));
-    form.width = node.width ?? (node.type === "subflow" ? 400 : 140);
-    form.height = node.height ?? (node.type === "subflow" ? 300 : 60);
-    const params = (node.data.params as Record<string, { value?: unknown; position?: string } | unknown> | undefined) ?? {};
-    form.params = Object.fromEntries(Object.entries(params).map(([key, value]) => [
-      key,
-      value && typeof value === "object" && "value" in value ? (value as { value: unknown }).value : value,
-    ]));
+    throw new Error("Legacy node cannot be edited; reload a package-format diagram");
   }
 
   function resetForm() {
     packageSelection = null;
-    legacySelection = null;
     form.name = "";
     form.color = "#4779c4";
     form.width = 140;
@@ -129,7 +113,6 @@ Licensed under the GNU General Public License v3 or later.
 
   function onPackageChange(metadata: ActivePackageMetadata | null) {
     packageSelection = metadata;
-    legacySelection = null;
     if (!metadata) {
       form.params = {};
       return;
@@ -139,19 +122,6 @@ Licensed under the GNU General Public License v3 or later.
     form.width = metadata.definition.view.width;
     form.height = metadata.definition.view.height;
     form.params = initialPackageParameters(metadata.definition);
-  }
-
-  function onLegacyChange(stereotype: StereotypeCore | null) {
-    legacySelection = stereotype;
-    packageSelection = null;
-    if (!stereotype) {
-      form.params = {};
-      return;
-    }
-    form.color = stereotype.view?.color ?? "#4779c4";
-    form.width = stereotype.view?.width ?? 140;
-    form.height = stereotype.view?.height ?? 60;
-    form.params = Object.fromEntries(Object.entries(stereotype.parameters ?? {}).map(([key, definition]) => [key, definition.default]));
   }
 
   function handleCreate() {
@@ -169,18 +139,7 @@ Licensed under the GNU General Public License v3 or later.
       resetForm();
       return;
     }
-    if (!legacySelection) return;
-    if (legacySelection.isJoin) {
-      diagram.addJoinNode(legacySelection, position.x, position.y, { name: form.name, color: form.color, params: form.params });
-    } else {
-      diagram.addModule(legacySelection, position.x, position.y, {
-        name: form.name,
-        color: form.color,
-        width: form.width,
-        height: form.height,
-        params: form.params,
-      });
-    }
+    return;
     resetForm();
   }
 
@@ -200,15 +159,7 @@ Licensed under the GNU General Public License v3 or later.
       diagram.refreshTypes();
       return;
     }
-    diagram.updateModule(selectedNode.id, {
-      name: form.name,
-      label: selectedNode.type === "subflow" ? form.name : undefined,
-      color: form.color,
-      width: form.width,
-      height: form.height,
-      stereotype: legacySelection?.name,
-      params: Object.fromEntries(Object.entries(form.params).map(([key, value]) => [key, { value }])),
-    });
+    throw new Error("Legacy node cannot be updated");
   }
 
   function updatePackageParameter(name: string, definition: ParameterDefinition, raw: unknown) {
@@ -257,34 +208,17 @@ Licensed under the GNU General Public License v3 or later.
 
   function getNodeLabel(nodeId: string): string {
     const node = diagram.nodes.find((candidate) => candidate.id === nodeId);
-    return String(node?.data.name ?? node?.data.stereotype ?? nodeId);
+    const data = node?.data as Record<string, unknown> | undefined;
+    const pkg = data?.package as { name?: unknown } | undefined;
+    return String(data?.name ?? pkg?.name ?? nodeId);
   }
 
   function selectDiagnosticNode(nodeId: string) {
     diagram.selectNodes([nodeId]);
   }
 
-  function applySuggestion(suggestion: TypeSuggestion) {
-    const target = diagram.getNodeById(suggestion.nodeId);
-    if (!target || nodePackageIdentity(target)) return;
-    const params = (target.data.params as Record<string, Record<string, unknown>>) ?? {};
-    const existing = params[suggestion.param] ?? {};
-    diagram.updateModule(suggestion.nodeId, { params: { ...params, [suggestion.param]: { ...existing, value: String(suggestion.value) } } });
-  }
-
-  let legacyDiagnostics = $derived.by(() => {
-    const result = diagram.typeResult;
-    if (!result || isPackageNode) return { errors: [], warnings: [], suggestions: [] };
-    const packageIds = new Set(diagram.nodes.filter((node) => nodePackageIdentity(node)).map((node) => node.id));
-    return {
-      errors: result.errors.filter((item) => !packageIds.has(item.nodeId)),
-      warnings: result.warnings.filter((item) => !packageIds.has(item.nodeId)),
-      suggestions: result.suggestions.filter((item) => !packageIds.has(item.nodeId)),
-    };
-  });
-
   let packageDiagnostics = $derived.by(() => {
-    const result = diagram.packageTypeResult;
+    const result = diagram.typeResult;
     if (!result) return [] as Array<{ nodeId: string; severity: string; message: string }>;
     const nodes = isPackageNode && selectedNode ? [selectedNode] : diagram.nodes.filter((node) => nodePackageIdentity(node));
     return nodes.flatMap((node) => {
@@ -293,9 +227,7 @@ Licensed under the GNU General Public License v3 or later.
     });
   });
 
-  let diagnosticCount = $derived(isPackageNode
-    ? packageDiagnostics.length
-    : legacyDiagnostics.errors.length + legacyDiagnostics.warnings.length + legacyDiagnostics.suggestions.length);
+  let diagnosticCount = $derived(packageDiagnostics.length);
 
   function packageStateMessage(state: EditorInferenceState | GraphNodeResult | undefined): string {
     if (!state) return "Package type-system is initializing.";
@@ -331,11 +263,6 @@ Licensed under the GNU General Public License v3 or later.
         <div>
           <label>Package</label>
           <SDropdown {diagram} packageCatalog={diagram.packageCatalog} selectedPackage={packageSelection} onPackageChange={onPackageChange} />
-        </div>
-      {:else}
-        <div>
-          <label>Stereotipo legacy</label>
-          <SDropdown {diagram} selectedStereotype={legacySelection} onSelectedChange={onLegacyChange} />
         </div>
       {/if}
 
@@ -381,16 +308,9 @@ Licensed under the GNU General Public License v3 or later.
             </div>
           {/each}
         </div>
-      {:else if legacySelection}
-        <div class="params-section">
-          <h4>Parametri legacy</h4>
-          {#each Object.entries(legacySelection.parameters ?? {}) as [key, config] (key)}
-            <div class="param-row"><label for={`legacy-param-${key}`}>{key}</label><input id={`legacy-param-${key}`} type="text" value={String(form.params[key] ?? config.default ?? "")} oninput={(event) => { form.params = { ...form.params, [key]: (event.target as HTMLInputElement).value }; handleManualUpdate(); }} /></div>
-          {/each}
-        </div>
       {/if}
 
-      {#if !isEditing && (packageSelection || legacySelection)}
+      {#if !isEditing && packageSelection}
         <button class="create-btn" onclick={handleCreate}>➕ Aggiungi al Canvas</button>
       {:else if isEditing}
         <button class="update-btn" onclick={handleManualUpdate}>💾 Salva Modifiche</button>
@@ -412,16 +332,6 @@ Licensed under the GNU General Public License v3 or later.
             <div class="type-error-item {diagnostic.severity}" role="button" tabindex="0" onclick={() => selectDiagnosticNode(diagnostic.nodeId)} onkeydown={(event) => { if (event.key === "Enter") selectDiagnosticNode(diagnostic.nodeId); }}>
               <span class="type-error-icon">{diagnostic.severity === "error" ? "❌" : "⚠️"}</span><div class="type-error-text"><span class="type-error-node">{getNodeLabel(diagnostic.nodeId)}</span><span class="type-error-msg">{diagnostic.message}</span></div>
             </div>
-          {/each}
-        {:else}
-          {#each legacyDiagnostics.errors as error (error.nodeId)}
-            <div class="type-error-item error" role="button" tabindex="0" onclick={() => selectDiagnosticNode(error.nodeId)}><span class="type-error-icon">❌</span><div class="type-error-text"><span class="type-error-node">{getNodeLabel(error.nodeId)}</span><span class="type-error-msg">{error.message}</span></div></div>
-          {/each}
-          {#each legacyDiagnostics.warnings as warning (`${warning.nodeId}-${warning.kind}`)}
-            <div class="type-error-item warning" role="button" tabindex="0" onclick={() => selectDiagnosticNode(warning.nodeId)}><span class="type-error-icon">⚠️</span><div class="type-error-text"><span class="type-error-node">{getNodeLabel(warning.nodeId)} · {warning.kind}</span><span class="type-error-msg">{warning.message}</span></div></div>
-          {/each}
-          {#each legacyDiagnostics.suggestions as suggestion (`${suggestion.nodeId}-${suggestion.param}`)}
-            <div class="type-error-item suggestion" role="button" tabindex="0" onclick={() => selectDiagnosticNode(suggestion.nodeId)}><span class="type-error-icon">💡</span><div class="type-error-text"><span class="type-error-node">{getNodeLabel(suggestion.nodeId)} · {suggestion.param}</span><span class="type-error-msg">Set to {suggestion.value}: {suggestion.reason}</span><button class="apply-suggestion-btn" onclick={(event) => { event.stopPropagation(); applySuggestion(suggestion); }}>Applica</button></div></div>
           {/each}
         {/if}
       </div>

@@ -28,12 +28,9 @@ export function scenarioSnapshot(
       height: metadata.definition.kind === "input" ? 30 : metadata.definition.view.height,
       data: {
         package: { id: metadata.id, version: metadata.version, name: metadata.definition.name },
-        stereotype: metadata.definition.name,
         name: modelNode.id,
         color: metadata.definition.view.color,
         params: structuredClone(modelNode.parameters),
-        isInput: metadata.definition.kind === "input",
-        isLoss: metadata.definition.kind === "loss",
         ...(metadata.definition.kind === "join" ? { inputsCount: modelNode.inputs.length } : {}),
       },
     }

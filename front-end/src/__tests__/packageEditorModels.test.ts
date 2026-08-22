@@ -20,7 +20,6 @@ afterEach(async () => {
 class MemoryDiagram extends DiagramCore {
   public nodes: Node[] = []
   public edges: Edge[] = []
-  public stereotypes = []
 }
 
 describe("package model editor acceptance", () => {
@@ -65,10 +64,7 @@ describe("package model editor acceptance", () => {
       data: {
         package: identity(packageId, name),
         name: id,
-        stereotype: name,
         params,
-        ...(packageId === "core.input" ? { isInput: true } : {}),
-        ...(packageId === "core.horizontal-repeat" || packageId === "core.repeat" ? { isSubFlow: true } : {}),
         ...(packageId === "core.add" ? { inputsCount: 2 } : {}),
       },
     })

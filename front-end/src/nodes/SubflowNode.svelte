@@ -21,14 +21,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { type Node } from "@xyflow/svelte";
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
-  import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
+  import { packageDiagnostic } from "../type-system/graph/presentation";
 
   type SubflowData = {
     label: string;
     isCollapsed: boolean;
     color: any;
-    params: Object;
-    stereotype: any;
+    params: Record<string, unknown>;
+    package: { id: string; version: string; name: string };
   };
 
   type MySubflowNode = Node<SubflowData, "subflow">;
@@ -42,17 +42,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     diagram.layoutDirection === "horizontal" ? Position.Right : Position.Bottom,
   );
 
-  let topParams = $derived(
-    Object.entries(data.params || {}).filter(
-      ([_, p]: any) => p?.position === "top",
-    ),
-  );
+  let topParams = $derived([] as Array<[string, unknown]>);
 
-  let bottomParams = $derived(
-    Object.entries(data.params || {}).filter(
-      ([_, p]: any) => p?.position === "bottom",
-    ),
-  );
+  let bottomParams = $derived([] as Array<[string, unknown]>);
 
   function focusInSidebar() {
     diagram.nodes = diagram.nodes.map((n) => ({
@@ -62,7 +54,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   let nodeDiagnostic = $derived(
-    getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
+    packageDiagnostic(diagram?.typeResult ?? null, id),
   );
 
 </script>
@@ -89,12 +81,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     </button>
   </div>
 
-  {#if data.stereotype && topParams.length > 0}
+  {#if topParams.length > 0}
     <div class="params-container top-params">
       {#each topParams as [key, param]}
         <div class="param-row">
           <span class="param-key">{key}</span>
-          <span class="param-value">{param.value}</span>
+          <span class="param-value">{String(param)}</span>
         </div>
       {/each}
     </div>
@@ -102,12 +94,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   <div class="subflow-body"></div>
 
-  {#if data.stereotype && bottomParams.length > 0}
+  {#if bottomParams.length > 0}
     <div class="params-container bottom-params">
       {#each bottomParams as [key, param]}
         <div class="param-row">
           <span class="param-key">{key}</span>
-          <span class="param-value">{param.value}</span>
+          <span class="param-value">{String(param)}</span>
         </div>
       {/each}
     </div>
@@ -115,7 +107,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   {#if nodeDiagnostic}
     <div class="node-indicator {nodeDiagnostic.severity}" title={nodeDiagnostic.message}>
-      {nodeDiagnostic.severity === "suggestion" ? "?" : "!"}
+      !
     </div>
   {/if}
 </div>

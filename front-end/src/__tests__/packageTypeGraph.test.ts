@@ -20,7 +20,7 @@ function packageNode(id: string, identity: typeof inputIdentity | typeof forkIde
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: identity, stereotype: identity.name, name: identity.name, params },
+    data: { package: identity, name: identity.name, params },
   } as Node
 }
 
@@ -79,7 +79,6 @@ describe("versioned package graph inference", () => {
     class MemoryDiagram extends DiagramCore {
       public nodes: Node[] = []
       public edges = []
-      public stereotypes = []
     }
     const source = new MemoryDiagram()
     const created = source.addPackageModule(inputIdentity, "input", 10, 20, {
