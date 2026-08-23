@@ -232,6 +232,7 @@ class JobManager:
             "heartbeat_at": None,
             "wandb_url": None,
             "model_package": None,
+            "training_package": None,
             "package_error": None,
             "artifact_dir": str(artifact_dir),
             "owner_connection_id": owner_connection_id,
@@ -382,12 +383,26 @@ class JobManager:
             if publish_wandb_url:
                 self._event(job_id, "wandb_ready", {"wandb_url": wandb_url})
             if job.get("submission", {}).get("network", {}).get("format") == "package":
+                training_package = self._training_package_info(job_id)
+                if training_package is None:
+                    error = "Trained package archive is missing or invalid"
+                    self._set_status(
+                        job_id,
+                        "failed",
+                        finished_at=utc_now(),
+                        error=error,
+                        wandb_url=wandb_url,
+                    )
+                    self._drop_active(job_id)
+                    self._event(job_id, "failed", {"error": error, **details})
+                    return
                 self._set_status(
                     job_id,
                     "succeeded",
                     finished_at=utc_now(),
                     error=None,
                     wandb_url=wandb_url,
+                    training_package=training_package,
                 )
                 self._drop_active(job_id)
                 self._event(job_id, "succeeded", details)
@@ -539,6 +554,54 @@ class JobManager:
             _remove_file(snapshot)
             raise PackageIntegrityError("Model package integrity check failed")
         return snapshot, wheel.name, computed
+
+    def training_package_download(self, job_id: str, *, owner_connection_id: str) -> tuple[Path, str, str]:
+        """Resolve and verify the trained package archive for download."""
+
+        job = self._owned_job(job_id, owner_connection_id)
+        package = job.get("training_package")
+        if not isinstance(package, dict) or not isinstance(package.get("filename"), str):
+            raise FileNotFoundError("Trained package is not available")
+        root = Path(job["artifact_dir"]).resolve()
+        filename = Path(package["filename"])
+        archive = (root / filename).resolve()
+        declared = package.get("sha256")
+        if (
+            filename.name != package["filename"]
+            or archive.suffix != ".zip"
+            or root not in archive.parents
+            or not archive.is_file()
+            or not isinstance(declared, str)
+            or not PACKAGE_SHA256_HEX.fullmatch(declared)
+        ):
+            raise FileNotFoundError("Trained package is not available")
+        snapshot, computed = _create_package_snapshot(
+            archive,
+            snapshot_dir=self.package_snapshot_dir,
+            suffix=".zip",
+        )
+        if not hmac.compare_digest(computed, declared.lower()):
+            _remove_file(snapshot)
+            raise PackageIntegrityError("Trained package integrity check failed")
+        return snapshot, archive.name, computed
+
+    def _training_package_info(self, job_id: str) -> dict[str, Any] | None:
+        """Build the public manifest for the worker's immutable archive."""
+
+        job = self.store.get_job(job_id)
+        if job is None:
+            return None
+        archive = Path(job["artifact_dir"]) / "trained-package.zip"
+        if not archive.is_file():
+            return None
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        return {
+            "schema_version": 1,
+            "format": "nnm-trained-package/v1",
+            "filename": archive.name,
+            "sha256": digest,
+            "size": archive.stat().st_size,
+        }
 
     def tail_logs(
         self,
@@ -692,6 +755,7 @@ def _create_package_snapshot(
     *,
     snapshot_dir: Path | None,
     chunk_size: int = PACKAGE_SNAPSHOT_CHUNK_SIZE,
+    suffix: str = ".whl",
 ) -> tuple[Path, str]:
     """Copy a wheel into a private immutable snapshot while hashing it in one pass.
 
@@ -713,7 +777,7 @@ def _create_package_snapshot(
         snapshot_dir.mkdir(parents=True, exist_ok=True)
     fd, raw_path = tempfile.mkstemp(
         prefix="nnm_pkg_",
-        suffix=".whl",
+        suffix=suffix,
         dir=str(snapshot_dir) if snapshot_dir is not None else None,
     )
     snapshot = Path(raw_path)

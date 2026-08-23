@@ -138,6 +138,25 @@ describe("authenticated training API", () => {
     expect(await wheel.text()).toBe("wheel");
   });
 
+  it("downloads and verifies a trained package archive", async () => {
+    const expected = await sha256Hex("trained-zip");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("trained-zip", {
+        status: 200,
+        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    const archive = await api.downloadTrainingPackage("job-1", expected);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/jobs/job-1/training-package");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
+    expect(await archive.text()).toBe("trained-zip");
+  });
+
   it("rejects a package whose body digest does not match the manifest", async () => {
     const expected = await sha256Hex("pristine-wheel");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(

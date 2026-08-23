@@ -180,6 +180,16 @@ class ModelPackageInfo(BaseModel):
     input_adapter: dict[str, Any]
 
 
+class TrainingPackageInfo(BaseModel):
+    """Digest-verified archive containing a package graph and trained weights."""
+
+    schema_version: int
+    format: Literal["nnm-trained-package/v1"]
+    filename: str
+    sha256: str
+    size: int = Field(ge=0)
+
+
 class JobStatus(BaseModel):
     """Public job metadata returned by the API."""
 
@@ -195,6 +205,7 @@ class JobStatus(BaseModel):
     heartbeat_at: str | None = None
     wandb_url: str | None = None
     model_package: ModelPackageInfo | None = None
+    training_package: TrainingPackageInfo | None = None
     package_error: str | None = None
     artifact_dir: str
 

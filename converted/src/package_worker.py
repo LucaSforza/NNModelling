@@ -9,6 +9,8 @@ import importlib.util
 import inspect
 import json
 import random
+import hashlib
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,7 @@ def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
         json.dumps(result, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+    _write_trained_package(package, artifacts_path)
     return result
 
 
@@ -160,6 +163,27 @@ def train(model: torch.nn.Module, request: dict[str, Any], artifacts_path: Path)
         encoding="utf-8",
     )
     return summary
+
+
+def _write_trained_package(package: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:
+    """Bundle the exact graph resources and trained weights for inference."""
+
+    archive_path = artifacts_path / "trained-package.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "package.json",
+            json.dumps(package, indent=2, sort_keys=True),
+        )
+        for name in ("weights.safetensors", "training-summary.json", "package-worker-result.json"):
+            archive.write(artifacts_path / name, name)
+    digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    return {
+        "schema_version": 1,
+        "format": "nnm-trained-package/v1",
+        "filename": archive_path.name,
+        "sha256": digest,
+        "size": archive_path.stat().st_size,
+    }
 
 
 def _load_dataset_class(target: str) -> type[Any]:

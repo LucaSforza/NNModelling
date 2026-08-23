@@ -26,6 +26,7 @@ export interface TrainingJobStatus {
   heartbeat_at: string | null;
   wandb_url: string | null;
   model_package: ModelPackageInfo | null;
+  training_package: TrainingPackageInfo | null;
   package_error: string | null;
   artifact_dir: string;
 }
@@ -37,6 +38,14 @@ export interface ModelPackageInfo {
   wheel: string;
   sha256: string;
   input_adapter: Record<string, unknown>;
+}
+
+export interface TrainingPackageInfo {
+  schema_version: number;
+  format: "nnm-trained-package/v1";
+  filename: string;
+  sha256: string;
+  size: number;
 }
 
 export interface TrainingJobLogs {
@@ -254,6 +263,35 @@ export class TrainingApiClient {
         "Il package scaricato non ha superato la verifica di integrità SHA-256; il download è stato annullato. Riprova o rigenera il job");
     }
     return new Blob([bytes], { type: "application/octet-stream" });
+  }
+
+  async downloadTrainingPackage(jobId: string, expectedSha256: string): Promise<Blob> {
+    const expected = requireSha256Hex(expectedSha256, 400, "invalid_expected_digest",
+      "Il digest SHA-256 atteso del pacchetto trainato non è valido");
+    requireWebCrypto();
+    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/training-package`, {
+      headers: this.authHeaders(),
+    });
+    if (!response.ok) throw await responseError(response);
+
+    const header = response.headers.get("x-nnm-sha256");
+    if (header === null) {
+      throw new BackendApiError(502, "training_package_digest_missing",
+        "Il server non ha restituito il digest SHA-256 del pacchetto trainato");
+    }
+    const declared = requireSha256Hex(header, 502, "training_package_digest_invalid",
+      "Il digest SHA-256 del pacchetto trainato non è valido");
+    if (declared !== expected) {
+      throw new BackendApiError(502, "training_package_digest_mismatch",
+        "Il digest del pacchetto trainato non corrisponde al manifest del job");
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (await sha256Hex(bytes) !== expected) {
+      throw new BackendApiError(502, "training_package_corrupted",
+        "Il pacchetto trainato non ha superato la verifica SHA-256");
+    }
+    return new Blob([bytes], { type: "application/zip" });
   }
 
   async subscribeTrainingEvents(

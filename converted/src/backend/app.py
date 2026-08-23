@@ -68,7 +68,13 @@ class _CleanupFileResponse(FileResponse):
                 await self.background()
 
 
-def _verified_snapshot_response(snapshot: Path, filename: str, digest: str) -> FileResponse:
+def _verified_snapshot_response(
+    snapshot: Path,
+    filename: str,
+    digest: str,
+    *,
+    media_type: str = "application/octet-stream",
+) -> FileResponse:
     """Serve the verified immutable snapshot and delete it when the response ends.
 
     Only the backend-private snapshot created and hashed by the manager is
@@ -92,7 +98,7 @@ def _verified_snapshot_response(snapshot: Path, filename: str, digest: str) -> F
         raise HTTPException(status_code=404, detail="Model package is not available") from None
     return _CleanupFileResponse(
         snapshot,
-        media_type="application/octet-stream",
+        media_type=media_type,
         filename=filename,
         headers={"X-NNM-SHA256": digest},
         background=BackgroundTask(_remove_file, snapshot),
@@ -388,6 +394,29 @@ def create_app(
                 detail={"code": "package_integrity_error", "message": str(exc)},
             ) from exc
         return _verified_snapshot_response(path, filename, digest)
+
+    @app.get("/jobs/{job_id}/training-package")
+    async def download_training_package(
+        job_id: str,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> FileResponse:
+        """Download the authenticated package graph and trained weights."""
+
+        try:
+            path, filename, digest = app.state.manager.training_package_download(
+                job_id,
+                owner_connection_id=connection["id"],
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown job") from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Trained package is not available") from exc
+        except PackageIntegrityError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "training_package_integrity_error", "message": str(exc)},
+            ) from exc
+        return _verified_snapshot_response(path, filename, digest, media_type="application/zip")
 
     @app.get("/jobs/{job_id}/events")
     def get_events(

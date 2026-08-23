@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 from threading import Event
 
@@ -61,6 +62,28 @@ def test_worker_loads_declared_package(tmp_path: Path) -> None:
     result = run(input_path, tmp_path / "artifacts")
 
     assert result["packages"] == [{"id": "demo", "version": "1.0.0"}]
+
+
+def test_package_worker_writes_downloadable_training_archive(tmp_path: Path) -> None:
+    from package_worker import _write_trained_package
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    for name in ("weights.safetensors", "training-summary.json", "package-worker-result.json"):
+        (artifacts / name).write_text(name, encoding="utf-8")
+
+    manifest = {"packages": [{"id": "demo", "version": "1.0.0"}]}
+    result = _write_trained_package(manifest, artifacts)
+
+    assert result["format"] == "nnm-trained-package/v1"
+    assert result["size"] == (artifacts / "trained-package.zip").stat().st_size
+    with zipfile.ZipFile(artifacts / "trained-package.zip") as archive:
+        assert set(archive.namelist()) == {
+            "package.json",
+            "weights.safetensors",
+            "training-summary.json",
+            "package-worker-result.json",
+        }
 
 
 def test_submit_uses_fake_engine_and_reports_completion(tmp_path: Path) -> None:
