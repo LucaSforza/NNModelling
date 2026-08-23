@@ -117,6 +117,35 @@ def build(parameters, context: BuildContext, services: SubflowServices):
     assert torch.equal(model(value), value)
 
 
+def test_subflow_proxy_builds_and_delegates_to_one_nested_graph() -> None:
+    root = Path(__file__).parents[3]
+    proxy_source = (root / "stereotype-packages/core/subflow-proxy/pytorch.py").read_text()
+    inner_source = """
+import torch
+class Shift(torch.nn.Module):
+    def forward(self, input): return input + 2
+def build(parameters, context, services): return Shift()
+"""
+    inner = _graph("demo.shift")
+    outer = {
+        "nodes": [
+            {"id": "input", "type": "input"},
+            {"id": "proxy", "type": "subflow", "package": {"id": "core.subflow-proxy", "version": "0.1.0"}, "subflow": inner},
+        ],
+        "edges": [{"source": "input", "target": "proxy", "targetHandle": "in-0"}],
+    }
+    model = compile_package_graph({
+        "packages": [
+            _package("core.subflow-proxy", proxy_source),
+            _package("demo.shift", inner_source),
+        ],
+        "graph": outer,
+    })
+
+    value = torch.tensor([[1.0, 2.0]])
+    assert torch.equal(model(value), value + 2)
+
+
 def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
     """Keep the browser bundle contract executable for the canonical VAE."""
 

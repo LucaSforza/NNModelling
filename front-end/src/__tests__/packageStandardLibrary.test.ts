@@ -39,6 +39,9 @@ import reparameterizeInference from "../../../stereotype-packages/core/reparamet
 import repeatManifest from "../../../stereotype-packages/core/repeat/manifest.json?raw"
 import repeatDefinition from "../../../stereotype-packages/core/repeat/stereotype.json?raw"
 import repeatInference from "../../../stereotype-packages/core/repeat/inference.lua?raw"
+import subflowProxyManifest from "../../../stereotype-packages/core/subflow-proxy/manifest.json?raw"
+import subflowProxyDefinition from "../../../stereotype-packages/core/subflow-proxy/stereotype.json?raw"
+import subflowProxyInference from "../../../stereotype-packages/core/subflow-proxy/inference.lua?raw"
 
 const packages: readonly PackageSelection[] = [
   packageSelection(inputManifest, inputDefinition, inputInference),
@@ -53,6 +56,7 @@ const packages: readonly PackageSelection[] = [
   packageSelection(reparameterizeManifest, reparameterizeDefinition, reparameterizeInference),
   packageSelection(repeatManifest, repeatDefinition, repeatInference),
   packageSelection(horizontalRepeatManifest, horizontalRepeatDefinition, horizontalRepeatInference),
+  packageSelection(subflowProxyManifest, subflowProxyDefinition, subflowProxyInference),
 ]
 
 let host: TypeSystemHost | undefined
@@ -65,7 +69,7 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, and loss packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.reparameterize", "core.repeat", "core.horizontal-repeat"]) {
+    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(id)
     }
 
@@ -155,6 +159,22 @@ describe("new core standard-library packages", () => {
       inferSubflow: () => ({ status: "success", output: { shape: ["B", 8], dtype: "float32" } }),
     }, { times: 3 })
     expect(horizontal).toEqual({ status: "success", output: { shape: ["B", 24], dtype: "float32" } })
+  })
+
+  test("delegates Subflow Proxy to exactly one nested subflow", async () => {
+    host = await TypeSystemHost.create(packages)
+    await host.activate("core.subflow-proxy")
+    let calls = 0
+
+    expect(host.inferForEditor("core.subflow-proxy", {
+      kind: "subflow",
+      inputs: [{ shape: ["B", 4], dtype: "float32" }],
+      inferSubflow: (input) => {
+        calls += 1
+        return { status: "success", output: input }
+      },
+    }, {})).toEqual({ status: "success", output: { shape: ["B", 4], dtype: "float32" } })
+    expect(calls).toBe(1)
   })
 })
 
