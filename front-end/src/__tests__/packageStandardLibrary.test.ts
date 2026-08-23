@@ -27,6 +27,9 @@ import inputInference from "../../../stereotype-packages/core/input/inference.lu
 import linearManifest from "../../../stereotype-packages/core/linear/manifest.json?raw"
 import linearDefinition from "../../../stereotype-packages/core/linear/stereotype.json?raw"
 import linearInference from "../../../stereotype-packages/core/linear/inference.lua?raw"
+import mseLossManifest from "../../../stereotype-packages/core/mse-loss/manifest.json?raw"
+import mseLossDefinition from "../../../stereotype-packages/core/mse-loss/stereotype.json?raw"
+import mseLossInference from "../../../stereotype-packages/core/mse-loss/inference.lua?raw"
 import repeatManifest from "../../../stereotype-packages/core/repeat/manifest.json?raw"
 import repeatDefinition from "../../../stereotype-packages/core/repeat/stereotype.json?raw"
 import repeatInference from "../../../stereotype-packages/core/repeat/inference.lua?raw"
@@ -39,6 +42,7 @@ const packages: readonly PackageSelection[] = [
   packageSelection(castManifest, castDefinition, castInference),
   packageSelection(embeddingManifest, embeddingDefinition, embeddingInference),
   packageSelection(crossEntropyManifest, crossEntropyDefinition, crossEntropyInference),
+  packageSelection(mseLossManifest, mseLossDefinition, mseLossInference),
   packageSelection(repeatManifest, repeatDefinition, repeatInference),
   packageSelection(horizontalRepeatManifest, horizontalRepeatDefinition, horizontalRepeatInference),
 ]
@@ -53,7 +57,7 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, and loss packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.cast", "core.embedding", "core.cross-entropy", "core.repeat", "core.horizontal-repeat"]) {
+    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.cast", "core.embedding", "core.cross-entropy", "core.mse-loss", "core.repeat", "core.horizontal-repeat"]) {
       await host.activate(id)
     }
 
@@ -77,6 +81,10 @@ describe("new core standard-library packages", () => {
     ] }, {})).toEqual({ status: "error", message: "Add input 2 is incompatible with input 1" })
 
     expect(host.inferForEditor("core.cross-entropy", { kind: "loss", inputs: [{ shape: ["B", 10], dtype: "float32" }] }, {})).toEqual({
+      status: "success", output: { shape: [], dtype: "float32" },
+    })
+
+    expect(host.inferForEditor("core.mse-loss", { kind: "loss", inputs: [{ shape: ["B", 1], dtype: "float32" }] }, {})).toEqual({
       status: "success", output: { shape: [], dtype: "float32" },
     })
   })
