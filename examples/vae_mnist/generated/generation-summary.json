@@ -6,16 +6,36 @@
   },
   "package": "vae_mnist_trained-package.zip",
   "package_format": "package-bundle/v1",
-  "package_sha256": "24286ec907c66307337fabbdba0be3e7144c25aadd34e5a1fe214813579aa4ec",
+  "package_sha256": "8e7fb645e1cdc3f094f4d2ff882069e8a8b943f18e1dcef6b10cafe2ee8a4150",
   "seed": 42,
   "training": {
     "dataset": "dataset.autoencoder_mnist.AutoencoderMNIST",
-    "epochs": 1,
+    "epochs": 5,
     "history": [
       {
         "epoch": 1.0,
-        "train_loss": 0.7203756429751714,
-        "val_loss": 0.7144116045633951
+        "train_loss": 0.7476688585382827,
+        "val_loss": 0.7153225401614575
+      },
+      {
+        "epoch": 2.0,
+        "train_loss": 0.7146400939276878,
+        "val_loss": 0.7113604152456243
+      },
+      {
+        "epoch": 3.0,
+        "train_loss": 0.7120149902840878,
+        "val_loss": 0.709850051301591
+      },
+      {
+        "epoch": 4.0,
+        "train_loss": 0.7108526867120823,
+        "val_loss": 0.709259459312926
+      },
+      {
+        "epoch": 5.0,
+        "train_loss": 0.7104564439109031,
+        "val_loss": 0.7085721277176066
       }
     ],
     "num_parameters": 431504

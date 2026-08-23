@@ -9,7 +9,6 @@ import importlib.util
 import inspect
 import json
 import random
-import hashlib
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -106,7 +105,7 @@ def _load_legacy_package(package_root: Path, package: dict[str, Any]) -> dict[st
 def train(model: torch.nn.Module, request: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:
     """Run a small, deterministic PyTorch loop using the registered dataset."""
 
-    training = request.get("training", {})
+    training = _training_config(request)
     dataset_config = training.get("dataset", {})
     target = str(dataset_config.get("target", "dataset.autoencoder_mnist.AutoencoderMNIST"))
     dataset_class = _load_dataset_class(target)
@@ -163,6 +162,18 @@ def train(model: torch.nn.Module, request: dict[str, Any], artifacts_path: Path)
         encoding="utf-8",
     )
     return summary
+
+
+def _training_config(request: dict[str, Any]) -> dict[str, Any]:
+    """Read training options from both direct and backend job envelopes."""
+
+    direct = request.get("training")
+    if isinstance(direct, dict):
+        return direct
+    submission = request.get("submission")
+    if isinstance(submission, dict) and isinstance(submission.get("training"), dict):
+        return submission["training"]
+    return {}
 
 
 def _write_trained_package(package: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:

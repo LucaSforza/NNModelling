@@ -86,6 +86,14 @@ def test_package_worker_writes_downloadable_training_archive(tmp_path: Path) -> 
         }
 
 
+def test_package_worker_reads_training_from_backend_submission_envelope() -> None:
+    from package_worker import _training_config
+
+    request = {"submission": {"training": {"trainer": {"max_epochs": 5}}}}
+
+    assert _training_config(request)["trainer"]["max_epochs"] == 5
+
+
 def test_submit_uses_fake_engine_and_reports_completion(tmp_path: Path) -> None:
     class FakeProcess:
         pid = 1234
