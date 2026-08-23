@@ -25,6 +25,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   } from "@xyflow/svelte";
 
   import Sidebar from "./components/Sidebar.svelte";
+  import DockedGroup from "./components/DockedGroup.svelte";
   import TrainingSidebar from "./components/TrainingSidebar.svelte";
 
   const {
@@ -45,6 +46,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import EditableEdge from "./edges/EditableEdge.svelte";
   import {
     checkValidConnection,
+    findDockedConnection,
     handleLoadModel,
     handleSaveModel,
     onNodeDragStop,
@@ -103,7 +105,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let loadError = $state<string | null>(null);
   let layoutError = $state<string | null>(null);
   let isLayoutMenuOpen = $state(false);
-  let canvasRef: HTMLDivElement;
+  let canvasRef = $state<HTMLDivElement>();
   let layoutControlRef: HTMLDivElement;
   let layoutButtonRef: HTMLButtonElement;
   let layoutMenuRef = $state<HTMLDivElement>();
@@ -159,6 +161,85 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         ? error.message
         : "Impossibile disporre automaticamente il diagramma.";
     }
+  }
+
+  function visibleHandleRects(): Array<{
+    nodeId: string;
+    handleId: string;
+    type: "source" | "target";
+    rect: { x: number; y: number; width: number; height: number };
+  }> {
+    return Array.from(document.querySelectorAll<HTMLElement>(".svelte-flow__handle"))
+      .flatMap((handle) => {
+        const nodeId = handle.dataset.nodeid;
+        const handleId = handle.dataset.handleid;
+        const node = nodeId ? diagram.getNodeById(nodeId) : undefined;
+        const type = handle.classList.contains("source")
+          ? "source"
+          : handle.classList.contains("target")
+            ? "target"
+            : undefined;
+        const bounds = handle.getBoundingClientRect();
+        if (
+          !nodeId ||
+          !handleId ||
+          !node ||
+          !diagram.isLayerNode(node) ||
+          !type ||
+          bounds.width === 0 ||
+          bounds.height === 0
+        ) {
+          return [];
+        }
+        return [{
+          nodeId,
+          handleId,
+          type,
+          rect: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          },
+        }];
+      });
+  }
+
+  async function handleNodeDragStop(payload: Parameters<typeof onNodeDragStop>[0]): Promise<void> {
+    const newNodes = onNodeDragStop(
+      payload,
+      diagram.nodes,
+      getIntersectingNodes,
+      getInternalNode,
+      diagram.edges,
+    );
+    if (newNodes !== undefined) diagram.nodes = newNodes;
+
+    // Wait for Svelte Flow to publish the final handle positions after a
+    // reparenting move, then turn a precise handle-over-handle drop into the
+    // same logical edge used by ordinary handle dragging.
+    await tick();
+    const targetNodeId = payload.targetNode?.id;
+    if (targetNodeId) {
+      const dockedConnection = findDockedConnection(
+        targetNodeId,
+        visibleHandleRects(),
+      );
+      if (dockedConnection && checkValidConnection(diagram, dockedConnection)) {
+        try {
+          diagram.addEdge(
+            dockedConnection.source,
+            dockedConnection.target,
+            dockedConnection.sourceHandle ?? "out",
+            dockedConnection.targetHandle ?? "in",
+            { docked: true },
+          );
+        } catch (error) {
+          console.warn("Collegamento dock rifiutato:", error);
+        }
+      }
+    }
+    diagram.refreshTypes();
   }
 
   async function openLayoutMenuAndFocusFirst(): Promise<void> {
@@ -339,6 +420,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 <div class="editor-layout">
   <div class="canvas-container" bind:this={canvasRef}>
+    <DockedGroup {diagram} host={canvasRef} />
     <SvelteFlow
       bind:nodes={diagram.nodes}
       bind:edges={diagram.edges}
@@ -350,17 +432,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       }}
       isValidConnection={(conn: Connection | Edge) =>
         checkValidConnection(diagram, conn)}
-      onnodedragstop={(payload) => {
-        let newNodes = onNodeDragStop(
-          payload,
-          diagram.nodes,
-          getIntersectingNodes,
-          getInternalNode,
-          diagram.edges,
-        );
-        if (newNodes !== undefined) diagram.nodes = newNodes;
-        diagram.refreshTypes();
-      }}
+      onnodedragstop={handleNodeDragStop}
       onconnect={() => {
         diagram.refreshTypes();
       }}

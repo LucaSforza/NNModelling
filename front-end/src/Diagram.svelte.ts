@@ -75,6 +75,17 @@ export class Diagram extends DiagramCore {
     return result;
   }
 
+  /** Presentation docking is intentionally limited to ordinary layer nodes. */
+  public isLayerNode(node: Node): boolean {
+    const identity = node.data?.package as { id?: unknown; version?: unknown } | undefined;
+    if (typeof identity?.id !== "string" || typeof identity.version !== "string") return false;
+    return this.packageCatalog.some((metadata) => (
+      metadata.id === identity.id &&
+      metadata.version === identity.version &&
+      metadata.definition.kind === "layer"
+    ));
+  }
+
   private async initializePackageTypes(): Promise<void> {
     try {
       this.packageTypeRuntime = await EditorTypeSystemRuntime.create();

@@ -1,0 +1,11 @@
+{
+  "name": "MSE Loss",
+  "description": "Computes a scalar mean-squared-error regression objective.",
+  "kind": "loss",
+  "view": {
+    "color": "#b85c5c",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {}
+}

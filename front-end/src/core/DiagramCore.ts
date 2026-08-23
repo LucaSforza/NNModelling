@@ -230,6 +230,12 @@ export class DiagramCore {
     return this.nodes.filter(n => parentsIds.find(c_id => c_id === n.id));
   }
 
+  /** Whether an edge was created by the handle-over-handle docking gesture. */
+  public isDockedEdge(edge: Edge): boolean {
+    const data = edge.data as { docked?: unknown } | undefined;
+    return data?.docked === true;
+  }
+
   /** Create a node backed by a versioned package identity. */
   public addPackageModule(
     identity: PackageIdentity,
@@ -571,7 +577,8 @@ export class DiagramCore {
     source: string,
     target: string,
     sourceHandle: string = "out",
-    targetHandle: string = "in"
+    targetHandle: string = "in",
+    options: { docked?: boolean } = {},
   ): Edge {
     // Validate before capturing undo state — don't waste an undo slot on a rejected connection
     const validation = coreCheckValidConnection(
@@ -594,7 +601,10 @@ export class DiagramCore {
       sourceHandle,
       targetHandle,
       type: "editable",
-      data: { route: { points: [] } },
+      data: {
+        route: { points: [] },
+        ...(options.docked ? { docked: true } : {}),
+      },
     };
 
     this.edges = [...this.edges, newEdge];

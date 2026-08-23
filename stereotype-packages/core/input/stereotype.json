@@ -10,6 +10,7 @@
   "parameters": {
     "shape": {
       "type": "shape",
+      "default": ["B", 28, 28],
       "position": "top"
     },
     "dtype": {

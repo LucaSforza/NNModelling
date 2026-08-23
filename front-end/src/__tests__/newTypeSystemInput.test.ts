@@ -38,14 +38,14 @@ describe("new package type-system input slice", () => {
     expect(host.isActive("core.input")).toBe(false)
   })
 
-  test("keeps missing required shape unresolved before Lua", async () => {
+  test("uses the MNIST-sized default shape when shape is omitted", async () => {
     const host = await TypeSystemHost.create([coreInputPackage])
     hosts.push(host)
     await host.activate("core.input")
 
-    expect(host.inferForEditor("core.input", { kind: "input", inputs: [] }, {})).toEqual({
-      status: "unresolved",
-      missingParameters: ["shape"],
+    expect(host.inferForEditor("core.input", { kind: "input", inputs: [] }, { dtype: "float32" })).toEqual({
+      status: "success",
+      output: { shape: ["B", 28, 28], dtype: "float32" },
     })
   })
 

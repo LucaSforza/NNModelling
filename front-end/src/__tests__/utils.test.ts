@@ -12,9 +12,10 @@
  */
 
 import { describe, it, expect, afterAll } from "vitest";
-import { type Edge } from "@xyflow/svelte";
+import { type Edge, type Node } from "@xyflow/svelte";
 import { Diagram } from "../Diagram.svelte";
-import { checkValidConnection } from "../utils";
+import type { ActivePackageMetadata } from "../type-system/host";
+import { checkValidConnection, findDockedConnection, type DockHandleRect } from "../utils";
 import { stubWindow, unstubWindow } from "./helpers";
 
 stubWindow();
@@ -141,5 +142,98 @@ describe("checkValidConnection", () => {
     // c -> join merges the second diamond branch; no path from join back to c.
     const conn = { source: "c", sourceHandle: "out", target: "join", targetHandle: "in-1" };
     expect(checkValidConnection(d, conn)).toBe(true);
+  });
+});
+
+describe("findDockedConnection", () => {
+  const handle = (
+    nodeId: string,
+    handleId: string,
+    type: DockHandleRect["type"],
+    x: number,
+    y: number,
+  ): DockHandleRect => ({
+    nodeId,
+    handleId,
+    type,
+    rect: { x, y, width: 4, height: 4 },
+  });
+
+  it("returns the logical connection when the target is dropped on an output", () => {
+    expect(findDockedConnection("target", [
+      handle("source", "out", "source", 100, 100),
+      handle("target", "in", "target", 104, 100),
+    ])).toEqual({
+      source: "source",
+      sourceHandle: "out",
+      target: "target",
+      targetHandle: "in",
+    });
+  });
+
+  it("requires a precise drop and ignores unrelated handles", () => {
+    expect(findDockedConnection("target", [
+      handle("source", "out", "source", 100, 100),
+      handle("target", "in", "target", 120, 100),
+      handle("other", "out", "source", 100, 100),
+    ])).toBeUndefined();
+  });
+
+  it("chooses the nearest free-looking target handle for a join", () => {
+    expect(findDockedConnection("join", [
+      handle("source", "out", "source", 100, 100),
+      handle("join", "in-0", "target", 130, 100),
+      handle("join", "in-1", "target", 104, 100),
+    ])).toEqual({
+      source: "source",
+      sourceHandle: "out",
+      target: "join",
+      targetHandle: "in-1",
+    });
+  });
+});
+
+describe("docked edge metadata", () => {
+  it("persists docking as presentation metadata without changing edge semantics", () => {
+    const d = new Diagram();
+    d.nodes = [
+      { id: "source", type: "custom", position: { x: 0, y: 0 }, data: {} },
+      { id: "target", type: "custom", position: { x: 0, y: 100 }, data: {} },
+    ] as Node[];
+
+    const edge = d.addEdge("source", "target", "out", "in", { docked: true });
+
+    expect(edge.data).toMatchObject({ docked: true });
+    expect(d.isDockedEdge(edge)).toBe(true);
+    expect(d.isDockedEdge({ ...edge, data: { route: { points: [] } } })).toBe(false);
+    expect(d.edges).toContainEqual(edge);
+  });
+});
+
+describe("layer docking invariant", () => {
+  it("recognizes only package nodes whose catalog kind is layer", () => {
+    const d = new Diagram();
+    d.packageCatalog = [
+      {
+        id: "core.linear",
+        version: "0.1.0",
+        definition: { kind: "layer" },
+      },
+    ] as unknown as ActivePackageMetadata[];
+
+    const layer = {
+      id: "layer",
+      type: "custom",
+      position: { x: 0, y: 0 },
+      data: { package: { id: "core.linear", version: "0.1.0" } },
+    } as Node;
+    const input = {
+      ...layer,
+      id: "input",
+      data: { package: { id: "core.input", version: "0.1.0" } },
+    } as Node;
+
+    expect(d.isLayerNode(layer)).toBe(true);
+    expect(d.isLayerNode(input)).toBe(false);
   });
 });
