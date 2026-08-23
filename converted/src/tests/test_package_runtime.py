@@ -53,6 +53,24 @@ def build(parameters, context: BuildContext, services: NoServices):
     assert tuple(model(torch.ones(4, 2)).shape) == (4, 3)
 
 
+def test_positional_encoding_package_adds_fixed_sinusoidal_table() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/positional-encoding/pytorch.py").read_text()
+    model = compile_package_graph({
+        "packages": [_package("core.positional-encoding", source)],
+        "graph": _graph(
+            "core.positional-encoding",
+            parameters={"d_model": 4, "max_len": 8},
+        ),
+    })
+
+    output = model(torch.zeros(2, 3, 4))
+
+    assert tuple(output.shape) == (2, 3, 4)
+    assert torch.allclose(output[0, 0], torch.tensor([0.0, 1.0, 0.0, 1.0]))
+    assert len(list(model.parameters())) == 0
+
+
 def test_join_order_follows_target_handle() -> None:
     source = """
 import torch

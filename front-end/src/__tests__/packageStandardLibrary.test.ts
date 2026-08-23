@@ -36,6 +36,9 @@ import klDivergenceInference from "../../../stereotype-packages/core/kl-divergen
 import mseLossManifest from "../../../stereotype-packages/core/mse-loss/manifest.json?raw"
 import mseLossDefinition from "../../../stereotype-packages/core/mse-loss/stereotype.json?raw"
 import mseLossInference from "../../../stereotype-packages/core/mse-loss/inference.lua?raw"
+import positionalEncodingManifest from "../../../stereotype-packages/core/positional-encoding/manifest.json?raw"
+import positionalEncodingDefinition from "../../../stereotype-packages/core/positional-encoding/stereotype.json?raw"
+import positionalEncodingInference from "../../../stereotype-packages/core/positional-encoding/inference.lua?raw"
 import reparameterizeManifest from "../../../stereotype-packages/core/reparameterize/manifest.json?raw"
 import reparameterizeDefinition from "../../../stereotype-packages/core/reparameterize/stereotype.json?raw"
 import reparameterizeInference from "../../../stereotype-packages/core/reparameterize/inference.lua?raw"
@@ -49,6 +52,7 @@ import subflowProxyInference from "../../../stereotype-packages/core/subflow-pro
 const packages: readonly PackageSelection[] = [
   packageSelection(inputManifest, inputDefinition, inputInference),
   packageSelection(linearManifest, linearDefinition, linearInference),
+  packageSelection(positionalEncodingManifest, positionalEncodingDefinition, positionalEncodingInference),
   packageSelection(addManifest, addDefinition, addInference),
   packageSelection(concatManifest, concatDefinition, concatInference),
   packageSelection(matmulManifest, matmulDefinition, matmulInference),
@@ -73,7 +77,7 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, and loss packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
+    for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(id)
     }
 
@@ -84,6 +88,18 @@ describe("new core standard-library packages", () => {
     expect(host.inferForEditor("core.linear", { kind: "layer", inputs: [{ shape: ["B", 128], dtype: "float32" }] }, {
       in_features: 128, out_features: 64,
     })).toEqual({ status: "success", output: { shape: ["B", 64], dtype: "float32" } })
+
+    expect(host.inferForEditor("core.positional-encoding", { kind: "layer", inputs: [{ shape: ["B", "T", 64], dtype: "float32" }] }, {
+      d_model: 64, max_len: 128,
+    })).toEqual({ status: "success", output: { shape: ["B", "T", 64], dtype: "float32" } })
+
+    expect(host.inferForEditor("core.positional-encoding", { kind: "layer", inputs: [{ shape: ["B", 64], dtype: "float32" }] }, {
+      d_model: 64, max_len: 128,
+    })).toEqual({ status: "error", message: "Positional Encoding expects a rank-3 input [B, L, D], got rank 2" })
+
+    expect(host.inferForEditor("core.positional-encoding", { kind: "layer", inputs: [{ shape: ["B", "T", 32], dtype: "float32" }] }, {
+      d_model: 64, max_len: 128,
+    })).toEqual({ status: "error", message: "Positional Encoding expects embedding dimension 64, got 32" })
 
     expect(host.inferForEditor("core.concat", { kind: "join", inputs: [
       { shape: ["B", 16], dtype: "float32" },
