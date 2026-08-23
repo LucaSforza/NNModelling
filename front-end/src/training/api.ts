@@ -57,6 +57,7 @@ export interface TrainingLogChunk {
 
 export interface TrainingJobRequest {
   schema_version: number;
+  /** The nntree variant is deprecated and retained for legacy clients. */
   network:
     | { format: "nntree"; value: Record<string, unknown> }
     | { format: "package"; value: { bundle_ref: string; graph: PackageBundleV1["graph"] } };

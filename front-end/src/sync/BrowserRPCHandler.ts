@@ -15,6 +15,8 @@
 // Browser-side RPC handler. Receives JSON-RPC requests from the MCP server
 // via WebSocket, dispatches them to the browser's Diagram instance, and
 // returns results. The browser is the single source of truth for diagram state.
+// The compile_nntree RPC below is deprecated compatibility surface; package
+// export is the forward path for backend execution.
 //
 // Protocol:
 //   Server → Client: { id: string, method: string, params?: Record<string, unknown> }

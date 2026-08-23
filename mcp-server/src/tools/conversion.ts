@@ -29,6 +29,8 @@ import type { ConversionResult, TrainingResult, InferenceResult } from "../pipel
 
 // ── Browser Proxy Tools ───────────────────────────────────────────────
 
+// DEPRECATED: NNTree conversion remains for MCP compatibility while package
+// export and backend execution become the forward workflow.
 export const compile_nntree = {
   schema: z.object({}),
 

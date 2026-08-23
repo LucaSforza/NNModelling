@@ -1,4 +1,8 @@
-"""Pydantic models for the remote-training API."""
+"""Pydantic models for the remote-training API.
+
+The ``nntree`` network variant is deprecated compatibility surface; package
+jobs are the forward path and use a separate network format.
+"""
 
 from __future__ import annotations
 
