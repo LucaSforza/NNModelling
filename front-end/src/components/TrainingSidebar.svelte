@@ -22,6 +22,8 @@
   } from "../training/connection";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
+  import { buildPackageBundle } from "../training/package-bundle";
+  import { bundledCorePackageExports } from "../type-system/bundled/catalog";
 
   interface Props {
     diagram: Diagram;
@@ -276,8 +278,40 @@
     return value;
   }
 
-  function buildRequest(): TrainingJobRequest {
-    throw new Error("Training is unavailable until the package backend runtime exists");
+  async function buildRequest(): Promise<TrainingJobRequest> {
+    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports());
+    const uploaded = await requireApi().uploadPackageBundle(bundle);
+    const overrides = overridesText.split("\n").map((line) => line.trim()).filter(Boolean);
+    return {
+      schema_version: 1,
+      network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
+      training: {
+        dataset: { target: selectedDataset, parameters: datasetParams },
+        batch_size: coerce(batchSize, "int"),
+        num_workers: coerce(numWorkers, "int"),
+        train_size: coerce(trainSize, "float"),
+        seed: coerce(seed, "int"),
+        optimizer: { target: optimizerTarget, learning_rate: coerce(learningRate, "float") },
+        trainer: {
+          max_epochs: coerce(maxEpochs, "int"),
+          accelerator,
+          patience: coerce(patience, "int"),
+          min_delta: coerce(minDelta, "float"),
+        },
+        wandb: { project: wandbProject, mode: wandbMode },
+        overrides,
+      },
+      resources: {
+        cpu: coerce(cpu, "int"),
+        memory_gb: coerce(memoryGb, "int"),
+        gpu: coerce(gpu, "int"),
+        ...(gpuMemoryGb ? { gpu_memory_gb: coerce(gpuMemoryGb, "int") } : {}),
+        ...(gpuType ? { gpu_type: gpuType } : {}),
+        ...(node ? { node } : {}),
+      },
+      priority: coerce(priority, "int") as number,
+      ...(packageSuffix ? { package_name: `nnm_${packageSuffix}` } : {}),
+    };
   }
 
   async function submit() {
@@ -289,7 +323,7 @@
       ? openWaitingWindow("In attesa che W&B inizializzi la run…")
       : null;
     try {
-      const job = await requireApi().submitTrainingJob(buildRequest());
+      const job = await requireApi().submitTrainingJob(await buildRequest());
       successMessage = `Job ${job.id} accodato.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);

@@ -57,11 +57,19 @@ export interface TrainingLogChunk {
 
 export interface TrainingJobRequest {
   schema_version: number;
-  network: { format: "nntree"; value: Record<string, unknown> };
+  network:
+    | { format: "nntree"; value: Record<string, unknown> }
+    | { format: "package"; value: { bundle_ref: string; graph: PackageBundleV1["graph"] } };
   training: Record<string, unknown>;
   resources: Record<string, unknown>;
   priority: number;
   package_name?: string;
+}
+
+export interface PackageBundleUploadResponse {
+  bundle_ref: string;
+  digest: string;
+  size: number;
 }
 
 export interface PairingGrant {
@@ -156,6 +164,24 @@ export class TrainingApiClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(job),
     });
+  }
+
+  /**
+   * Upload an immutable package bundle before submitting its job reference.
+   * Contract v1 currently assumes JSON transport; the backend may later wrap
+   * the same canonical payload in a streamed archive without changing callers.
+   */
+  async uploadPackageBundle(bundle: PackageBundleV1): Promise<PackageBundleUploadResponse> {
+    const response = await this.request<PackageBundleUploadResponse>("/package-bundles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(bundle),
+    });
+    const digest = requireSha256Hex(response.digest, 502, "bundle_digest_invalid", "Il backend ha restituito un digest bundle non valido");
+    if (digest !== bundle.digest) {
+      throw new BackendApiError(502, "bundle_digest_mismatch", "Il digest del bundle restituito dal backend non corrisponde al bundle inviato");
+    }
+    return { ...response, digest };
   }
 
   cancelTrainingJob(jobId: string): Promise<TrainingJobStatus> {
@@ -382,3 +408,4 @@ function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void
     }, { once: true });
   });
 }
+import type { PackageBundleV1 } from "./package-bundle";

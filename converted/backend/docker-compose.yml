@@ -21,11 +21,16 @@ services:
       NNM_ADMIN_TOKEN_FILE: /run/secrets/nnm-admin-token
       NNM_ALLOWED_ORIGINS: ${NNM_ALLOWED_ORIGINS:-http://127.0.0.1:5174}
       NNM_SESSION_TTL: ${NNM_SESSION_TTL:-24h}
+      NNM_CONTAINER_ENGINE: ${NNM_CONTAINER_ENGINE:-podman}
+      NNM_CONTAINER_IMAGE: ${NNM_CONTAINER_IMAGE:?set NNM_CONTAINER_IMAGE to a digest-pinned worker image}
+      CONTAINER_HOST: ${CONTAINER_HOST:-unix:///run/podman/podman.sock}
     ports:
       - "8000:8000"
     volumes:
       - backend-jobs:/app/jobs
       - ../valkey-data/admin.token:/run/secrets/nnm-admin-token:ro
+      # Rootless Podman socket. The host user must own and protect this socket.
+      - ${NNM_CONTAINER_ENGINE_SOCKET:-/run/user/1000/podman/podman.sock}:/run/podman/podman.sock
     depends_on:
       valkey:
         condition: service_healthy

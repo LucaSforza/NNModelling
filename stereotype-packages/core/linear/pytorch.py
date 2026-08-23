@@ -20,6 +20,8 @@ def build(
     return torch.nn.Linear(
         parameters["in_features"],
         parameters["out_features"],
-        bias=parameters["bias"],
-        dtype=torch_dtype(context["output"]["dtype"]),
+        bias=parameters.get("bias", True),
+        dtype=torch_dtype(
+            parameters.get("dtype", context.get("output", {}).get("dtype", "float32"))
+        ),
     )
