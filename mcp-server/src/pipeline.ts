@@ -167,7 +167,8 @@ function spawnPython(
 // ── executeConversion ──────────────────────────────
 
 /**
- * Execute the NNTree-to-Hydra conversion pipeline.
+ * Deprecated NNTree-to-Hydra conversion pipeline.
+ * Package jobs use the backend package runtime instead.
  *
  * Writes the NNTree JSON to a temporary file, runs `convert.py`,
  * parses the output for task type, and walks the output directory

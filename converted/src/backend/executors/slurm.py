@@ -1,4 +1,7 @@
-"""Slurm executor with local and SSH-backed sbatch submission."""
+"""Deprecated NNTree Slurm executor retained for compatibility jobs."""
+
+# DEPRECATED: package jobs use the container boundary; retain this executor
+# until legacy NNTree clients and their migration window are retired.
 
 from __future__ import annotations
 

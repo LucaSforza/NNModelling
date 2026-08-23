@@ -55,6 +55,13 @@ export type PackageBundle = {
 
 export type Package = PackageBundle
 
+/** Raw resources exposed only to the package transport/export boundary. */
+export type PackageExportInfo = {
+  readonly manifest: Manifest
+  readonly definition: string
+  readonly pytorch?: string
+}
+
 export type InferenceServices = {
   readonly inferSubflow?: (input: TensorType) => TypeResult
   readonly inferStereotype?: (reference: StereotypeReference, inputs: readonly TensorType[]) => TypeResult

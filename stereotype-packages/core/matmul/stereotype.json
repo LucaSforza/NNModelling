@@ -1,0 +1,11 @@
+{
+  "name": "MatMul",
+  "description": "Multiplies two or more rank-2 tensors from left to right.",
+  "kind": "join",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {}
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Subflow Proxy",
+  "description": "Builds and delegates to one instance of its nested subflow.",
+  "kind": "subflow",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {}
+}

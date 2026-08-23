@@ -26,6 +26,7 @@ from backend.auth import (
 )
 from backend.dataset_registry import discover_datasets
 from backend.manager import JobManager, PackageIntegrityError, _remove_file
+from backend.package_store import PackageStore
 from backend.models import (
     JobStatus,
     JobSubmission,
@@ -33,6 +34,9 @@ from backend.models import (
     PairingApprovalInput,
     PairingRequestInput,
     PairingStatusResponse,
+    PackageBundleInfo,
+    PackageInfo,
+    PackageUpload,
     SessionInfo,
 )
 
@@ -64,7 +68,13 @@ class _CleanupFileResponse(FileResponse):
                 await self.background()
 
 
-def _verified_snapshot_response(snapshot: Path, filename: str, digest: str) -> FileResponse:
+def _verified_snapshot_response(
+    snapshot: Path,
+    filename: str,
+    digest: str,
+    *,
+    media_type: str = "application/octet-stream",
+) -> FileResponse:
     """Serve the verified immutable snapshot and delete it when the response ends.
 
     Only the backend-private snapshot created and hashed by the manager is
@@ -88,7 +98,7 @@ def _verified_snapshot_response(snapshot: Path, filename: str, digest: str) -> F
         raise HTTPException(status_code=404, detail="Model package is not available") from None
     return _CleanupFileResponse(
         snapshot,
-        media_type="application/octet-stream",
+        media_type=media_type,
         filename=filename,
         headers={"X-NNM-SHA256": digest},
         background=BackgroundTask(_remove_file, snapshot),
@@ -129,6 +139,10 @@ def create_app(
         expose_headers=["X-NNM-SHA256"],
     )
     app.state.manager = manager or JobManager.from_environment()
+    if hasattr(app.state.manager, "package_store"):
+        app.state.package_store = app.state.manager.package_store
+    else:
+        app.state.package_store = PackageStore(Path(os.getenv("NNM_BACKEND_PACKAGE_ROOT", "packages")))
     app.state.auth = auth_service or _auth_from_environment(in_memory=injected_manager is not None)
     app.state.admin_token = admin_token if admin_token is not None else _read_admin_token()
 
@@ -230,6 +244,63 @@ def create_app(
     ) -> list[dict[str, Any]]:
         return [dataset.model_dump(mode="json") for dataset in discover_datasets()]
 
+    @app.post("/packages", response_model=PackageInfo, status_code=201)
+    async def upload_package(
+        body: PackageUpload,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> PackageInfo:
+        """Validate and store executable package code under connection ownership."""
+
+        try:
+            record = app.state.package_store.put(
+                body.bundle,
+                owner_connection_id=connection["id"],
+                declared_digest=body.sha256,
+            )
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return PackageInfo(**record)
+
+    @app.post("/package-bundles", response_model=PackageBundleInfo, status_code=201)
+    async def upload_package_bundle(
+        body: dict[str, Any],
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> PackageBundleInfo:
+        """Store one complete frontend package graph before job submission."""
+
+        try:
+            record = app.state.package_store.put_bundle(
+                body,
+                owner_connection_id=connection["id"],
+                declared_digest=body.get("digest") if isinstance(body.get("digest"), str) else None,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return PackageBundleInfo(**record)
+
+    @app.get("/packages/{package_id}/{version}", response_model=PackageInfo)
+    async def get_package(
+        package_id: str,
+        version: str,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> PackageInfo:
+        try:
+            record = app.state.package_store.get(package_id, version, owner_connection_id=connection["id"])
+        except (KeyError, FileNotFoundError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=404, detail="Unknown package") from exc
+        return PackageInfo(id=record["id"], version=record["version"], sha256=record["sha256"])
+
+    @app.delete("/packages/{package_id}/{version}", status_code=204)
+    async def delete_package(
+        package_id: str,
+        version: str,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> None:
+        try:
+            app.state.package_store.delete(package_id, version, owner_connection_id=connection["id"])
+        except (KeyError, FileNotFoundError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=404, detail="Unknown package") from exc
+
     @app.get("/compute-units")
     async def compute_units(
         _connection: dict[str, Any] = Depends(current_connection),
@@ -323,6 +394,29 @@ def create_app(
                 detail={"code": "package_integrity_error", "message": str(exc)},
             ) from exc
         return _verified_snapshot_response(path, filename, digest)
+
+    @app.get("/jobs/{job_id}/training-package")
+    async def download_training_package(
+        job_id: str,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> FileResponse:
+        """Download the authenticated package graph and trained weights."""
+
+        try:
+            path, filename, digest = app.state.manager.training_package_download(
+                job_id,
+                owner_connection_id=connection["id"],
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown job") from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Trained package is not available") from exc
+        except PackageIntegrityError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "training_package_integrity_error", "message": str(exc)},
+            ) from exc
+        return _verified_snapshot_response(path, filename, digest, media_type="application/zip")
 
     @app.get("/jobs/{job_id}/events")
     def get_events(

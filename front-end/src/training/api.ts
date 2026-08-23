@@ -26,6 +26,7 @@ export interface TrainingJobStatus {
   heartbeat_at: string | null;
   wandb_url: string | null;
   model_package: ModelPackageInfo | null;
+  training_package: TrainingPackageInfo | null;
   package_error: string | null;
   artifact_dir: string;
 }
@@ -37,6 +38,14 @@ export interface ModelPackageInfo {
   wheel: string;
   sha256: string;
   input_adapter: Record<string, unknown>;
+}
+
+export interface TrainingPackageInfo {
+  schema_version: number;
+  format: "nnm-trained-package/v1";
+  filename: string;
+  sha256: string;
+  size: number;
 }
 
 export interface TrainingJobLogs {
@@ -57,11 +66,20 @@ export interface TrainingLogChunk {
 
 export interface TrainingJobRequest {
   schema_version: number;
-  network: { format: "nntree"; value: Record<string, unknown> };
+  /** The nntree variant is deprecated and retained for legacy clients. */
+  network:
+    | { format: "nntree"; value: Record<string, unknown> }
+    | { format: "package"; value: { bundle_ref: string; graph: PackageBundleV1["graph"] } };
   training: Record<string, unknown>;
   resources: Record<string, unknown>;
   priority: number;
   package_name?: string;
+}
+
+export interface PackageBundleUploadResponse {
+  bundle_ref: string;
+  digest: string;
+  size: number;
 }
 
 export interface PairingGrant {
@@ -158,6 +176,24 @@ export class TrainingApiClient {
     });
   }
 
+  /**
+   * Upload an immutable package bundle before submitting its job reference.
+   * Contract v1 currently assumes JSON transport; the backend may later wrap
+   * the same canonical payload in a streamed archive without changing callers.
+   */
+  async uploadPackageBundle(bundle: PackageBundleV1): Promise<PackageBundleUploadResponse> {
+    const response = await this.request<PackageBundleUploadResponse>("/package-bundles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(bundle),
+    });
+    const digest = requireSha256Hex(response.digest, 502, "bundle_digest_invalid", "Il backend ha restituito un digest bundle non valido");
+    if (digest !== bundle.digest) {
+      throw new BackendApiError(502, "bundle_digest_mismatch", "Il digest del bundle restituito dal backend non corrisponde al bundle inviato");
+    }
+    return { ...response, digest };
+  }
+
   cancelTrainingJob(jobId: string): Promise<TrainingJobStatus> {
     return this.request(`/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
   }
@@ -227,6 +263,35 @@ export class TrainingApiClient {
         "Il package scaricato non ha superato la verifica di integrità SHA-256; il download è stato annullato. Riprova o rigenera il job");
     }
     return new Blob([bytes], { type: "application/octet-stream" });
+  }
+
+  async downloadTrainingPackage(jobId: string, expectedSha256: string): Promise<Blob> {
+    const expected = requireSha256Hex(expectedSha256, 400, "invalid_expected_digest",
+      "Il digest SHA-256 atteso del pacchetto trainato non è valido");
+    requireWebCrypto();
+    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/training-package`, {
+      headers: this.authHeaders(),
+    });
+    if (!response.ok) throw await responseError(response);
+
+    const header = response.headers.get("x-nnm-sha256");
+    if (header === null) {
+      throw new BackendApiError(502, "training_package_digest_missing",
+        "Il server non ha restituito il digest SHA-256 del pacchetto trainato");
+    }
+    const declared = requireSha256Hex(header, 502, "training_package_digest_invalid",
+      "Il digest SHA-256 del pacchetto trainato non è valido");
+    if (declared !== expected) {
+      throw new BackendApiError(502, "training_package_digest_mismatch",
+        "Il digest del pacchetto trainato non corrisponde al manifest del job");
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (await sha256Hex(bytes) !== expected) {
+      throw new BackendApiError(502, "training_package_corrupted",
+        "Il pacchetto trainato non ha superato la verifica SHA-256");
+    }
+    return new Blob([bytes], { type: "application/zip" });
   }
 
   async subscribeTrainingEvents(
@@ -382,3 +447,4 @@ function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void
     }, { once: true });
   });
 }
+import type { PackageBundleV1 } from "./package-bundle";

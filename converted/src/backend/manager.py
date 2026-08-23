@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from backend.config_service import build_job_hydra_configs
-from backend.executors import Executor, LocalExecutor, SlurmExecutor
+from backend.executors import ContainerExecutor, Executor, LocalExecutor, SlurmExecutor
 from backend.models import JobStatus, JobSubmission, ResourceRequest
+from backend.package_store import PackageStore
+from package_runtime import compile_package_graph
 from backend.store import JobStore, ValkeyJobStore, utc_now
 from model_package.exporter import build_model_wheel
 
@@ -61,6 +63,7 @@ class JobManager:
         poll_interval: float = 0.25,
         *,
         package_snapshot_dir: str | Path | None = None,
+        package_store: PackageStore | None = None,
     ) -> None:
         if not executors:
             raise ValueError("At least one executor is required")
@@ -76,6 +79,7 @@ class JobManager:
         self.package_snapshot_dir = (
             Path(package_snapshot_dir) if package_snapshot_dir is not None else None
         )
+        self.package_store = package_store or PackageStore(self.artifact_root / "packages")
         self._active: dict[str, tuple[Executor, dict[str, Any]]] = {}
         self._round_robin_cursor = 0
         self._lock = threading.RLock()
@@ -93,8 +97,17 @@ class JobManager:
         artifact_root = Path(
             os.getenv("NNM_BACKEND_ARTIFACT_ROOT", str(default_artifact_root))
         ).expanduser().resolve()
+        package_store = PackageStore(os.getenv("NNM_BACKEND_PACKAGE_ROOT", str(artifact_root / "packages")))
         store = ValkeyJobStore(os.getenv("NNM_VALKEY_URL", "valkey://127.0.0.1:6379/0"))
         executors: list[Executor] = [LocalExecutor(converted_dir)]
+        container_image = os.getenv("NNM_CONTAINER_IMAGE")
+        if container_image:
+            executors.append(
+                ContainerExecutor(
+                    engine=os.getenv("NNM_CONTAINER_ENGINE", "podman"),
+                    image=container_image,
+                )
+            )
         if os.getenv("NNM_ENABLE_SLURM", "0").lower() in {"1", "true", "yes"}:
             slurm_gpu_type = os.getenv("NNM_SLURM_GPU_TYPE") or None
             executors.append(
@@ -113,7 +126,7 @@ class JobManager:
                     ),
                 )
             )
-        return cls(store, artifact_root, executors)
+        return cls(store, artifact_root, executors, package_store=package_store)
 
     def start(self) -> None:
         """Start the scheduler thread and recover persisted queue metadata."""
@@ -187,7 +200,25 @@ class JobManager:
         payload["artifact_dir"] = str(artifact_dir)
         requested_path = artifact_dir / "requested_config.json"
         requested_path.write_text(json.dumps(submission.model_dump(mode="json"), indent=2), encoding="utf-8")
-        build_job_hydra_configs(payload, artifact_dir)
+        if submission.network.format == "nntree":
+            build_job_hydra_configs(payload, artifact_dir)
+        else:
+            package_value = dict(submission.network.value)
+            bundle_ref = package_value.get("bundle_ref")
+            if isinstance(bundle_ref, str):
+                stored = self.package_store.get_bundle(
+                    bundle_ref,
+                    owner_connection_id=owner_connection_id,
+                )
+                package_value = stored["bundle"]
+                if package_value.get("graph") != submission.network.value.get("graph"):
+                    raise ValueError("package graph does not match the uploaded bundle")
+            elif "packages" not in package_value:
+                raise ValueError("package jobs require bundle_ref or inline packages")
+            compile_package_graph(package_value)
+            (artifact_dir / "package.json").write_text(
+                json.dumps(package_value, sort_keys=True), encoding="utf-8"
+            )
         record = {
             "id": job_id,
             "status": "queued",
@@ -201,6 +232,7 @@ class JobManager:
             "heartbeat_at": None,
             "wandb_url": None,
             "model_package": None,
+            "training_package": None,
             "package_error": None,
             "artifact_dir": str(artifact_dir),
             "owner_connection_id": owner_connection_id,
@@ -254,7 +286,7 @@ class JobManager:
                     job = self.store.get_job(job_id)
                     if job is None or job.get("status") != "queued":
                         continue
-                    executor = self._select_executor(job["resources"])
+                    executor = self._select_executor(job["resources"], job)
                     if executor is None:
                         deferred_job_ids.append(job_id)
                         continue
@@ -304,13 +336,20 @@ class JobManager:
                             deferred_job["created_at"],
                         )
 
-    def _select_executor(self, resources: dict[str, Any]) -> Executor | None:
+    def _select_executor(self, resources: dict[str, Any], job: dict[str, Any] | None = None) -> Executor | None:
         """Select a compatible executor with a round-robin cursor."""
 
+        is_package_job = bool(
+            job and job.get("submission", {}).get("network", {}).get("format") == "package"
+        )
         count = len(self.executors)
         for offset in range(count):
             index = (self._round_robin_cursor + offset) % count
             candidate = self.executors[index]
+            if is_package_job and candidate.kind != "container":
+                continue
+            if not is_package_job and candidate.kind == "container":
+                continue
             if candidate.can_run(resources):
                 self._round_robin_cursor = (index + 1) % count
                 return candidate
@@ -343,6 +382,31 @@ class JobManager:
         if return_code == 0:
             if publish_wandb_url:
                 self._event(job_id, "wandb_ready", {"wandb_url": wandb_url})
+            if job.get("submission", {}).get("network", {}).get("format") == "package":
+                training_package = self._training_package_info(job_id)
+                if training_package is None:
+                    error = "Trained package archive is missing or invalid"
+                    self._set_status(
+                        job_id,
+                        "failed",
+                        finished_at=utc_now(),
+                        error=error,
+                        wandb_url=wandb_url,
+                    )
+                    self._drop_active(job_id)
+                    self._event(job_id, "failed", {"error": error, **details})
+                    return
+                self._set_status(
+                    job_id,
+                    "succeeded",
+                    finished_at=utc_now(),
+                    error=None,
+                    wandb_url=wandb_url,
+                    training_package=training_package,
+                )
+                self._drop_active(job_id)
+                self._event(job_id, "succeeded", details)
+                return
             # The wheel is part of the promised output of a successful job:
             # the job is never persisted as ``succeeded`` before the package
             # export committed. A packaging failure (missing/corrupt safe
@@ -490,6 +554,54 @@ class JobManager:
             _remove_file(snapshot)
             raise PackageIntegrityError("Model package integrity check failed")
         return snapshot, wheel.name, computed
+
+    def training_package_download(self, job_id: str, *, owner_connection_id: str) -> tuple[Path, str, str]:
+        """Resolve and verify the trained package archive for download."""
+
+        job = self._owned_job(job_id, owner_connection_id)
+        package = job.get("training_package")
+        if not isinstance(package, dict) or not isinstance(package.get("filename"), str):
+            raise FileNotFoundError("Trained package is not available")
+        root = Path(job["artifact_dir"]).resolve()
+        filename = Path(package["filename"])
+        archive = (root / filename).resolve()
+        declared = package.get("sha256")
+        if (
+            filename.name != package["filename"]
+            or archive.suffix != ".zip"
+            or root not in archive.parents
+            or not archive.is_file()
+            or not isinstance(declared, str)
+            or not PACKAGE_SHA256_HEX.fullmatch(declared)
+        ):
+            raise FileNotFoundError("Trained package is not available")
+        snapshot, computed = _create_package_snapshot(
+            archive,
+            snapshot_dir=self.package_snapshot_dir,
+            suffix=".zip",
+        )
+        if not hmac.compare_digest(computed, declared.lower()):
+            _remove_file(snapshot)
+            raise PackageIntegrityError("Trained package integrity check failed")
+        return snapshot, archive.name, computed
+
+    def _training_package_info(self, job_id: str) -> dict[str, Any] | None:
+        """Build the public manifest for the worker's immutable archive."""
+
+        job = self.store.get_job(job_id)
+        if job is None:
+            return None
+        archive = Path(job["artifact_dir"]) / "trained-package.zip"
+        if not archive.is_file():
+            return None
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        return {
+            "schema_version": 1,
+            "format": "nnm-trained-package/v1",
+            "filename": archive.name,
+            "sha256": digest,
+            "size": archive.stat().st_size,
+        }
 
     def tail_logs(
         self,
@@ -643,6 +755,7 @@ def _create_package_snapshot(
     *,
     snapshot_dir: Path | None,
     chunk_size: int = PACKAGE_SNAPSHOT_CHUNK_SIZE,
+    suffix: str = ".whl",
 ) -> tuple[Path, str]:
     """Copy a wheel into a private immutable snapshot while hashing it in one pass.
 
@@ -664,7 +777,7 @@ def _create_package_snapshot(
         snapshot_dir.mkdir(parents=True, exist_ok=True)
     fd, raw_path = tempfile.mkstemp(
         prefix="nnm_pkg_",
-        suffix=".whl",
+        suffix=suffix,
         dir=str(snapshot_dir) if snapshot_dir is not None else None,
     )
     snapshot = Path(raw_path)

@@ -1,4 +1,8 @@
-"""Pydantic models for the remote-training API."""
+"""Pydantic models for the remote-training API.
+
+The ``nntree`` network variant is deprecated compatibility surface; package
+jobs are the forward path and use a separate network format.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +18,58 @@ PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
 
 
 class NetworkPayload(BaseModel):
-    """A compiled network included in a training job."""
+    """A compiled NNTree or package graph included in a training job."""
 
-    format: Literal["nntree"] = "nntree"
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["nntree", "package"] = "nntree"
     value: dict[str, Any]
+
+    @field_validator("value")
+    @classmethod
+    def validate_network_value(cls, value: dict[str, Any], info: Any) -> dict[str, Any]:
+        """Require the minimal shape of the selected transport format."""
+
+        if info.data.get("format") == "package":
+            has_inline_packages = isinstance(value.get("packages"), list)
+            has_bundle_ref = isinstance(value.get("bundle_ref"), str) and bool(value["bundle_ref"])
+            if not isinstance(value.get("graph"), dict) or not (has_inline_packages or has_bundle_ref):
+                raise ValueError("package network requires graph plus packages or bundle_ref")
+        return value
+
+
+class PackageUpload(BaseModel):
+    """Package bundle uploaded by an authenticated browser connection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bundle: dict[str, Any]
+    sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str | None) -> str | None:
+        """Reject malformed declared digests before storage is attempted."""
+
+        if value is not None and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+            raise ValueError("sha256 must be a hexadecimal SHA-256 digest")
+        return value
+
+
+class PackageInfo(BaseModel):
+    """Public digest-addressed package metadata."""
+
+    id: str
+    version: str
+    sha256: str
+
+
+class PackageBundleInfo(BaseModel):
+    """Digest-addressed graph bundle stored for one browser connection."""
+
+    bundle_ref: str
+    digest: str
+    size: int = Field(ge=0)
 
 
 class ResourceRequest(BaseModel):
@@ -128,6 +180,16 @@ class ModelPackageInfo(BaseModel):
     input_adapter: dict[str, Any]
 
 
+class TrainingPackageInfo(BaseModel):
+    """Digest-verified archive containing a package graph and trained weights."""
+
+    schema_version: int
+    format: Literal["nnm-trained-package/v1"]
+    filename: str
+    sha256: str
+    size: int = Field(ge=0)
+
+
 class JobStatus(BaseModel):
     """Public job metadata returned by the API."""
 
@@ -143,6 +205,7 @@ class JobStatus(BaseModel):
     heartbeat_at: str | None = None
     wandb_url: str | None = None
     model_package: ModelPackageInfo | None = None
+    training_package: TrainingPackageInfo | None = None
     package_error: str | None = None
     artifact_dir: str
 

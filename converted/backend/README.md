@@ -50,6 +50,7 @@ just --justfile converted/backend/justfile test
 ## Docker
 
 ```bash
+NNM_CONTAINER_IMAGE=registry.example/nnm-worker@sha256:<64-hex-digest> \
 just --justfile converted/backend/justfile docker-up
 just --justfile converted/backend/justfile docker-down
 ```
@@ -57,6 +58,44 @@ just --justfile converted/backend/justfile docker-down
 Compose persists Valkey and job artifacts. The admin token is generated on the
 host and mounted read-only into the backend container. Configure the exact
 allowed frontend Origins before admitting LAN clients.
+
+### Package worker containers
+
+Package jobs use `ContainerExecutor`, with `podman` as the default engine. Set
+`NNM_CONTAINER_ENGINE=docker` for Docker or to a Docker-compatible wrapper. The
+worker image must be addressed by an immutable `@sha256:` digest; tags are
+rejected. The backend launches argv directly and never interpolates a shell
+command.
+
+Each job gets a disposable container with a read-only root filesystem, a
+read-only `/input` bind mount, a writable `/artifacts` bind mount, dropped
+capabilities, `no-new-privileges`, a PID limit, CPU/RAM limits, and
+`--network none` by default. Cancellation terminates the engine process group;
+the timeout policy is enforced by the executor. Input is staged outside the
+artifact directory so the writable mount cannot override the read-only mount.
+
+The compose example mounts a rootless Podman socket at
+`/run/podman/podman.sock`. A container-engine socket is effectively host-level
+execution authority: protect it like an administrator credential, do not
+expose it to untrusted users, and prefer a dedicated runner for shared hosts.
+The socket path and UID are operator-specific. Docker mode requires a Docker
+CLI or compatible wrapper in the backend image and the corresponding socket;
+the supplied image installs Podman only.
+
+GPU jobs are intentionally not enabled by this executor. CUDA image selection,
+device passthrough, rootless Podman GPU support and Docker `--gpus` semantics
+need a separate tested policy; no GPU capability is claimed here.
+
+The public worker entrypoint is:
+
+```bash
+python -m package_worker --input /input/job.json --artifacts /artifacts
+```
+
+It validates package identity, loads each declared `pytorch.py` under a unique
+module name, requires the fixed `build` entrypoint, and optionally invokes
+declared builds. The graph compiler and package upload/API integration are
+deliberately outside this task.
 
 ## Documentation
 

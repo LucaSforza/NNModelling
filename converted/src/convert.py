@@ -8,6 +8,8 @@
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# DEPRECATED: NNTree-to-Hydra conversion remains only for legacy clients.
+# Package jobs use the package runtime and container worker instead.
 from typing import Any
 import json
 import os

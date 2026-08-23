@@ -20,6 +20,39 @@ describe("training job actions", () => {
 });
 
 describe("authenticated training API", () => {
+  it("uploads a package bundle through the authenticated package endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ bundle_ref: "bundle-1", digest: "a".repeat(64), size: 12 }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+    const bundle = { schema_version: 1, format: "package-bundle/v1", runtime: { name: "stereotype_runtime.pytorch", version: 1 }, graph: { nodes: [], edges: [] }, packages: [], digest: "a".repeat(64) } as const;
+
+    await expect(api.uploadPackageBundle(bundle)).resolves.toMatchObject({ bundle_ref: "bundle-1" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/package-bundles");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
+    expect(JSON.parse(String(init.body))).toMatchObject({ format: "package-bundle/v1", digest: bundle.digest });
+  });
+
+  it("accepts a package job request without changing the nntree API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await api.submitTrainingJob({
+      schema_version: 1,
+      network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
+      training: {}, resources: {}, priority: 0,
+    });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({
+      network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
+    });
+  });
+
   it("sends the bearer token in headers and never in the URL", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } }),
@@ -103,6 +136,25 @@ describe("authenticated training API", () => {
     expect(url).not.toContain("very-secret-token");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
     expect(await wheel.text()).toBe("wheel");
+  });
+
+  it("downloads and verifies a trained package archive", async () => {
+    const expected = await sha256Hex("trained-zip");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("trained-zip", {
+        status: 200,
+        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    const archive = await api.downloadTrainingPackage("job-1", expected);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/jobs/job-1/training-package");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
+    expect(await archive.text()).toBe("trained-zip");
   });
 
   it("rejects a package whose body digest does not match the manifest", async () => {

@@ -1,4 +1,6 @@
-"""Local subprocess executor."""
+"""Deprecated NNTree host executor retained for compatibility jobs."""
+
+# DEPRECATED: package jobs must never use this host-Python execution path.
 
 from __future__ import annotations
 

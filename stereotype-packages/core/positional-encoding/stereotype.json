@@ -1,0 +1,24 @@
+{
+  "name": "Positional Encoding",
+  "description": "Adds non-trainable sinusoidal positional information to sequence embeddings.",
+  "kind": "layer",
+  "view": {
+    "color": "#8b6bb8",
+    "width": 200,
+    "height": 100
+  },
+  "parameters": {
+    "d_model": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 512,
+      "position": "top"
+    },
+    "max_len": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 5000,
+      "position": "bottom"
+    }
+  }
+}

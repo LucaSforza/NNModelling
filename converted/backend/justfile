@@ -10,6 +10,8 @@ valkey_url := "valkey://127.0.0.1:" + valkey_port + "/0"
 uv_cache_dir := env_var_or_default("UV_CACHE_DIR", "/tmp/nnmodelling-uv-cache")
 admin_token_file := env_var_or_default("NNM_ADMIN_TOKEN_FILE", valkey_data_dir / "admin.token")
 admin_url := env_var_or_default("NNM_ADMIN_URL", "http://127.0.0.1:" + api_port)
+container_engine := env_var_or_default("NNM_CONTAINER_ENGINE", "podman")
+container_image := env_var_or_default("NNM_CONTAINER_IMAGE", "")
 
 default:
     @just --list
@@ -75,8 +77,12 @@ test:
 
 # Build and start the persistent Docker deployment.
 docker-up: admin-init
-    docker compose -f "{{backend_dir}}/docker-compose.yml" up --build
+    NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_IMAGE="{{container_image}}" docker compose -f "{{backend_dir}}/docker-compose.yml" up --build
 
 # Stop the Docker deployment without deleting its volumes.
 docker-down:
     docker compose -f "{{backend_dir}}/docker-compose.yml" down
+
+# Print the configured package-worker engine/image without starting services.
+container-config:
+    @echo "engine={{container_engine}} image={{container_image}}"
