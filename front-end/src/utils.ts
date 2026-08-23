@@ -23,6 +23,61 @@ export type NodeDragPayload = {
   nodes: Node[];                  // L'array completo di tutti i nodi
 };
 
+export interface DockHandleRect {
+  nodeId: string;
+  handleId: string;
+  type: "source" | "target";
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+const DOCK_DISTANCE_PX = 8;
+
+function handleCenter(handle: DockHandleRect): { x: number; y: number } {
+  return {
+    x: handle.rect.x + handle.rect.width / 2,
+    y: handle.rect.y + handle.rect.height / 2,
+  };
+}
+
+/**
+ * Find the closest source/target handle pair for a node-drop docking gesture.
+ * Screen-space geometry is intentional: it matches what the user sees at any
+ * canvas zoom without changing the logical graph representation.
+ */
+export function findDockedConnection(
+  targetNodeId: string,
+  handles: readonly DockHandleRect[],
+): Connection | undefined {
+  const targetHandles = handles.filter(
+    (handle) => handle.nodeId === targetNodeId && handle.type === "target",
+  );
+  const sourceHandles = handles.filter(
+    (handle) => handle.nodeId !== targetNodeId && handle.type === "source",
+  );
+
+  let closest: { distance: number; source: DockHandleRect; target: DockHandleRect } | undefined;
+  for (const target of targetHandles) {
+    const targetCenter = handleCenter(target);
+    for (const source of sourceHandles) {
+      const sourceCenter = handleCenter(source);
+      const distance = Math.hypot(
+        targetCenter.x - sourceCenter.x,
+        targetCenter.y - sourceCenter.y,
+      );
+      if (distance > DOCK_DISTANCE_PX || (closest && distance >= closest.distance)) continue;
+      closest = { distance, source, target };
+    }
+  }
+
+  if (!closest) return undefined;
+  return {
+    source: closest.source.nodeId,
+    sourceHandle: closest.source.handleId,
+    target: closest.target.nodeId,
+    targetHandle: closest.target.handleId,
+  };
+}
+
 // HELPER: Riordina i nodi e previene cicli infiniti
 function sortNodesByParent(nodesArray: Node[]): Node[] {
   const sorted: Node[] = [];

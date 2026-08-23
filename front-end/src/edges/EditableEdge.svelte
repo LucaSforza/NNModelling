@@ -8,7 +8,7 @@ See the LICENSE file for details.
 -->
 
 <script lang="ts">
-  import { BaseEdge, useSvelteFlow, type EdgeProps } from "@xyflow/svelte";
+  import { BaseEdge, useSvelteFlow, type Edge, type EdgeProps } from "@xyflow/svelte";
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { routePointsFromData } from "../core/edgeRoute";
@@ -45,6 +45,8 @@ See the LICENSE file for details.
   let gesture = $state<Gesture | null>(null);
 
   let persistedPoints = $derived(routePointsFromData(data));
+  let logicalEdge = $derived({ id, data } as Edge);
+  let isDocked = $derived(diagram.isDockedEdge(logicalEdge));
   let displayedPoints = $derived(previewPoints ?? persistedPoints);
   let scopeOrigin = $derived.by(() => {
     // Track endpoints and diagram state: both change when a containing scope moves.
@@ -178,30 +180,32 @@ See the LICENSE file for details.
 
 <svelte:window onkeydown={keyDown} />
 
-<BaseEdge
-  {path}
-  {markerStart}
-  {markerEnd}
-  {interactionWidth}
-  {style}
-  class={{ "editable-edge-path": true, "editable-edge-path--selected": selected }}
-/>
+{#if !isDocked}
+  <BaseEdge
+    {path}
+    {markerStart}
+    {markerEnd}
+    {interactionWidth}
+    {style}
+    class={{ "editable-edge-path": true, "editable-edge-path--selected": selected }}
+  />
 
-<!-- BaseEdge draws the visible route; this transparent overlay owns pointer capture. -->
-<path
-  d={path}
-  class="editable-edge-hit-target nopan"
-  role="presentation"
-  fill="none"
-  stroke="transparent"
-  stroke-width="24"
-  onpointerdown={beginCreate}
-  onpointermove={moveGesture}
-  onpointerup={finishGesture}
-  onpointercancel={(event) => finishGesture(event, true)}
-/>
+  <!-- BaseEdge draws the visible route; this transparent overlay owns pointer capture. -->
+  <path
+    d={path}
+    class="editable-edge-hit-target nopan"
+    role="presentation"
+    fill="none"
+    stroke="transparent"
+    stroke-width="24"
+    onpointerdown={beginCreate}
+    onpointermove={moveGesture}
+    onpointerup={finishGesture}
+    onpointercancel={(event) => finishGesture(event, true)}
+  />
+{/if}
 
-{#if selected}
+{#if selected && !isDocked}
   <g class="editable-edge-controls nopan" data-png-exclude="true" aria-label="Edge route controls">
     {#each displayedPoints as point, index (`${index}-${point.x}-${point.y}`)}
       {@const absolutePoint = { x: point.x + scopeOrigin.x, y: point.y + scopeOrigin.y }}
