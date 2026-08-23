@@ -1,6 +1,6 @@
 ---
 name: nnmodelling-mcp
-description: Operate NNModelling through its live browser DiagramCore and browser-backed MCP server. Use when Codex or OpenCode must open or diagnose the editor, frontend, Chromium DevTools, WebSocket bridge, or MCP stdio server; inspect or edit a neural-network diagram; query tensor types; capture screenshots or hover tooltips; convert a diagram; train or run inference; or diagnose leaked ports and disconnected browser sessions. Route Codex desktop to its in-app Browser when appropriate while preserving external Chromium/CDP as the OpenCode, CLI, and unsupported-host fallback.
+description: Operate NNModelling through its live browser DiagramCore and browser-backed MCP server. Use when Codex must open or diagnose the editor, frontend, WebSocket bridge, or MCP stdio server; inspect or edit a neural-network diagram; query tensor types; capture screenshots or hover tooltips; convert a diagram; train or run inference; or diagnose leaked ports and disconnected browser sessions. Always use the Codex in-app Browser; never fall back to external Chromium, Chrome, or CDP.
 ---
 
 # NNModelling Browser and MCP
@@ -22,26 +22,17 @@ UI gestures when reproducing UI behavior, exercising a control that MCP does
 not expose, or satisfying an explicit request to interact manually. Verify any
 UI-driven graph mutation through MCP afterward.
 
-## Select the browser surface
+## Mandatory browser surface
 
-Honor an explicit browser choice. Do not replace an explicitly requested
-in-app Browser with Chromium, or an explicitly requested Chrome/Chromium
-session with the in-app Browser.
+Every live NNModelling workflow in this skill MUST use the Codex desktop
+in-app Browser. Before any browser action, load and follow the available
+`control-in-app-browser` skill and select the Codex in-app Browser through its
+browser client.
 
-When the user does not choose a surface, select in this order:
-
-1. If the host exposes a dedicated in-app Browser capability, prefer it for a
-   shared visual workflow. In Codex desktop, load and follow the available
-   `control-in-app-browser` skill before browser actions. Let that skill perform
-   browser discovery and control; do not reproduce its private setup here.
-2. If the user requests direct Chrome/Chromium control, or the in-app Browser
-   is unavailable, load `chrome-direct` when available and use the external
-   Chromium branch below.
-3. In OpenCode or another host without the Codex in-app Browser, use the
-   external Chromium branch. Do not attempt to invoke Codex-only browser APIs.
-
-Do not infer a capability from the model or provider name. Inspect the skills
-and tools actually exposed by the host.
+Do not use external Chromium, Chrome, `chrome-direct`, CDP, or the
+`nnm-stack.sh browser` fallback. If the Codex in-app Browser is unavailable,
+cannot connect, or fails during the workflow, stop and report the blocker;
+never switch browser surfaces silently or automatically.
 
 ## Start the shared stack
 
@@ -70,37 +61,20 @@ Start only missing components in persistent terminals:
 
    Reuse a server already listening on port 9339. Never start a second one.
 
-3. Open the frontend with the selected visual surface:
-
-   - **In-app Browser:** open `http://127.0.0.1:5174` through the host's Browser
-     capability. Do not run the `browser` subcommand merely to obtain a second
-     copy of the page.
-   - **External Chromium/OpenCode fallback:** keep this in a separate
-     persistent terminal:
-
-     ```bash
-     .agents/skills/nnmodelling-mcp/scripts/nnm-stack.sh browser
-     ```
+3. Open `http://127.0.0.1:5174` through the Codex in-app Browser. Do not run
+   the `browser` subcommand or open a second external copy of the page.
 
 4. Wait for `Browser tab connected`. With multiple connected frontend tabs,
    call `list_browser_tabs` and `select_browser_tab`; never guess which tab is
    active.
 
-5. Run the status command again. Chromium DevTools on port 9223 may correctly
-   remain unavailable for an in-app Browser session. The required conditions
-   are a reachable frontend, one MCP server on 9339, and a selected frontend
-   tab.
+5. Run the status command again. The required conditions are a reachable
+   frontend, one MCP server on 9339, and a selected frontend tab in the Codex
+   in-app Browser.
 
-Defaults are frontend `http://127.0.0.1:5174`, external Chromium DevTools
-`9223`, and the browser WebSocket bridge `9339`. Override the first two with
-`NNM_FRONTEND_URL` and `NNM_CDP_PORT`.
-
-If Chromium is not installed as Flatpak, set `NNM_BROWSER_COMMAND` to a working
-executable. Do not use this machine's `~/.local/bin/google-chrome` wrapper
-without checking it: it may depend on an unavailable `cobalt` binary.
-Launching the Flatpak GUI normally requires elevated execution approval; ask
-for it through the command tool instead of falling back to an unrelated
-browser.
+The default frontend is `http://127.0.0.1:5174`; override it with
+`NNM_FRONTEND_URL` when needed. Port 9223 and `NNM_CDP_PORT` are not part of
+this workflow.
 
 ## Connect over raw stdio when MCP tools are absent
 
@@ -146,16 +120,10 @@ diagram through the selected browser surface.
 and suggestions. A Loss is conceptually a layer with rank-1 output `[B]`, even
 though the current Python backend treats it as a terminal objective.
 
-Choose the screenshot path by surface:
-
-- **In-app Browser:** use the Browser capability for screenshots, hover,
-  rendered-state inspection, and visual verification. Use its Developer Mode
-  only when DOM, CSS, console, network, or performance inspection is needed and
-  the required approval is granted. Do not expect this tab to appear on the
-  external CDP port 9223.
-- **External Chromium:** use MCP `capture_screenshot` with `pageUrl` when
-  several DevTools pages exist, `hoverNodeId` for the tensor tooltip, and an
-  explicit `/tmp/*.png` `outputPath` for later inspection.
+Use the Codex in-app Browser for screenshots, hover, rendered-state inspection,
+and visual verification. Use its Developer Mode only when DOM, CSS, console,
+network, or performance inspection is needed and the required approval is
+granted.
 
 Use `reloadPage: true` only to discard broken HMR state. Reloading resets the
 in-memory diagram. After any reload, wait for reconnection and recreate or
@@ -192,13 +160,8 @@ it. For smoke testing, train only two or three small networks at most.
 - MCP reports no selected tab: the frontend is absent, reloading, connected to
   another server instance, or the chosen browser cannot reach the local bridge.
 - An in-app Browser opens the page but never connects: inspect console and
-  network state through that Browser. If the user did not explicitly require
-  it, use external Chromium as the compatibility fallback; otherwise report
-  the failure without silently switching surfaces.
-- External screenshot cannot find a page: start Chromium with
-  `--remote-debugging-port` and pass the exact `pageUrl`.
-- Port 9223 is unavailable during an in-app Browser workflow: this is expected;
-  use the in-app Browser's own screenshot and inspection capabilities.
+  network state through that Browser, then report the failure if it persists.
+  Do not switch to another browser surface.
 - Hydra rejects `--max-epochs` or `--device`: the server build is stale;
   rebuild and restart it. Current code must emit `trainer.*` overrides.
 - Linear matrix mismatch on MNIST: add `Flatten`; static Input metadata alone
