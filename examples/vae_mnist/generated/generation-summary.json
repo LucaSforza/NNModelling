@@ -1,0 +1,23 @@
+{
+  "latent_dim": 32,
+  "outputs": {
+    "generated": "generated.png",
+    "reconstructions": "reconstructions.png"
+  },
+  "package": "vae_mnist_trained-package.zip",
+  "package_format": "package-bundle/v1",
+  "package_sha256": "24286ec907c66307337fabbdba0be3e7144c25aadd34e5a1fe214813579aa4ec",
+  "seed": 42,
+  "training": {
+    "dataset": "dataset.autoencoder_mnist.AutoencoderMNIST",
+    "epochs": 1,
+    "history": [
+      {
+        "epoch": 1.0,
+        "train_loss": 0.7203756429751714,
+        "val_loss": 0.7144116045633951
+      }
+    ],
+    "num_parameters": 431504
+  }
+}
