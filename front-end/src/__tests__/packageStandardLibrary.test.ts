@@ -27,6 +27,9 @@ import inputInference from "../../../stereotype-packages/core/input/inference.lu
 import linearManifest from "../../../stereotype-packages/core/linear/manifest.json?raw"
 import linearDefinition from "../../../stereotype-packages/core/linear/stereotype.json?raw"
 import linearInference from "../../../stereotype-packages/core/linear/inference.lua?raw"
+import matmulManifest from "../../../stereotype-packages/core/matmul/manifest.json?raw"
+import matmulDefinition from "../../../stereotype-packages/core/matmul/stereotype.json?raw"
+import matmulInference from "../../../stereotype-packages/core/matmul/inference.lua?raw"
 import klDivergenceManifest from "../../../stereotype-packages/core/kl-divergence/manifest.json?raw"
 import klDivergenceDefinition from "../../../stereotype-packages/core/kl-divergence/stereotype.json?raw"
 import klDivergenceInference from "../../../stereotype-packages/core/kl-divergence/inference.lua?raw"
@@ -48,6 +51,7 @@ const packages: readonly PackageSelection[] = [
   packageSelection(linearManifest, linearDefinition, linearInference),
   packageSelection(addManifest, addDefinition, addInference),
   packageSelection(concatManifest, concatDefinition, concatInference),
+  packageSelection(matmulManifest, matmulDefinition, matmulInference),
   packageSelection(castManifest, castDefinition, castInference),
   packageSelection(embeddingManifest, embeddingDefinition, embeddingInference),
   packageSelection(crossEntropyManifest, crossEntropyDefinition, crossEntropyInference),
@@ -69,7 +73,7 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, and loss packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
+    for (const id of ["core.input", "core.linear", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(id)
     }
 
@@ -92,6 +96,20 @@ describe("new core standard-library packages", () => {
       { shape: ["B", 32], dtype: "float32" },
     ] }, {})).toEqual({ status: "error", message: "Add input 2 is incompatible with input 1" })
 
+    expect(host.inferForEditor("core.matmul", { kind: "join", inputs: [
+      { shape: [32, 64], dtype: "float32" },
+      { shape: [64, 16], dtype: "float32" },
+      { shape: [16, 8], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: [32, 8], dtype: "float32" } })
+
+    expect(host.inferForEditor("core.matmul", { kind: "join", inputs: [
+      { shape: [32, 64], dtype: "float32" },
+      { shape: [128, 16], dtype: "float32" },
+    ] }, {})).toEqual({
+      status: "error",
+      message: "MatMul inner dimensions are incompatible: input 1 has 64, input 2 has 128",
+    })
+
     expect(host.inferForEditor("core.cross-entropy", { kind: "loss", inputs: [{ shape: ["B", 10], dtype: "float32" }] }, {})).toEqual({
       status: "success", output: { shape: [], dtype: "float32" },
     })
@@ -111,7 +129,7 @@ describe("new core standard-library packages", () => {
 
   test("preserves explicit dtype behavior and rejects mismatches", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.linear", "core.cast", "core.embedding", "core.concat"]) await host.activate(id)
+    for (const id of ["core.linear", "core.cast", "core.embedding", "core.concat", "core.matmul"]) await host.activate(id)
 
     expect(host.inferForEditor("core.linear", { kind: "layer", inputs: [{ shape: ["B", 128], dtype: "float16" }] }, {
       in_features: 128, out_features: 64, dtype: "float16",
@@ -133,6 +151,20 @@ describe("new core standard-library packages", () => {
       { shape: ["B", 16], dtype: "float32" },
       { shape: ["B", 8], dtype: "float16" },
     ] }, { dim: -1 })).toEqual({ status: "error", message: "Concat input 2 has dtype float16, expected float32" })
+
+    expect(host.inferForEditor("core.matmul", { kind: "join", inputs: [
+      { shape: [32, 64], dtype: "float32" },
+      { shape: [64, 16], dtype: "float16" },
+    ] }, {})).toEqual({ status: "error", message: "MatMul input 2 has dtype float16, expected float32" })
+
+    expect(host.inferForEditor("core.matmul", { kind: "join", inputs: [
+      { shape: [32, 64], dtype: "float32" },
+      { shape: [64, 16], dtype: "float32" },
+      { shape: [8, 4], dtype: "float32" },
+    ] }, {})).toEqual({
+      status: "error",
+      message: "MatMul inner dimensions are incompatible: input 2 has 16, input 3 has 8",
+    })
   })
 
   test("composes Repeat and Horizontal Repeat through their declared capabilities", async () => {

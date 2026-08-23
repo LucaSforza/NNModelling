@@ -79,6 +79,51 @@ def build(parameters, context: BuildContext, services: NoServices): return Join(
     assert torch.equal(model(torch.tensor([3.0])), torch.tensor([0.0]))
 
 
+def test_matmul_package_builds_matrix_product() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/matmul/pytorch.py").read_text()
+    package = _package("core.matmul", source)
+    graph = {
+        "nodes": [
+            {"id": "input", "type": "input"},
+            {"id": "matmul", "type": "join", "package": {"id": "core.matmul", "version": "0.1.0"}},
+        ],
+        "edges": [
+            {"source": "input", "target": "matmul", "targetHandle": "in-0"},
+            {"source": "input", "target": "matmul", "targetHandle": "in-1"},
+            {"source": "input", "target": "matmul", "targetHandle": "in-2"},
+        ],
+    }
+    model = compile_package_graph({"packages": [package], "graph": graph})
+
+    assert model.modules_by_id["matmul"].__class__.__name__ == "SequentialMatMul"
+    value = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    assert torch.equal(model(value), value @ value @ value)
+
+
+def test_matmul_package_selects_parallel_builder_for_four_inputs() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/matmul/pytorch.py").read_text()
+    package = _package("core.matmul", source)
+    graph = {
+        "nodes": [
+            {"id": "input", "type": "input"},
+            {"id": "matmul", "type": "join", "package": {"id": "core.matmul", "version": "0.1.0"}},
+        ],
+        "edges": [
+            {"source": "input", "target": "matmul", "targetHandle": "in-0"},
+            {"source": "input", "target": "matmul", "targetHandle": "in-1"},
+            {"source": "input", "target": "matmul", "targetHandle": "in-2"},
+            {"source": "input", "target": "matmul", "targetHandle": "in-3"},
+        ],
+    }
+    model = compile_package_graph({"packages": [package], "graph": graph})
+
+    assert model.modules_by_id["matmul"].__class__.__name__ == "ParallelMatMul"
+    value = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    assert torch.equal(model(value), value @ value @ value @ value)
+
+
 def test_rejects_arbitrary_import_and_missing_dependency() -> None:
     bad_source = "import os\ndef build(parameters, context, services): return object()\n"
     with pytest.raises(PackageValidationError, match="import 'os'"):
