@@ -69,6 +69,8 @@ NNTree fixtures as active verification inputs.
 - normalize registered dataset batches to explicit inputs and targets;
 - remove all inferred-loss and signature-dispatch behavior;
 - make exported wheels invoke only the prediction program;
+- support an opt-in wheel-adapter surface declared by stereotype packages, for
+  model capabilities beyond prediction without exposing compiler internals;
 - reject incompatible worker images with a typed protocol error;
 - prove the complete ResNet and VAE browser-to-wheel paths.
 
@@ -81,6 +83,10 @@ NNTree fixtures as active verification inputs.
 - changing the Lua type engine into a Python- or dataset-driven engine;
 - Kubernetes or broader container-controller redesign.
 - preserving an NNTree/Hydra command as a hidden flag or silent fallback.
+- treating a dataset adapter as a model-generation API;
+- exposing a package's arbitrary Python functions, `CompiledPrograms`,
+  `_GraphModule`, `modules_by_id` or subflow implementation objects from a
+  wheel.
 
 ## Decisions and invariants
 
@@ -97,6 +103,23 @@ NNTree fixtures as active verification inputs.
 - A target-free package objective receives no target even when the batch has
   one. A target-bound objective fails if its declared source is unavailable.
 - The wheel public API never invokes or exposes a requirement for targets.
+- The implemented wheel v1 surface is deliberately limited to
+  `load_model`, `predict_tensor` and `predict`. It is sufficient for the
+  standard prediction program, but it does not make a VAE latent space public.
+- The implemented T09 wheel adapter is opt-in and stereotype-declared: its
+  stable name, tensor input/output contract and forbidden target policy are
+  selected on an explicit graph node and recorded in immutable wheel metadata.
+  Its only v1 entrypoint is `module.forward`; it is never discovered through a
+  Python symbol, node display name or subflow implementation detail.
+- Dataset adapters remain preprocessing boundaries from an external value to a
+  declared model input. They cannot sample a model distribution, decode a
+  latent tensor or obtain model modules.
+- A public wheel adapter must have declared input/output contracts, a target
+  policy and, where relevant, an explicit randomness policy. It cannot invoke
+  the training-only objective region or receive implicit `batch.targets`.
+- A subflow remains private unless a stereotype-declared wheel adapter is
+  explicitly bound to that compiled instance. The adapter must reuse the shared
+  module store; it must not rebuild or duplicate parameters.
 
 ## Contracts and control flow
 
@@ -111,6 +134,10 @@ registered dataset
 trained shared state + PredictionProgram
     -> portable wheel
     -> load_model().predict_tensor(inputs)
+
+selected, stereotype-declared wheel adapter
+    -> versioned wheel manifest -> generic adapter dispatcher
+    -> restricted typed adapter over shared modules -> declared result
 ```
 
 The objective region begins at every `kind: "loss"` node and includes its
@@ -150,6 +177,7 @@ returns a typed compatibility failure rather than executing older semantics.
 | [T07](tasks/T07-remove-legacy-surfaces.md) | `integration` | T01 | T03, T04, T05 | frontend, MCP and current documentation | No public NNTree/Hydra surface |
 | [T08](tasks/T08-delete-legacy-python.md) | `backend` | T04, T05, T07, parent P04 | — | legacy Python, dependencies and tests | No active NNTree/Hydra runtime |
 | [T06](tasks/T06-image-and-real-qa.md) | `integration` | T02, T04, T05, T07, T08 | — | worker image/protocol, integration tests, examples | Current-image browser and wheel proof |
+| [T09](tasks/T09-declarative-public-endpoints.md) | `architecture` | T05, T06 | — | package contract, compiler/exporter/runtime design and focused tests | Implemented v1 adapter contract; browser QA pending |
 
 Tasks marked parallel have non-overlapping source ownership. Test files must
 stay with the task's subsystem to avoid concurrent edits to one shared test
@@ -172,6 +200,11 @@ module.
   migrated before their legacy fixtures are removed.
 - T06 must build a fresh image by digest, prove its protocol metadata, and use
   the Codex in-app Browser for both submissions.
+- T09's v1 contract is recorded in the
+  [wheel-adapter decision](../../../knowledge/decisions/wheel-adapters.md).
+  It binds `wheelAdapters` selected on explicit root-graph nodes to existing
+  compiled modules through `module.forward`; it cannot turn `pytorch.py` into a
+  general wheel callback surface. Browser submission/download QA remains open.
 - Review blocks completion on package-ID/class dispatch, inferred roles,
   duplicate parameters, objective execution during prediction, stale image
   configuration, or legacy tests that preserve forbidden behavior.
@@ -196,7 +229,12 @@ module.
       browser and its downloaded wheel reconstructs `[B, 1, 28, 28]` through
       `predict_tensor()`.
 - [ ] The VAE example uses only the installed wheel's public API and produces a
-      reconstruction sheet plus a denoised input-space digit morph.
+      visually inspected reconstruction sheet. It does not claim latent-space
+      interpolation until a public endpoint contract exists.
+- [ ] A VAE stereotype's explicitly selected adapter, when declared, is
+      callable through the generic wheel API; the example never reaches
+      encoder/decoder modules or a package Python symbol directly. Browser
+      proof for this adapter remains pending under T09/T06.
 - [ ] A stale execution-protocol image fails before bundle compilation with a
       typed, actionable error.
 - [ ] No active frontend, MCP, backend, test or current-documentation path
@@ -240,6 +278,10 @@ an unavailable engine is reported as an environmental limitation, not a pass.
 - T05 migrates the current model-package contract from resolved NNTree/Hydra
   configuration to a package graph plus explicit prediction descriptor when
   the implementation makes that contract true.
+- T09 records the implemented stereotype-declared adapter contract in
+  [wheel-adapters](../../../knowledge/decisions/wheel-adapters.md). Its focused
+  Python coverage is present; browser submission/download QA is still required
+  before the task can complete.
 - Update the current package type-system contract when role-aware graph
   completion lands.
 - Record the worker protocol and image lifecycle in operations knowledge after

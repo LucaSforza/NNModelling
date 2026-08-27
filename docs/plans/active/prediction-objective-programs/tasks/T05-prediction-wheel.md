@@ -27,7 +27,11 @@ even when the source training graph contains an objective region.
 
 ## Invariants
 
-- `load_model`, `predict_tensor` and `predict` remain the complete public API.
+- `load_model`, `predict_tensor` and `predict` are the complete public API for
+  this task's prediction-only wheel v1. Any stereotype-declared wheel adapter
+  is the separate, opt-in T09 surface documented in the
+  [wheel-adapter decision](../../../../knowledge/decisions/wheel-adapters.md);
+  it does not change this task's target-free prediction path.
 - The wheel is independent of the checkout and training dataset.
 - Safetensors restore strictly against the one shared trained state.
 - Public inference cannot require or fabricate targets.

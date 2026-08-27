@@ -54,7 +54,9 @@ through downloaded, clean-environment wheels.
 6. Install each wheel in a clean temporary environment. Verify ResNet logits
    and VAE reconstructions through only `load_model().predict_tensor()`.
 7. Rewrite the VAE example to use only the public wheel API and render a
-   reconstruction sheet plus a denoised input-space morph between two digits.
+   reconstruction sheet. Do not simulate a latent interpolation with an
+   input-space morph: latent traversal waits for an explicit public endpoint
+   contract (T09).
 
 ## Out of scope
 
@@ -73,6 +75,11 @@ through downloaded, clean-environment wheels.
 - [ ] The VAE example contains no checkout runtime or internal model access.
 - [ ] Actual image outputs are visually inspected and poor results are reported
       rather than described as successful interpolation.
+
+T09 has focused Python and clean-wheel coverage, but no browser submission,
+download and installed-wheel exercise for a selected adapter has been recorded
+yet. That end-to-end proof remains pending and is not inferred from the unit
+tests.
 
 ## Validation
 
