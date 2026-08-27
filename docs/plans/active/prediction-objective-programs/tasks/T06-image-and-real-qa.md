@@ -1,0 +1,90 @@
+---
+id: T06
+kind: task
+status: ready
+plan: ../plan.md
+role: integration
+depends_on: [T02, T04, T05, T07, T08]
+parallel_with: []
+write_scope:
+  - converted/backend/
+  - converted/src/backend/
+  - converted/src/tests/test_backend_e2e.py
+  - front-end/src/__tests__/
+  - examples/vae_mnist/
+  - docs/plans/active/prediction-objective-programs/evidence/
+---
+
+# Version the worker image and prove real workflows
+
+## Objective
+
+Prevent stale worker semantics and verify ResNet and VAE from the browser
+through downloaded, clean-environment wheels.
+
+## Context required
+
+- [Package backend security decision](../../../../knowledge/decisions/package-backend-standard.md)
+- [Accepted execution decision](../../../../knowledge/decisions/prediction-objective-programs.md)
+- T02, T04 and T05 handoffs
+- NNModelling browser/MCP and final-verification skills
+
+## Invariants
+
+- FastAPI never executes package Python.
+- Browser-submitted code runs only in the constrained Podman/Docker worker.
+- The configured image is immutable by digest and reports a versioned worker
+  execution protocol.
+- QA uses the public UI and downloaded wheel APIs, not artifact-directory
+  shortcuts as the acceptance proof.
+- This integration task may change only worker protocol/deployment glue and the
+  VAE example. It must not modify the compiler, trainer, package definitions,
+  frontend graph semantics or wheel exporter; failures in those areas return
+  to T01–T05 for a reviewed fix and targeted tests.
+
+## Work
+
+1. Add a request/worker execution-protocol version and typed mismatch error.
+2. Add tests proving an old protocol fails before package compilation.
+3. Build a fresh worker image, record its digest and verify Podman and Docker
+   command parity with fake-engine tests before real-engine smoke checks.
+4. Through the Codex in-app Browser, train the explicit-loss ResNet on bounded
+   MNIST and download its wheel.
+5. Through the same UI, train the explicit-output VAE and download its wheel.
+6. Install each wheel in a clean temporary environment. Verify ResNet logits
+   and VAE reconstructions through only `load_model().predict_tensor()`.
+7. Rewrite the VAE example to use only the public wheel API and render a
+   reconstruction sheet plus a denoised input-space morph between two digits.
+
+## Out of scope
+
+- Opportunistic compiler, trainer, frontend-semantic or exporter fixes during
+  QA.
+- Treating an unavailable container engine or browser download event as a
+  successful test.
+
+## Acceptance criteria
+
+- [ ] Browser job logs expose the expected worker protocol and immutable image
+      digest.
+- [ ] ResNet and VAE jobs reach `succeeded` with explicit objectives.
+- [ ] Both browser download controls produce verified wheels.
+- [ ] Clean installs pass the output-shape assertions without targets.
+- [ ] The VAE example contains no checkout runtime or internal model access.
+- [ ] Actual image outputs are visually inspected and poor results are reported
+      rather than described as successful interpolation.
+
+## Validation
+
+```bash
+cd converted && uv run pytest src/tests/test_backend_e2e.py -q
+pnpm --dir front-end test
+pnpm --dir front-end check
+git diff --check
+```
+
+## Required handoff
+
+Return job IDs, image digest/protocol, browser-visible statuses, wheel hashes,
+clean-environment commands and results, inspected image paths, engine
+availability and any limitation that prevented a real Docker or Podman run.

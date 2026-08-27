@@ -1,0 +1,69 @@
+---
+id: T05
+kind: task
+status: ready
+plan: ../plan.md
+role: backend
+depends_on: [T03]
+parallel_with: [T04]
+write_scope:
+  - converted/src/model_package/
+  - converted/src/tests/test_model_package.py
+  - docs/knowledge/contracts/model-package.md
+---
+
+# Export only target-free prediction semantics
+
+## Objective
+
+Make the installed wheel's public API execute the declared prediction program
+even when the source training graph contains an objective region.
+
+## Context required
+
+- [Portable model-package contract](../../../../knowledge/contracts/model-package.md)
+- [Accepted execution decision](../../../../knowledge/decisions/prediction-objective-programs.md)
+- T03 compiled-program and state-dict handoff
+
+## Invariants
+
+- `load_model`, `predict_tensor` and `predict` remain the complete public API.
+- The wheel is independent of the checkout and training dataset.
+- Safetensors restore strictly against the one shared trained state.
+- Public inference cannot require or fabricate targets.
+
+## Work
+
+1. Add failing clean-wheel tests for a classifier graph containing Cross
+   Entropy and a VAE graph containing MSE plus KL.
+2. Export the explicit prediction descriptor and required package closure.
+3. Load the shared trained state and expose only prediction through the public
+   facade.
+4. Delete `_load_resolved_config()`, YAML/JSON fallback handling, the legacy
+   GraphNet/config branch and internal-access assumptions once package-native
+   fixtures cover their remaining invariants.
+5. Replace the current resolved-config/NNTree model-package documentation with
+   the package graph and explicit prediction-descriptor contract once tests
+   prove the new wheel behavior.
+
+## Acceptance criteria
+
+- [ ] Classifier `predict_tensor` returns `[B, C]` logits without a target.
+- [ ] VAE `predict_tensor` returns the declared reconstruction tensor.
+- [ ] Tests do not access `.network`, `modules_by_id` or repository runtime
+      imports.
+- [ ] Objective modules are not invoked during inference.
+- [ ] Wheel construction has no resolved-config or `_target_` input variant.
+- [ ] The current model-package KB describes the implemented package-native
+      wheel and no longer requires a resolved NNTree/Hydra configuration.
+
+## Validation
+
+```bash
+cd converted && uv run pytest src/tests/test_model_package.py -q
+```
+
+## Required handoff
+
+Return wheel contents, public-API proofs, exact test results and any legacy
+runtime code that cannot yet be deleted.
