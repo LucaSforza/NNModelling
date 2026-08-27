@@ -1,8 +1,9 @@
 ---
 id: package-pytorch-backend
 kind: plan
-status: draft
+status: superseded
 updated: 2026-08-23
+superseded_by: ../package-backend-standard/plan.md
 areas:
   - architecture
   - frontend
@@ -11,7 +12,12 @@ areas:
   - testing
 ---
 
-# Package PyTorch backend integration
+# Package PyTorch backend integration (superseded)
+
+This draft described a migration that kept NNTree as a supported backend
+variant. The project decision on 2026-08-27 is package-only standardization:
+see [`../package-backend-standard/plan.md`](../package-backend-standard/plan.md)
+and [`../../../knowledge/decisions/package-backend-standard.md`](../../../knowledge/decisions/package-backend-standard.md).
 
 ## Goal
 

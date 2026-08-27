@@ -1,8 +1,9 @@
 ---
 id: T04
 kind: task
-status: draft
+status: superseded
 plan: ../plan.md
+superseded_by: ../../package-backend-standard/tasks/P02-bundle-storage.md
 role: backend
 depends_on: [T01, T03]
 parallel_with: [T02]

@@ -6,19 +6,19 @@ updated: 2026-08-12
 
 # Remote-training architecture
 
-The optional training backend accepts a compiled NNTree and complete training
-request, persists it in Valkey, schedules it, and produces recoverable
-artifacts. The existing local conversion, training and inference CLI remains a
-supported independent path.
+The current checkout still implements the historical NNTree training backend
+and the experimental package path from PR44. The accepted package-only target,
+including its least-privilege Podman/Docker controller, is defined in the
+[package backend decision](../decisions/package-backend-standard.md) and the
+[active implementation plan](../../plans/active/package-backend-standard/plan.md).
 
 ```text
 TrainingSidebar or MCP HTTP client
   -> FastAPI (`converted/src/backend/app.py`)
   -> Valkey job store and event streams
   -> JobManager priority/FIFO scheduler
-  -> LocalExecutor or SlurmExecutor
-  -> Hydra/Lightning artifacts
-  -> model-package wheel
+  -> current local/Slurm or experimental package executor
+  -> training artifacts
 ```
 
 ## Job contract
@@ -26,7 +26,8 @@ TrainingSidebar or MCP HTTP client
 `JobSubmission` is versioned and rejects unknown top-level fields. Version 1
 contains:
 
-- `network`: compiled `nntree` payload;
+- `network`: currently `nntree`; the accepted target is a `package` bundle
+  reference plus semantic graph;
 - `training`: dataset, optimizer, trainer, W&B, early stopping and overrides;
 - `resources`: CPU, memory, GPU and optional Slurm selectors;
 - `priority` and optional `nnm_<name>` package name.
@@ -49,17 +50,18 @@ and must be reassessed against current code before becoming a new plan.
 
 - The frontend and optional MCP client use the same FastAPI state; MCP does not
   duplicate jobs or scheduling.
-- Hydra overrides are composed as configuration and are never shell commands.
-- Local execution launches the repository's fixed training entry point.
-- Slurm scripts are generated from validated resource fields and may be
-  submitted locally or through a configured SSH host.
+- The accepted target validates typed package/training data and never imports
+  package Python in FastAPI.
+- The accepted target launches exactly one short-lived worker container per job
+  through a Podman/Docker controller.
 - Artifacts default to `converted/jobs/<job-id>/` and may be relocated with
   `NNM_BACKEND_ARTIFACT_ROOT`.
-- Dataset discovery imports installed trusted dataset classes and exposes
-  constructor metadata without uploading dataset code.
+- Current dataset discovery and package execution are being replaced by the
+  registered-dataset and worker-only policy in the accepted target.
 - Job access is scoped to an authenticated browser connection; see
   [Pairing and ownership](../contracts/pairing.md).
-- Successful jobs may emit a portable wheel; see
+- The current legacy path may emit a portable wheel; the accepted package path
+  must emit the same contract. See
   [Model packages](../contracts/model-package.md).
 
 ## Principal code

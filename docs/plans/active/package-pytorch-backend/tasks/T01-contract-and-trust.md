@@ -1,8 +1,9 @@
 ---
 id: T01
 kind: task
-status: draft
+status: superseded
 plan: ../plan.md
+superseded_by: ../../package-backend-standard/tasks/P01-contract-and-legacy-removal.md
 role: architecture
 depends_on: []
 parallel_with: []

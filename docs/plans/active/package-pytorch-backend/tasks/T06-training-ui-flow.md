@@ -1,8 +1,9 @@
 ---
 id: T06
 kind: task
-status: draft
+status: superseded
 plan: ../plan.md
+superseded_by: ../../package-backend-standard/tasks/P06-frontend-api.md
 role: frontend
 depends_on: [T02, T04]
 parallel_with: [T05]

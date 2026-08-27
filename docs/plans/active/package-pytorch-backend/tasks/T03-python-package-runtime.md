@@ -1,8 +1,9 @@
 ---
 id: T03
 kind: task
-status: draft
+status: superseded
 plan: ../plan.md
+superseded_by: ../../package-backend-standard/tasks/P03-runtime-and-training.md
 role: backend
 depends_on: [T01]
 parallel_with: [T02]

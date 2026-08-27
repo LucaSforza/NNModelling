@@ -1,8 +1,9 @@
 ---
 id: T05
 kind: task
-status: draft
+status: superseded
 plan: ../plan.md
+superseded_by: ../../package-backend-standard/tasks/P04-container-controller.md
 role: operations
 depends_on: [T03, T04]
 parallel_with: []

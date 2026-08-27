@@ -46,22 +46,20 @@ package-ID inference switch.
 
 ## Backend boundary
 
-The existing Python code still supports historical NNTree-based runtime and
-backend concerns, but package-format diagrams currently stop at the frontend:
+The current checkout still contains the historical NNTree backend and the
+experimental package integration; package-format diagrams are not yet a
+completed backend path. The accepted target is documented in the
+[package backend decision](../decisions/package-backend-standard.md) and
+implemented by the active
+[package-backend-standard plan](../../plans/active/package-backend-standard/plan.md).
 
-```text
-package diagram -X-> compile / convert / train / infer
-```
+That target makes package graphs the only backend format and places all
+`pytorch.py` execution behind a least-privilege Podman/Docker worker. Lua
+remains the sole frontend semantic authority; PyTorch is never a type-
+inference fallback.
 
-The future backend will independently load trusted package `pytorch.py`
-entrypoints. Its concrete NNModelling design is intentionally deferred until
-that work begins; the frontend must never call Python as a type-inference
-fallback. See [`../../TODO.md`](../../TODO.md).
-
-Remote training remains an independent existing subsystem. See
-[Remote training](remote-training.md), the
-[pairing contract](../contracts/pairing.md), and the
-[model-package contract](../contracts/model-package.md).
+See [Remote training](remote-training.md), the [pairing contract](../contracts/pairing.md),
+and the [model-package contract](../contracts/model-package.md).
 
 ## Durable invariants
 

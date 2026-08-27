@@ -1,11 +1,16 @@
 ---
 id: nntree-deprecation
 kind: migration-record
-status: tracking-only
+status: superseded
 updated: 2026-08-23
+superseded_by: ../package-backend-standard/plan.md
 ---
 
-# NNTree deprecation tracking
+# NNTree deprecation tracking (superseded)
+
+On 2026-08-27 the project decided that NNTree is not a backend compatibility
+variant for the standard package implementation. The removal work is defined
+in [`../package-backend-standard/plan.md`](../package-backend-standard/plan.md).
 
 NNTree remains a supported backend input. This document is an inventory, not
 authorization to remove or reinterpret the legacy route. Deletion requires an

@@ -1,8 +1,9 @@
 ---
 id: T07
 kind: task
-status: draft
+status: superseded
 plan: ../plan.md
+superseded_by: ../../package-backend-standard/tasks/P07-verification-and-cleanup.md
 role: integration
 depends_on: [T05, T06]
 parallel_with: []
