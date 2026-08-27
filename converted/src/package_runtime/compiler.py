@@ -316,10 +316,9 @@ def _selected_adapter_descriptors(
         if not isinstance(declarations, list):
             raise PackageValidationError(f"package {package.package_id} wheelAdapters must be a list")
         for selection in raw_selections:
-            if isinstance(selection, str):
-                name = selection
-            else:
-                raise PackageValidationError(f"wheel adapter selection on {node_id} must be a name or object")
+            if not isinstance(selection, Mapping):
+                raise PackageValidationError(f"wheel adapter selection on {node_id} must be an object")
+            name = selection.get("name")
             if not isinstance(name, str) or not name:
                 raise PackageValidationError(f"wheel adapter selection on {node_id} has an invalid name")
             matches = [item for item in declarations if isinstance(item, Mapping) and item.get("name") == name]
@@ -327,7 +326,8 @@ def _selected_adapter_descriptors(
                 raise PackageValidationError(
                     f"wheel adapter {name!r} on {node_id} is missing or has an ambiguous version"
                 )
-            descriptor = _validate_adapter_declaration(matches[0], package, node_id)
+            declaration = _validate_adapter_declaration(matches[0], package, node_id)
+            descriptor = _bind_adapter_declaration(selection, declaration, node_id)
             if descriptor["name"] in names:
                 raise PackageValidationError(f"duplicate wheel adapter name {descriptor['name']!r}")
             names.add(descriptor["name"])
@@ -374,6 +374,73 @@ def _validate_adapter_declaration(
         "package_version": package.version,
         "node_id": node_id,
     }
+
+
+def _bind_adapter_declaration(
+    selection: Mapping[str, Any], declaration: dict[str, Any], node_id: str
+) -> dict[str, Any]:
+    """Bind a concrete node schema to the stereotype's symbolic template."""
+
+    for field in ("input", "output"):
+        concrete = selection.get(field)
+        if not isinstance(concrete, Mapping) or concrete.get("type") != "tensor":
+            raise PackageValidationError(
+                f"wheel adapter {declaration['name']!r} binding on {node_id} requires a concrete tensor {field}"
+            )
+        _validate_concrete_tensor_schema(concrete, declaration["name"], field)
+
+    bindings: dict[str, int] = {}
+    _match_declared_shape(
+        declaration["input"]["shape"], selection["input"]["shape"], bindings,
+        declaration["name"], "input",
+    )
+    _match_declared_shape(
+        declaration["output"]["shape"], selection["output"]["shape"], bindings,
+        declaration["name"], "output",
+    )
+    if selection["input"]["dtype"] != declaration["input"]["dtype"]:
+        raise PackageValidationError(f"wheel adapter {declaration['name']!r} input dtype binding is incompatible")
+    if selection["output"]["dtype"] != declaration["output"]["dtype"]:
+        raise PackageValidationError(f"wheel adapter {declaration['name']!r} output dtype binding is incompatible")
+    return {
+        **declaration,
+        "input": _concrete_schema(selection["input"]),
+        "output": _concrete_schema(selection["output"]),
+    }
+
+
+def _validate_concrete_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> None:
+    shape = schema.get("shape")
+    if not isinstance(shape, list) or any(
+        not (isinstance(item, int) and not isinstance(item, bool) and item > 0)
+        for item in shape
+    ):
+        raise PackageValidationError(f"wheel adapter {name!r} {role} binding shape must be positive integers")
+    if schema.get("dtype") not in _ADAPTER_DTYPES:
+        raise PackageValidationError(f"wheel adapter {name!r} {role} binding dtype is invalid")
+
+
+def _concrete_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    return {"type": "tensor", "shape": list(schema["shape"]), "dtype": schema["dtype"]}
+
+
+def _match_declared_shape(
+    declared: list[Any], concrete: list[int], bindings: dict[str, int], name: str, role: str,
+) -> None:
+    if len(declared) != len(concrete):
+        raise PackageValidationError(f"wheel adapter {name!r} {role} binding rank is incompatible")
+    for index, (expected, actual) in enumerate(zip(declared, concrete)):
+        if isinstance(expected, int):
+            if expected != actual:
+                raise PackageValidationError(
+                    f"wheel adapter {name!r} {role} binding dimension {index} is incompatible"
+                )
+            continue
+        previous = bindings.setdefault(expected, actual)
+        if previous != actual:
+            raise PackageValidationError(
+                f"wheel adapter {name!r} {role} binding symbol {expected!r} is inconsistent"
+            )
 
 
 def _validate_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> None:
