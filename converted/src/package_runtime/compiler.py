@@ -354,8 +354,6 @@ def _validate_adapter_declaration(
     if not isinstance(output, Mapping) or output.get("type") != "tensor":
         raise PackageValidationError(f"wheel adapter {name!r} must declare a tensor output")
     _validate_tensor_schema(output, name, "output")
-    if not _schema_symbols(output).issubset(_schema_symbols(input_schema)):
-        raise PackageValidationError(f"wheel adapter {name!r} output shape uses an unbound symbol")
     randomness = raw.get("randomness", {"mode": "none"})
     if not isinstance(randomness, Mapping) or randomness.get("mode") not in {"none", "seeded"}:
         raise PackageValidationError(f"wheel adapter {name!r} has unsupported randomness policy")
@@ -387,10 +385,6 @@ def _validate_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> 
         raise PackageValidationError(f"wheel adapter {name!r} {role} tensor shape is invalid")
     if dtype not in {"float16", "bfloat16", "float32", "float64"}:
         raise PackageValidationError(f"wheel adapter {name!r} {role} tensor dtype is invalid")
-
-
-def _schema_symbols(schema: Mapping[str, Any]) -> set[str]:
-    return {dimension for dimension in schema["shape"] if isinstance(dimension, str)}
 
 
 def _compile_adapters(

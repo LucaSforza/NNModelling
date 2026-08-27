@@ -475,6 +475,14 @@ def build(parameters, context, services): return Flatten()
     model = compile_package_graph({"packages": [package], "graph": graph})
     assert tuple(model.adapter("flatten")(torch.ones(3, 2, 2)).shape) == (3, 4)
 
+    output_only_symbol_definition = {**definition, "wheelAdapters": [{
+        **definition["wheelAdapters"][0],
+        "output": {"type": "tensor", "shape": ["B", "M"], "dtype": "float32"},
+    }]}
+    output_only_symbol_package = _package("demo.adapter-output", source, definition=output_only_symbol_definition)
+    output_only_symbol_model = compile_package_graph({"packages": [output_only_symbol_package], "graph": graph})
+    assert tuple(output_only_symbol_model.adapter("flatten")(torch.ones(3, 2, 2)).shape) == (3, 4)
+
     bad_output_definition = {**definition, "wheelAdapters": [{
         **definition["wheelAdapters"][0],
         "output": {"type": "tensor", "shape": ["B", 5], "dtype": "float32"},
