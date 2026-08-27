@@ -84,11 +84,12 @@ describe("new core standard-library packages", () => {
     for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.output", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(id)
     }
-    expect(host.packageDefinition("core.subflow-proxy")?.wheelAdapters).toEqual([expect.objectContaining({
+    expect(host.packageDefinition("core.repeat")?.wheelAdapters).toEqual([expect.objectContaining({
       name: "forward",
       entrypoint: "module.forward",
       targetPolicy: "forbidden",
     })])
+    expect(host.packageDefinition("core.subflow-proxy")?.wheelAdapters).toBeUndefined()
 
     expect(host.inferForEditor("core.input", { kind: "input", inputs: [] }, {
       shape: ["B", 3, 32, 32], dtype: "float32",
