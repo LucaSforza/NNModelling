@@ -2,6 +2,16 @@
   "name": "Subflow Proxy",
   "description": "Builds and delegates to one instance of its nested subflow.",
   "kind": "subflow",
+  "wheelAdapters": [
+    {
+      "name": "forward",
+      "entrypoint": "module.forward",
+      "input": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },
+      "output": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },
+      "targetPolicy": "forbidden",
+      "randomness": { "mode": "none" }
+    }
+  ],
   "view": {
     "color": "#4779c4",
     "width": 180,
