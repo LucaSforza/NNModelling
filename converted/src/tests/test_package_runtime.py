@@ -527,6 +527,38 @@ def test_wheel_adapter_requires_fixed_target_free_protocol(entrypoint: str, mess
         compile_package_graph({"packages": [package], "graph": graph})
 
 
+def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> None:
+    adapter_definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "decode",
+            "entrypoint": "module.forward",
+            "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "targetPolicy": "forbidden",
+        }],
+    }
+    adapter = _package("demo.selected-adapter", "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n", definition=adapter_definition)
+    loss = _package(
+        "demo.loss-with-empty-selection",
+        "import torch\ndef build(parameters, context, services): return torch.nn.MSELoss()\n",
+        definition={"kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets"}]}},
+    )
+    output = _package("demo.output-with-empty-selection", "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n", definition={"kind": "output"})
+    graph = {"nodes": [
+        {"id": "input", "type": "input", "wheelAdapters": []},
+        {"id": "selected", "type": "layer", "package": {"id": "demo.selected-adapter", "version": "0.1.0"}, "wheelAdapters": ["decode"]},
+        {"id": "loss", "type": "layer", "package": {"id": "demo.loss-with-empty-selection", "version": "0.1.0"}, "wheelAdapters": []},
+        {"id": "output", "type": "layer", "package": {"id": "demo.output-with-empty-selection", "version": "0.1.0"}, "wheelAdapters": []},
+    ], "edges": [
+        {"source": "input", "target": "selected", "targetHandle": "in-0"},
+        {"source": "input", "target": "loss", "targetHandle": "in-0"},
+        {"source": "input", "target": "output", "targetHandle": "in-0"},
+    ]}
+    model = compile_package_graph({"packages": [adapter, loss, output], "graph": graph})
+    assert tuple(model.adapter("decode")(torch.ones(2, 2)).shape) == (2, 2)
+
+
 @pytest.mark.parametrize(
     ("binding", "message"),
     [

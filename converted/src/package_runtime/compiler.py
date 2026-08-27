@@ -298,6 +298,11 @@ def _selected_adapter_descriptors(
     for node in raw_nodes:
         if not isinstance(node, Mapping) or "wheelAdapters" not in node:
             continue
+        raw_selections = node["wheelAdapters"]
+        if not isinstance(raw_selections, list):
+            raise PackageValidationError(f"wheelAdapters on node {node.get('id')} must be a list")
+        if not raw_selections:
+            continue
         node_id = node.get("id")
         if not isinstance(node_id, str) or not node_id:
             raise PackageValidationError("wheel adapter binding requires a node id")
@@ -307,9 +312,6 @@ def _selected_adapter_descriptors(
         package = _resolve_package(catalog, package_ref)
         if node.get("type") == "input" or package.kind in {"input", "loss", "output"}:
             raise PackageValidationError(f"wheel adapter binding on {node_id} must target a stereotype module")
-        raw_selections = node["wheelAdapters"]
-        if not isinstance(raw_selections, list):
-            raise PackageValidationError(f"wheelAdapters on node {node_id} must be a list")
         declarations = package.definition.get("wheelAdapters", [])
         if not isinstance(declarations, list):
             raise PackageValidationError(f"package {package.package_id} wheelAdapters must be a list")
