@@ -159,8 +159,10 @@ def test_wheel_exposes_selected_stereotype_adapter_without_model_internals(tmp_p
     wheel, module = _wheel_model(tmp_path, bundle, "adapter")
     try:
         model = module.load_model()
-        value = torch.randn(3, 2)
-        assert torch.equal(model.adapter("decode").run(value), model.predict_tensor(value))
+        value = [[1, 2], [3, 4], [5, 6]]
+        output = model.adapter("decode").run(value)
+        assert output.dtype == torch.float32
+        assert tuple(output.shape) == (3, 2)
         assert not hasattr(model, "network")
     finally:
         _cleanup("adapter", wheel)

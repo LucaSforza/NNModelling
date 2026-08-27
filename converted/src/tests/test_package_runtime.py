@@ -421,6 +421,82 @@ def build(parameters, context, services): return torch.nn.Linear(2, 2, bias=Fals
         model.adapter("sample")
 
 
+def test_wheel_adapter_coerces_numeric_sequences_and_enforces_shape_and_dtype() -> None:
+    source = """
+import torch
+def build(parameters, context, services): return torch.nn.Identity()
+"""
+    definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "decode",
+            "entrypoint": "module.forward",
+            "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "targetPolicy": "forbidden",
+        }],
+    }
+    package = _package("demo.adapter-shape", source, definition=definition)
+    graph = _graph("demo.adapter-shape")
+    graph["nodes"][1]["wheelAdapters"] = ["decode"]
+    model = compile_package_graph({"packages": [package], "graph": graph})
+
+    output = model.adapter("decode")([[1, 2], [3, 4]])
+    assert output.dtype == torch.float32
+    assert tuple(output.shape) == (2, 2)
+    with pytest.raises(TypeError, match="input dtype"):
+        model.adapter("decode")(torch.ones(2, 2, dtype=torch.float64))
+    with pytest.raises(ValueError, match="dimension"):
+        model.adapter("decode")(torch.ones(2, 3))
+    with pytest.raises(TypeError, match="numeric sequence"):
+        model.adapter("decode")([["not", "numeric"]])
+
+
+def test_wheel_adapter_enforces_output_shape_and_shared_symbol_bindings() -> None:
+    source = """
+import torch
+class Flatten(torch.nn.Module):
+    def forward(self, value): return value.flatten(1)
+def build(parameters, context, services): return Flatten()
+"""
+    definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "flatten",
+            "entrypoint": "module.forward",
+            "input": {"type": "tensor", "shape": ["B", 2, 2], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "targetPolicy": "forbidden",
+        }],
+    }
+    package = _package("demo.adapter-output", source, definition=definition)
+    graph = _graph("demo.adapter-output")
+    graph["nodes"][1]["wheelAdapters"] = ["flatten"]
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    assert tuple(model.adapter("flatten")(torch.ones(3, 2, 2)).shape) == (3, 4)
+
+    bad_output_definition = {**definition, "wheelAdapters": [{
+        **definition["wheelAdapters"][0],
+        "output": {"type": "tensor", "shape": ["B", 5], "dtype": "float32"},
+    }]}
+    bad_output_package = _package("demo.adapter-output", source, definition=bad_output_definition)
+    with pytest.raises(ValueError, match="expected 5"):
+        compile_package_graph({"packages": [bad_output_package], "graph": graph}).adapter("flatten")(torch.ones(3, 2, 2))
+
+    bad_dtype_source = source.replace("value.flatten(1)", "value.flatten(1).double()")
+    bad_dtype_package = _package("demo.adapter-output", bad_dtype_source, definition=definition)
+    with pytest.raises(TypeError, match="output dtype"):
+        compile_package_graph({"packages": [bad_dtype_package], "graph": graph}).adapter("flatten")(torch.ones(3, 2, 2))
+
+    bad_symbol_definition = {**definition, "wheelAdapters": [{
+        **definition["wheelAdapters"][0],
+        "input": {"type": "tensor", "shape": ["B", "B", 2], "dtype": "float32"},
+    }]}
+    bad_symbol_package = _package("demo.adapter-output", source, definition=bad_symbol_definition)
+    with pytest.raises(ValueError, match="inconsistent dimension"):
+        compile_package_graph({"packages": [bad_symbol_package], "graph": graph}).adapter("flatten")(torch.ones(3, 2, 2))
+
+
 @pytest.mark.parametrize(
     ("entrypoint", "message"),
     [("decode", "module.forward"), ("module.forward", "targetPolicy")],

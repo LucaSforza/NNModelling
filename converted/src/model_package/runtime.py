@@ -48,10 +48,10 @@ class _WheelAdapterHandle:
         self._device = device
 
     @torch.inference_mode()
-    def run(self, value: torch.Tensor) -> torch.Tensor:
-        if not isinstance(value, torch.Tensor):
-            raise TypeError("wheel adapter expects a torch.Tensor")
-        return self._compiled(value.to(self._device))
+    def run(self, value: object) -> torch.Tensor:
+        if isinstance(value, torch.Tensor):
+            value = value.to(self._device)
+        return self._compiled(value)
 
 
 def load_model(device: str | torch.device = "cpu") -> InferenceModel:

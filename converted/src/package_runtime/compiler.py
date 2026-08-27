@@ -354,6 +354,8 @@ def _validate_adapter_declaration(
     if not isinstance(output, Mapping) or output.get("type") != "tensor":
         raise PackageValidationError(f"wheel adapter {name!r} must declare a tensor output")
     _validate_tensor_schema(output, name, "output")
+    if not _schema_symbols(output).issubset(_schema_symbols(input_schema)):
+        raise PackageValidationError(f"wheel adapter {name!r} output shape uses an unbound symbol")
     randomness = raw.get("randomness", {"mode": "none"})
     if not isinstance(randomness, Mapping) or randomness.get("mode") not in {"none", "seeded"}:
         raise PackageValidationError(f"wheel adapter {name!r} has unsupported randomness policy")
@@ -385,6 +387,10 @@ def _validate_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> 
         raise PackageValidationError(f"wheel adapter {name!r} {role} tensor shape is invalid")
     if dtype not in {"float16", "bfloat16", "float32", "float64"}:
         raise PackageValidationError(f"wheel adapter {name!r} {role} tensor dtype is invalid")
+
+
+def _schema_symbols(schema: Mapping[str, Any]) -> set[str]:
+    return {dimension for dimension in schema["shape"] if isinstance(dimension, str)}
 
 
 def _compile_adapters(
@@ -623,13 +629,17 @@ def _outgoing(incoming: dict[str, list[dict[str, Any]]], source: str) -> list[di
 class _BoundModule:
     """Narrow callable capability passed to the fixed module.forward adapter."""
 
-    __slots__ = ("_forward",)
+    __slots__ = ("_module",)
 
     def __init__(self, module: torch.nn.Module) -> None:
-        self._forward = module.forward
+        self._module = module
 
     def __call__(self, value: torch.Tensor) -> torch.Tensor:
-        return self._forward(value)
+        devices = {parameter.device for parameter in self._module.parameters()}
+        devices.update(buffer.device for buffer in self._module.buffers())
+        if len(devices) == 1:
+            value = value.to(next(iter(devices)))
+        return self._module(value)
 
 
 class _CompiledAdapter:
@@ -639,13 +649,84 @@ class _CompiledAdapter:
         self.descriptor = descriptor
         self._module = module
 
-    def __call__(self, value: torch.Tensor) -> torch.Tensor:
-        if not isinstance(value, torch.Tensor):
-            raise TypeError("wheel adapter expects a torch.Tensor")
-        output = self._module(value)
+    def __call__(self, value: object) -> torch.Tensor:
+        input_schema = self.descriptor["input"]
+        tensor = _adapter_input_tensor(value, input_schema, self.descriptor["name"])
+        bindings: dict[str, int] = {}
+        _match_adapter_shape(tensor.shape, input_schema["shape"], bindings, "input")
+        output = self._module(tensor)
         if not isinstance(output, torch.Tensor):
             raise PackageValidationError("wheel adapter module.forward must return a torch.Tensor")
+        output_schema = self.descriptor["output"]
+        if output.dtype != _adapter_dtype(output_schema["dtype"]):
+            raise TypeError(
+                f"wheel adapter {self.descriptor['name']!r} output dtype {output.dtype} does not match "
+                f"{output_schema['dtype']}"
+            )
+        _match_adapter_shape(output.shape, output_schema["shape"], bindings, "output")
         return output
+
+
+_ADAPTER_DTYPES = {
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
+    "float64": torch.float64,
+}
+
+
+def _adapter_dtype(name: str) -> torch.dtype:
+    return _ADAPTER_DTYPES[name]
+
+
+def _adapter_input_tensor(value: object, schema: Mapping[str, Any], name: str) -> torch.Tensor:
+    expected = _adapter_dtype(schema["dtype"])
+    if isinstance(value, torch.Tensor):
+        tensor = value
+    else:
+        if not _numeric_sequence(value):
+            raise TypeError(f"wheel adapter {name!r} expects a tensor or nested numeric sequence")
+        try:
+            tensor = torch.as_tensor(value, dtype=expected)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise TypeError(f"wheel adapter {name!r} input is not a rectangular numeric sequence") from exc
+    if tensor.dtype != expected:
+        raise TypeError(
+            f"wheel adapter {name!r} input dtype {tensor.dtype} does not match {schema['dtype']}"
+        )
+    return tensor
+
+
+def _numeric_sequence(value: object) -> bool:
+    if isinstance(value, bool) or isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_numeric_sequence(item) for item in value)
+    return False
+
+
+def _match_adapter_shape(
+    actual: torch.Size,
+    declared: list[Any],
+    bindings: dict[str, int],
+    role: str,
+) -> None:
+    if len(actual) != len(declared):
+        raise ValueError(f"wheel adapter {role} rank {len(actual)} does not match declared rank {len(declared)}")
+    for index, (actual_dimension, declared_dimension) in enumerate(zip(actual, declared)):
+        if isinstance(declared_dimension, int):
+            if actual_dimension != declared_dimension:
+                raise ValueError(
+                    f"wheel adapter {role} dimension {index} is {actual_dimension}, expected {declared_dimension}"
+                )
+            continue
+        previous = bindings.setdefault(declared_dimension, actual_dimension)
+        if previous != actual_dimension:
+            raise ValueError(
+                f"wheel adapter {role} symbol {declared_dimension!r} has inconsistent dimension"
+            )
 
 
 def _version_matches(version: str, requirement: str) -> bool:
