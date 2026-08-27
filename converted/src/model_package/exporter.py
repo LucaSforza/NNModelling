@@ -13,10 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
-
-from model_package.adapters import adapter_spec_from_dataset_config
-
+from package_runtime.compiler import adapter_descriptors
 
 PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*(?:[A-Za-z0-9.+-]*)\Z")
@@ -28,24 +25,30 @@ def build_model_wheel(
     *,
     package_name: str,
     version: str = "0.1.0",
+    package: Mapping[str, Any] | None = None,
+    input_adapter: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Build a pure-Python inference wheel from one successful job artifact."""
+    """Build a pure-Python inference wheel from a package training artifact."""
 
     if not PACKAGE_NAME.fullmatch(package_name):
         raise ValueError("package_name must match nnm_<name> using letters, digits, and underscores")
     if not VERSION.fullmatch(version):
         raise ValueError("version is not a valid package version")
+    if not isinstance(package, Mapping) or not isinstance(package.get("graph"), Mapping):
+        raise ValueError("package must contain a graph mapping")
     artifact_path = Path(artifact_dir).resolve()
     weights_path = artifact_path / "weights.safetensors"
     if not weights_path.is_file():
         raise FileNotFoundError(f"model weights not found: {weights_path}")
     _validate_safe_weights(weights_path)
-    config = _load_resolved_config(artifact_path)
     module_name = package_name
     architecture = {
-        "schema_version": 1,
-        "net": _rewrite_targets(_mapping(config["net"]), module_name),
-        "input_adapter": adapter_spec_from_dataset_config(_mapping(config.get("dataset", {}))),
+        "schema_version": 3,
+        "format": "package-model/v1",
+        "package": _json_safe(package),
+        "prediction": {"program": "prediction"},
+        "input_adapter": dict(input_adapter or {"kind": "tensor", "version": 1}),
+        "adapters": adapter_descriptors(package),
     }
     dist_dir = artifact_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
@@ -77,6 +80,7 @@ def build_model_wheel(
         "wheel": str(Path("dist") / wheel_name),
         "sha256": _sha256(wheel_path),
         "input_adapter": architecture["input_adapter"],
+        "adapters": architecture["adapters"],
     }
     (artifact_path / "model-package.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return wheel_path
@@ -96,38 +100,25 @@ def _validate_safe_weights(weights_path: Path) -> None:
             raise ValueError("weights.safetensors contains no tensors")
 
 
-def _load_resolved_config(artifact_path: Path) -> dict[str, Any]:
-    json_path = artifact_path / "resolved_config.json"
-    if json_path.is_file():
-        value = json.loads(json_path.read_text(encoding="utf-8"))
-    else:
-        yaml_path = artifact_path / "resolved_config.yaml"
-        if not yaml_path.is_file():
-            raise FileNotFoundError("resolved_config.yaml is required to export a model package")
-        value = OmegaConf.to_container(OmegaConf.load(yaml_path), resolve=True)
-    return _mapping(value)
-
-
 def _copy_runtime(package_dir: Path) -> None:
     source_dir = Path(__file__).resolve().parent
     for filename in RUNTIME_FILES:
         shutil.copy2(source_dir / filename, package_dir / filename)
-    source_ops = source_dir.parent / "ops"
-    target_ops = package_dir / "_ops"
-    target_ops.mkdir()
-    for source in source_ops.glob("*.py"):
-        content = source.read_text(encoding="utf-8").replace("from ops.", "from .")
-        (target_ops / source.name).write_text(content, encoding="utf-8")
-
-
-def _rewrite_targets(value: Any, module_name: str) -> Any:
-    if isinstance(value, dict):
-        return {key: _rewrite_targets(item, module_name) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_rewrite_targets(item, module_name) for item in value]
-    if isinstance(value, str) and value.startswith("ops."):
-        return f"{module_name}._ops.{value.removeprefix('ops.')}"
-    return value
+    runtime_dir = package_dir / "package_runtime"
+    runtime_dir.mkdir()
+    shutil.copy2(source_dir.parent / "package_runtime" / "__init__.py", runtime_dir / "__init__.py")
+    compiler = (source_dir.parent / "package_runtime" / "compiler.py").read_text(encoding="utf-8")
+    compiler = compiler.replace(
+        "from stereotype_runtime import pytorch as stereotype_pytorch\nfrom stereotype_runtime.pytorch import BuildContext, StereotypeReference",
+        "from ..stereotype_runtime import pytorch as stereotype_pytorch\nfrom ..stereotype_runtime.pytorch import BuildContext, StereotypeReference",
+    )
+    (runtime_dir / "compiler.py").write_text(compiler, encoding="utf-8")
+    shutil.copy2(source_dir.parent / "package_runtime" / "loader.py", runtime_dir / "loader.py")
+    stereotype_dir = package_dir / "stereotype_runtime"
+    stereotype_dir.mkdir()
+    source_stereotype = source_dir.parent / "stereotype_runtime"
+    shutil.copy2(source_stereotype / "__init__.py", stereotype_dir / "__init__.py")
+    shutil.copy2(source_stereotype / "pytorch.py", stereotype_dir / "pytorch.py")
 
 
 def _metadata(package_name: str, version: str) -> str:
@@ -138,12 +129,7 @@ def _metadata(package_name: str, version: str) -> str:
         "Summary: Exported NNModelling inference model\n"
         "Requires-Python: >=3.12\n"
         "Requires-Dist: torch\n"
-        "Requires-Dist: hydra-core\n"
-        "Requires-Dist: omegaconf\n"
         "Requires-Dist: safetensors\n"
-        "Requires-Dist: torchvision\n"
-        "Requires-Dist: Pillow\n"
-        "Requires-Dist: transformers\n"
     )
 
 
@@ -167,7 +153,11 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ValueError("resolved model configuration must be a mapping")
-    return dict(value)
+def _json_safe(value: Any) -> Any:
+    """Copy a bundle while rejecting values that cannot be wheel metadata."""
+
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("package bundle must contain JSON-compatible values") from exc
+    return json.loads(encoded)
