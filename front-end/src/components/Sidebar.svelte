@@ -39,6 +39,7 @@ Licensed under the GNU General Public License v3 or later.
     width: 140,
     height: 60,
     params: {} as Record<string, unknown>,
+    wheelAdapters: [] as string[],
   });
   let packageSelection = $state<ActivePackageMetadata | null>(null);
   let sidebarWidth = $state(320);
@@ -50,6 +51,7 @@ Licensed under the GNU General Public License v3 or later.
   let isPackageNode = $derived(selectedPackageIdentity !== undefined);
   let packageDefinition = $derived(packageSelection?.definition ?? null);
   let packageParameters = $derived(packageDefinition ? Object.entries(packageDefinition.parameters) : []);
+  let packageAdapters = $derived(packageDefinition?.wheelAdapters ?? []);
   let packageOutput = $derived(selectedNode && isPackageNode
     ? packageOutputLabel(diagram.typeResult, selectedNode.id)
     : null);
@@ -96,6 +98,9 @@ Licensed under the GNU General Public License v3 or later.
       form.params = packageSelection
         ? initialPackageParameters(packageSelection.definition, (node.data.params as Record<string, unknown> | undefined))
         : structuredClone((node.data.params as Record<string, unknown> | undefined) ?? {});
+      form.wheelAdapters = Array.isArray(node.data.wheelAdapters)
+        ? node.data.wheelAdapters.filter((name: unknown): name is string => typeof name === "string")
+        : [];
       return;
     }
 
@@ -109,6 +114,7 @@ Licensed under the GNU General Public License v3 or later.
     form.width = 140;
     form.height = 60;
     form.params = {};
+    form.wheelAdapters = [];
   }
 
   function onPackageChange(metadata: ActivePackageMetadata | null) {
@@ -122,6 +128,7 @@ Licensed under the GNU General Public License v3 or later.
     form.width = metadata.definition.view.width;
     form.height = metadata.definition.view.height;
     form.params = initialPackageParameters(metadata.definition);
+    form.wheelAdapters = [];
   }
 
   function handleCreate() {
@@ -134,6 +141,7 @@ Licensed under the GNU General Public License v3 or later.
         width: form.width,
         height: form.height,
         params: form.params,
+        wheelAdapters: form.wheelAdapters,
         inputsCount: definition.kind === "join" ? 2 : undefined,
       });
       resetForm();
@@ -152,6 +160,7 @@ Licensed under the GNU General Public License v3 or later.
         width: form.width,
         height: form.height,
         params: form.params,
+        wheelAdapters: form.wheelAdapters,
         inputsCount: Number(selectedNode.data.inputsCount ?? 2),
       });
       // Keep the selected-node panel in sync even when Svelte has not yet
@@ -329,6 +338,27 @@ Licensed under the GNU General Public License v3 or later.
             </div>
           {/each}
         </div>
+        {#if packageAdapters.length > 0}
+          <div class="params-section">
+            <h4>Wheel adapters</h4>
+            {#each packageAdapters as adapter (adapter.name)}
+              <label class="adapter-option">
+                <input
+                  type="checkbox"
+                  checked={form.wheelAdapters.includes(adapter.name)}
+                  onchange={(event) => {
+                    const enabled = (event.target as HTMLInputElement).checked;
+                    form.wheelAdapters = enabled
+                      ? [...new Set([...form.wheelAdapters, adapter.name])]
+                      : form.wheelAdapters.filter((name) => name !== adapter.name);
+                    if (isEditing) handleManualUpdate();
+                  }}
+                />
+                {adapter.name}
+              </label>
+            {/each}
+          </div>
+        {/if}
       {/if}
 
       {#if !isEditing && packageSelection}
@@ -393,4 +423,5 @@ Licensed under the GNU General Public License v3 or later.
   .type-success { color: #166534; font-size: .82rem; }
   .type-error-msg { color: #b91c1c; font-size: .82rem; white-space: pre-wrap; }
   .nested-params { margin: 6px 0 0 10px; padding-left: 8px; border-left: 2px solid #d1d5db; display: flex; flex-direction: column; gap: 6px; }
+  .adapter-option { flex-direction: row; align-items: center; gap: 6px; }
 </style>
