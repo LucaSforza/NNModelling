@@ -1,16 +1,16 @@
 ---
 kind: decision
-status: proposed
+status: accepted
 updated: 2026-08-27
 ---
 
 # Package backend standard and least-privilege execution
 
 The owner has confirmed the package-only backend direction, mandatory
-Podman/Docker encapsulation for browser-supplied training code, and the
-least-privilege objective. The controller shape, defaults and migration order
-below are the proposed implementation of those constraints and remain open
-until explicitly confirmed.
+Podman/Docker encapsulation for browser-supplied training code, the controller
+boundary, the least-privilege policy and the migration away from NNTree backend
+compatibility. The execution split between prediction and objectives is refined
+by a separate accepted decision linked below.
 
 ## Decision
 
@@ -123,7 +123,8 @@ epochs, early stopping, accelerator, W&B mode and resource limits.
 The seed is applied before model construction, dataset splitting or loader
 creation. The objective receives targets through an explicit runtime contract;
 loss behavior is never selected by output-shape heuristics or a package-ID
-special case.
+special case. The accepted compilation and target-binding model is defined by
+the [prediction/objective program decision](prediction-objective-programs.md).
 
 Datasets are pre-installed/registered or mounted by the operator. The browser
 cannot provide an import path, host path or dataset Python source. Network and

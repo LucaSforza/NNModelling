@@ -1,7 +1,7 @@
 ---
 id: package-backend-standard
 kind: plan
-status: draft
+status: in_progress
 updated: 2026-08-27
 areas:
   - architecture
@@ -22,6 +22,10 @@ NNTree conversion pipeline.
 
 The proposed architecture is recorded in
 [`docs/knowledge/decisions/package-backend-standard.md`](../../../knowledge/decisions/package-backend-standard.md).
+Prediction and objective execution are refined by the accepted
+[`prediction-objective-programs`](../../../knowledge/decisions/prediction-objective-programs.md)
+decision and its focused
+[`implementation plan`](../prediction-objective-programs/plan.md).
 
 ## Scope
 
@@ -48,6 +52,10 @@ The implementation must remove, rather than preserve behind a format flag:
   package-native exporter imports them;
 - `package_worker._run_legacy()` and legacy package fixtures;
 - the `training_package` status/API/UI path and `nnm-trained-package/v1` ZIP.
+- MCP/browser `compile_nntree`, `execute_conversion` and `convert.py` pipeline;
+- frontend Hydra override fields and free-form override request data;
+- Hydra/OmegaConf dependencies and current NNTree/Hydra documentation after
+  package-native replacements pass their gates.
 
 The portable wheel remains a product contract, but its exporter/runtime must be
 rewritten to consume the package graph and package resources instead of Hydra
@@ -85,11 +93,13 @@ return typed 404/403/422 errors. Invalid submissions create no job directory.
 
 Move all package loading and graph compilation behind the worker boundary.
 The runtime must load exact package IDs/versions in a generated namespace and
-provide explicit build, subflow, join and objective/loss interfaces without
-package-ID switches. Implement a typed trainer that applies every accepted UI
-field, seeds before model/dataset/loader creation, records normalized config,
-supports deterministic CPU execution and rejects unsupported accelerator,
-W&B, dataset or optimizer options.
+compile shared modules into separate prediction and objective programs. Loss
+packages bind targets through their declarative stereotype contract; output
+shape/dtype dispatch, Python signature inspection and package-ID switches are
+forbidden. Implement a typed trainer that applies every accepted UI field,
+seeds before model/dataset/loader creation, records normalized config, supports
+deterministic CPU execution and rejects unsupported accelerator, W&B, dataset
+or optimizer options.
 
 ### P04 — ContainerController and executor adapters
 
@@ -124,6 +134,12 @@ CPU job through the browser/API. Verify a downloaded wheel in a clean
 environment without the repository checkout. Verify invalid source cannot
 touch the control plane, unknown references are typed errors, ownership cannot
 be overwritten, and unsupported capabilities fail before queueing.
+
+The focused
+[`prediction-objective-programs`](../prediction-objective-programs/plan.md)
+initiative owns the ordered frontend/MCP removal and final Python/dependency
+deletion tasks. Its package replacement gates must pass before P07 considers
+the legacy stack unreachable.
 
 ## Container least-privilege contract
 
@@ -161,6 +177,10 @@ Kubernetes concepts into the package, training or frontend contracts.
       rejected with an explicit capability error.
 - [ ] Every training field is applied, normalized or rejected; none is silently
       ignored.
+- [ ] The compiler exposes separate prediction and objective programs over one
+      shared parameter set, and the trainer contains no inferred-loss fallback.
+- [ ] A wheel invokes the explicit prediction output without a target even when
+      the training graph contains objectives.
 - [ ] A successful package job yields an installable, self-contained wheel and
       no public training ZIP.
 - [ ] The old NNTree conversion/executor modules are unreachable and removed

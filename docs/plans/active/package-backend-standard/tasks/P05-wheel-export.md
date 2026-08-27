@@ -20,12 +20,16 @@ package entrypoints needed for inference, include declarative adapters,
 resolved metadata and verified safetensors, and write a deterministic wheel
 with `load_model`, `predict_tensor` and `predict`.
 
+The wheel compiles or loads only the explicit prediction program. It must not
+invoke, require a target for, or guess its output from the objective region.
+
 The worker computes and commits the wheel digest before the job becomes
 `succeeded`. Remove `training_package`, `/training-package` and the raw ZIP
 consumer once the wheel gate passes.
 
-Acceptance: a downloaded wheel installs and infers in a clean environment with
-no repository checkout, Lightning, W&B or training dataset.
+Acceptance: a downloaded classifier and VAE wheel install and infer through
+their public API in a clean environment with no targets, repository checkout,
+Lightning, W&B or training dataset.
 
 Validation:
 

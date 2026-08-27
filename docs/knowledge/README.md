@@ -28,3 +28,4 @@ Current decisions:
 - [Package type-system cutover](decisions/stereotype-type-system-migration.md)
 - [Editable edge routing](decisions/editable-edge-routing.md)
 - [Package backend standard and least-privilege execution](decisions/package-backend-standard.md)
+- [Prediction and objective program separation](decisions/prediction-objective-programs.md)

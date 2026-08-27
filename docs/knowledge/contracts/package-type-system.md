@@ -93,11 +93,19 @@ the frontend cutover.
 
 ## Explicit boundary
 
-Package diagrams cannot yet compile, convert, train or run inference through
-the Python backend. The future backend will independently load trusted
-`pytorch.py` entrypoints, but its NNModelling design must be based on the
-backend architecture that exists when that work begins. Do not design that
-integration prematurely or use PyTorch as a type-inference fallback.
+The current branch contains an experimental package compiler, trainer and
+wheel path, but they do not yet satisfy the accepted backend execution
+contract. The backend loads `pytorch.py` independently inside its worker;
+Python remains outside frontend type inference and cannot be used as a Lua
+fallback.
+
+The accepted backend integration changes completion from one structural
+terminal to role-aware prediction and objective terminals. That future
+contract, including explicit `kind: "output"` and declarative loss bindings,
+is recorded in the
+[prediction/objective program decision](../decisions/prediction-objective-programs.md).
+Until its implementation lands, the single-terminal rule above describes the
+current frontend rather than the accepted training boundary.
 
 Legacy `TypeEngine`, `StereotypeCore`, repository `Stereotypes/`, wrapped
 parameters and legacy editable diagrams are removed and have no compatibility
