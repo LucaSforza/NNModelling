@@ -1,7 +1,8 @@
 import type { Edge, Node } from "@xyflow/svelte"
-import type { PackageExportInfo } from "../type-system/packages/types"
+import type { PackageExportInfo, WheelAdapterValueSchema } from "../type-system/packages/types"
 import type { PackageIdentity } from "../core/types"
 import { parseDefinition } from "../type-system/packages/validation"
+import type { GraphInferenceResult } from "../type-system/graph/types"
 
 export type PackageBundleGraph = {
   readonly nodes: readonly {
@@ -9,7 +10,7 @@ export type PackageBundleGraph = {
     readonly type: string
     readonly package: PackageIdentity
     readonly params: Readonly<Record<string, unknown>>
-    readonly wheelAdapters: readonly string[]
+    readonly wheelAdapters: readonly PackageBundleAdapterBinding[]
     readonly parentId: string | null
   }[]
   readonly edges: readonly {
@@ -19,6 +20,12 @@ export type PackageBundleGraph = {
     readonly sourceHandle: string | null
     readonly targetHandle: string | null
   }[]
+}
+
+export type PackageBundleAdapterBinding = {
+  readonly name: string
+  readonly input: WheelAdapterValueSchema
+  readonly output: WheelAdapterValueSchema
 }
 
 export type PackageBundleFile = {
@@ -46,14 +53,18 @@ export type PackageBundleV1 = {
 }
 
 type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[] } }
+type SemanticGraph = Omit<PackageBundleGraph, "nodes"> & {
+  readonly nodes: readonly (Omit<PackageBundleGraph["nodes"][number], "wheelAdapters"> & { readonly wheelAdapters: readonly string[] })[]
+}
 
 /** Build the content-addressed, semantic package transport without running Python. */
 export async function buildPackageBundle(
   nodes: readonly Node[],
   edges: readonly Edge[],
   exports: ReadonlyMap<string, PackageExportInfo>,
+  inference?: GraphInferenceResult | null,
 ): Promise<PackageBundleV1> {
-  const graph = semanticGraph(nodes, edges)
+  const graphDraft = semanticGraph(nodes, edges)
   const selected = new Map<string, PackageExportInfo>()
   const visit = (identity: PackageIdentity): void => {
     const current = selected.get(identity.id)
@@ -80,8 +91,8 @@ export async function buildPackageBundle(
       visit({ id: dependency, version: dependencyInfo.manifest.version, name: dependencyInfo.manifest.id })
     }
   }
-  for (const node of graph.nodes) visit(node.package)
-  validateWheelAdapterBindings(graph, selected)
+  for (const node of graphDraft.nodes) visit(node.package)
+  const graph = materializeGraph(graphDraft, selected, inference)
 
   const packages = await Promise.all([...selected.values()]
     .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
@@ -116,31 +127,89 @@ export async function buildPackageBundle(
   return { ...payload, digest: await sha256(canonicalJson(payload)) }
 }
 
-function validateWheelAdapterBindings(
-  graph: PackageBundleGraph,
+function materializeGraph(
+  graph: SemanticGraph,
   selected: ReadonlyMap<string, PackageExportInfo>,
-): void {
-  const definitions = new Map<string, ReadonlySet<string>>()
+  inference?: GraphInferenceResult | null,
+): PackageBundleGraph {
+  const definitions = new Map<string, ReadonlyMap<string, WheelAdapterValueDefinition>>()
   for (const [id, packageInfo] of selected) {
     const definition = parseDefinition(JSON.parse(packageInfo.definition))
-    definitions.set(id, new Set((definition.wheelAdapters ?? []).map((adapter) => adapter.name)))
+    definitions.set(id, new Map((definition.wheelAdapters ?? []).map((adapter) => [adapter.name, adapter])))
   }
-  for (const node of graph.nodes) {
-    const available = definitions.get(node.package.id) ?? new Set<string>()
-    for (const adapter of node.wheelAdapters) {
-      if (!adapter.trim()) throw new Error(`graph node '${node.id}' has an empty wheel adapter binding`)
-      if (!available.has(adapter)) {
-        throw new Error(`graph node '${node.id}' selects undeclared wheel adapter '${adapter}'`)
-      }
-    }
+  const nodes = graph.nodes.map((node) => ({
+    ...node,
+    wheelAdapters: node.wheelAdapters.map((name) => {
+      if (!name.trim()) throw new Error(`graph node '${node.id}' has an empty wheel adapter binding`)
+      const declaration = definitions.get(node.package.id)?.get(name)
+      if (!declaration) throw new Error(`graph node '${node.id}' selects undeclared wheel adapter '${name}'`)
+      return bindAdapter(node, name, declaration, graph.edges, inference)
+    }),
+  }))
+  return { ...graph, nodes }
+}
+
+type WheelAdapterValueDefinition = {
+  readonly name: string
+  readonly input: WheelAdapterValueSchema
+  readonly output: WheelAdapterValueSchema
+}
+
+function bindAdapter(
+  node: SemanticGraph["nodes"][number],
+  name: string,
+  declaration: WheelAdapterValueDefinition,
+  edges: SemanticGraph["edges"],
+  inference?: GraphInferenceResult | null,
+): PackageBundleAdapterBinding {
+  const input = declaration.input.type === "tensor"
+    ? inferredInput(node.id, edges, inference)
+    : declaration.input
+  const output = declaration.output.type === "tensor"
+    ? inferredOutput(node.id, inference)
+    : declaration.output
+  return {
+    name,
+    input: compatibleSchema(declaration.input, input, "input", name, node.id),
+    output: compatibleSchema(declaration.output, output, "output", name, node.id),
   }
+}
+
+function inferredInput(nodeId: string, edges: SemanticGraph["edges"], inference?: GraphInferenceResult | null): WheelAdapterValueSchema {
+  if (!inference) throw new Error(`graph node '${nodeId}' wheel adapter input cannot be inferred`)
+  const incoming = edges.filter((edge) => edge.target === nodeId)
+  if (incoming.length !== 1) throw new Error(`graph node '${nodeId}' wheel adapter input requires exactly one inferred source`)
+  const result = inference.nodes.get(incoming[0]!.source)
+  if (!result || result.status !== "success") throw new Error(`graph node '${nodeId}' wheel adapter input inference is unavailable`)
+  return { type: "tensor", shape: result.output.shape, dtype: result.output.dtype }
+}
+
+function inferredOutput(nodeId: string, inference?: GraphInferenceResult | null): WheelAdapterValueSchema {
+  const result = inference?.nodes.get(nodeId)
+  if (!result || result.status !== "success") throw new Error(`graph node '${nodeId}' wheel adapter output inference is unavailable`)
+  return { type: "tensor", shape: result.output.shape, dtype: result.output.dtype }
+}
+
+function compatibleSchema(
+  declaration: WheelAdapterValueSchema,
+  actual: WheelAdapterValueSchema,
+  role: "input" | "output",
+  adapter: string,
+  nodeId: string,
+): WheelAdapterValueSchema {
+  if (declaration.type !== actual.type) throw new Error(`graph node '${nodeId}' wheel adapter '${adapter}' ${role} type is incompatible`)
+  if (declaration.type !== "tensor" || actual.type !== "tensor") return declaration
+  if (declaration.dtype !== actual.dtype || declaration.shape.length !== actual.shape.length || declaration.shape.some((dimension, index) => typeof dimension === "number" && dimension !== actual.shape[index])) {
+    throw new Error(`graph node '${nodeId}' wheel adapter '${adapter}' ${role} schema is incompatible`)
+  }
+  return actual
 }
 
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value))
 }
 
-function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): PackageBundleGraph {
+function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): SemanticGraph {
   const seen = new Set<string>()
   const graphNodes = nodes.map((candidate) => {
     const node = candidate as PackageNode

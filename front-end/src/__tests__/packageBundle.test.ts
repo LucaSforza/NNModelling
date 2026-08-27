@@ -5,6 +5,16 @@ import type { Edge, Node } from "@xyflow/svelte"
 import { bundledCorePackages } from "../type-system/bundled/catalog"
 import { parseDefinition } from "../type-system/packages/validation"
 
+const adapterInference = {
+  nodes: new Map([
+    ["input", { status: "success" as const, output: { shape: ["B", 4], dtype: "float32" as const } }],
+    ["layer", { status: "success" as const, output: { shape: ["B", 8], dtype: "float32" as const } }],
+  ]),
+  order: ["input", "layer"],
+  terminals: ["layer"],
+  complete: true,
+}
+
 const input: PackageExportInfo = {
   manifest: {
     schemaVersion: 1, id: "core.input", version: "0.1.0", dependencies: {},
@@ -101,14 +111,16 @@ describe("package bundle v1", () => {
       { id: "edge", source: "input", target: "layer", sourceHandle: "out", targetHandle: "in-0" },
     ]
     const exports = new Map([["core.input", input], ["test.layer", layer]])
-    const first = await buildPackageBundle(nodes, edges, exports)
-    const second = await buildPackageBundle([...nodes].reverse(), [...edges].reverse(), exports)
+    const first = await buildPackageBundle(nodes, edges, exports, adapterInference)
+    const second = await buildPackageBundle([...nodes].reverse(), [...edges].reverse(), exports, adapterInference)
 
     expect(canonicalJson(first)).toBe(canonicalJson(second))
     expect(first.digest).toMatch(/^[0-9a-f]{64}$/)
     expect(first.graph.nodes[0]?.id).toBe("input")
     expect(first.graph.edges[0]).toMatchObject({ targetHandle: "in-0", sourceHandle: "out" })
-    expect(first.graph.nodes.find((item) => item.id === "layer")?.wheelAdapters).toEqual(["decode"])
+    expect(first.graph.nodes.find((item) => item.id === "layer")?.wheelAdapters).toEqual([{
+      name: "decode", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" },
+    }])
     expect(first.packages.map((item) => item.id)).toEqual(["core.input", "test.layer"])
     expect(Object.keys(first.packages[1]?.files ?? {})).toEqual(["manifest.json", "pytorch.py", "stereotype.json"])
   })
@@ -127,6 +139,25 @@ describe("package bundle v1", () => {
     }
     await expect(buildPackageBundle([bound], [], new Map([["core.input", input], ["test.layer", layer]]))).rejects.toThrow(
       "graph node 'layer' selects undeclared wheel adapter 'sample'",
+    )
+  })
+
+  it("rejects a selected tensor adapter when instance inference is unavailable", async () => {
+    const bound = { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, wheelAdapters: ["decode"] } }
+    await expect(buildPackageBundle([bound], [], new Map([["core.input", input], ["test.layer", layer]]))).rejects.toThrow(
+      "wheel adapter input cannot be inferred",
+    )
+  })
+
+  it("rejects a selected tensor adapter incompatible with the inferred instance output", async () => {
+    const incompatible = { ...adapterInference, nodes: new Map([
+      ["input", { status: "success" as const, output: { shape: ["B", 4], dtype: "float32" as const } }],
+      ["layer", { status: "success" as const, output: { shape: ["B", 7], dtype: "float32" as const } }],
+    ]) }
+    const bound = { ...node("input", { id: "core.input", version: "0.1.0", name: "Input" }), data: { package: { id: "core.input", version: "0.1.0", name: "Input" }, wheelAdapters: [] } }
+    const layerNode = { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, wheelAdapters: ["decode"] } }
+    await expect(buildPackageBundle([bound, layerNode], [{ id: "edge", source: "input", target: "layer", sourceHandle: "out", targetHandle: "in" }], new Map([["core.input", input], ["test.layer", layer]]), incompatible)).rejects.toThrow(
+      "wheel adapter 'decode' output schema is incompatible",
     )
   })
 })
