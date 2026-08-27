@@ -18,11 +18,23 @@ export type GraphInferenceResult = {
   readonly order: readonly string[]
   readonly terminals: readonly string[]
   readonly complete: boolean
+  /** Explicit prediction/objective terminals for training-capable graphs. */
+  readonly predictionTerminals?: readonly string[]
+  readonly objectiveTerminals?: readonly string[]
+  readonly trainingComplete?: boolean
+  readonly trainingDiagnostics?: readonly string[]
 }
 
 export type PackageNodeData = {
   readonly package?: PackageIdentity
   readonly params?: Readonly<Record<string, unknown>>
+  /** Explicit names of wheel adapters selected for this concrete node. */
+  readonly wheelAdapters?: readonly string[]
+}
+
+export function selectedWheelAdapters(node: Node): readonly string[] {
+  const adapters = (node.data as PackageNodeData | undefined)?.wheelAdapters
+  return Array.isArray(adapters) && adapters.every((name) => typeof name === "string") ? adapters : []
 }
 
 export function packageIdentity(node: Node): PackageIdentity | undefined {

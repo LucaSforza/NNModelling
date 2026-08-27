@@ -1,7 +1,40 @@
 import type { DType, Dimension, TensorType } from "../tensor-type"
 import type { TypeContext, TypeResult } from "../type-inference"
 
-export type PackageKind = "input" | "layer" | "loss" | "join" | "subflow"
+export type PackageKind = "input" | "layer" | "loss" | "join" | "subflow" | "output"
+
+export type ObjectiveExternalInput = {
+  readonly name: string
+  readonly source: "batch.targets"
+  /** Optional declarative conversion from the dataset target contract. */
+  readonly transform?: "flatten_batch"
+}
+
+export type ObjectiveDefinition = {
+  readonly externalInputs: readonly ObjectiveExternalInput[]
+}
+
+/** A value crossing the generic installed-wheel adapter boundary. */
+export type WheelAdapterValueSchema =
+  | { readonly type: "tensor"; readonly shape: readonly Dimension[]; readonly dtype: DType }
+  | { readonly type: "number" }
+  | { readonly type: "integer" }
+  | { readonly type: "boolean" }
+  | { readonly type: "string" }
+
+export type WheelAdapterRandomness =
+  | { readonly mode: "none" }
+  | { readonly mode: "seeded"; readonly seedInput: string }
+
+export type WheelAdapterDefinition = {
+  readonly name: string
+  /** Stable allowlisted protocol identifier, not an arbitrary Python symbol. */
+  readonly entrypoint: string
+  readonly input: WheelAdapterValueSchema
+  readonly output: WheelAdapterValueSchema
+  readonly targetPolicy: "forbidden"
+  readonly randomness?: WheelAdapterRandomness
+}
 
 export type StereotypeReference = {
   readonly id: string
@@ -23,6 +56,8 @@ export type Definition = {
   readonly name: string
   readonly description?: string
   readonly kind: PackageKind
+  readonly objective?: ObjectiveDefinition
+  readonly wheelAdapters?: readonly WheelAdapterDefinition[]
   readonly view: { readonly color: string; readonly width: number; readonly height: number }
   readonly parameters: Readonly<Record<string, ParameterDefinition>>
 }

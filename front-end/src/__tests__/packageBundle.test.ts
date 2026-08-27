@@ -3,6 +3,7 @@ import { buildPackageBundle, canonicalJson } from "../training/package-bundle"
 import type { PackageExportInfo } from "../type-system/packages/types"
 import type { Edge, Node } from "@xyflow/svelte"
 import { bundledCorePackages } from "../type-system/bundled/catalog"
+import { parseDefinition } from "../type-system/packages/validation"
 
 const input: PackageExportInfo = {
   manifest: {
@@ -20,7 +21,11 @@ const layer: PackageExportInfo = {
       pytorch: { language: "python", file: "pytorch.py" },
     },
   },
-  definition: JSON.stringify({ name: "Layer", kind: "layer", view: { color: "#000000", width: 80, height: 40 }, parameters: {} }),
+  definition: JSON.stringify({
+    name: "Layer", kind: "layer",
+    wheelAdapters: [{ name: "decode", entrypoint: "module.forward", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" }, targetPolicy: "forbidden", randomness: { mode: "none" } }],
+    view: { color: "#000000", width: 80, height: 40 }, parameters: {},
+  }),
   pytorch: "from stereotype_runtime.pytorch import BuildContext\r\n",
 }
 
@@ -29,6 +34,50 @@ function node(id: string, identity: { id: string; version: string; name: string 
 }
 
 describe("package bundle v1", () => {
+  it("validates typed stereotype-declared wheel adapters", () => {
+    expect(parseDefinition(JSON.parse(layer.definition)).wheelAdapters).toEqual([{
+      name: "decode", entrypoint: "module.forward", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" }, targetPolicy: "forbidden", randomness: { mode: "none" },
+    }])
+    for (const adapter of [
+      { name: "Decode", entrypoint: "decode", input: { type: "number" }, output: { type: "number" }, targetPolicy: "forbidden" },
+      { name: "decode", entrypoint: "decode", input: { type: "number" }, output: { type: "number" }, targetPolicy: "allowed" },
+      { name: "decode", entrypoint: "decode", input: { type: "number" }, output: { type: "number" }, targetPolicy: "forbidden", randomness: { mode: "seeded" } },
+    ]) {
+      expect(() => parseDefinition({ name: "Adapter", kind: "layer", wheelAdapters: [adapter], view: { color: "#000000", width: 80, height: 40 }, parameters: {} })).toThrow()
+    }
+  })
+
+  it("parses explicit objective bindings and output roles", () => {
+    expect(parseDefinition({
+      name: "Cross Entropy", kind: "loss",
+      objective: { externalInputs: [{ name: "target", source: "batch.targets" }] },
+      view: { color: "#000000", width: 80, height: 40 }, parameters: {},
+    }).objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets" }] })
+    expect(parseDefinition({
+      name: "Output", kind: "output",
+      view: { color: "#000000", width: 80, height: 40 }, parameters: {},
+    }).kind).toBe("output")
+  })
+
+  it("preserves a declared objective target adaptation", () => {
+    expect(parseDefinition({
+      name: "MSE", kind: "loss",
+      objective: { externalInputs: [{ name: "target", source: "batch.targets", transform: "flatten_batch" }] },
+      view: { color: "#b85c5c", width: 180, height: 100 }, parameters: {},
+    }).objective).toEqual({
+      externalInputs: [{ name: "target", source: "batch.targets", transform: "flatten_batch" }],
+    })
+  })
+
+  it.each([
+    [{ name: "Loss", kind: "loss", objective: { externalInputs: [{ name: "target", source: "batch.targets" }, { name: "target", source: "batch.targets" }] } }],
+    [{ name: "Loss", kind: "loss", objective: { externalInputs: [{ name: "target", source: "batch.inputs" }] } }],
+    [{ name: "Loss", kind: "loss" }],
+    [{ name: "Layer", kind: "layer", objective: { externalInputs: [] } }],
+  ])("rejects invalid objective declarations", (partial) => {
+    expect(() => parseDefinition({ ...partial, view: { color: "#000000", width: 80, height: 40 }, parameters: {} })).toThrow()
+  })
+
   it("keeps PyTorch modules in the browser resource seam", () => {
     const linear = bundledCorePackages().find((selection) => {
       const manifest = JSON.parse(String((selection.resources as Record<string, string>)["manifest.json"])) as { id: string }
@@ -37,8 +86,17 @@ describe("package bundle v1", () => {
     expect((linear?.resources as Record<string, string>)["pytorch.py"]).toEqual(expect.any(String))
   })
 
+  it("rejects a graph binding that its stereotype did not declare", async () => {
+    await expect(buildPackageBundle([
+      { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, params: {}, wheelAdapters: ["sample"] } },
+    ], [], new Map([["core.input", input], ["test.layer", layer]]))).rejects.toThrow("selects undeclared wheel adapter 'sample'")
+  })
+
   it("is deterministic and preserves semantic graph ordering and closure", async () => {
-    const nodes = [node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), node("input", { id: "core.input", version: "0.1.0", name: "Input" })]
+    const nodes = [
+      { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, params: { width: 4, labels: ["x", "y"] }, wheelAdapters: ["decode"] } },
+      node("input", { id: "core.input", version: "0.1.0", name: "Input" }),
+    ]
     const edges: Edge[] = [
       { id: "edge", source: "input", target: "layer", sourceHandle: "out", targetHandle: "in-0" },
     ]
@@ -50,6 +108,7 @@ describe("package bundle v1", () => {
     expect(first.digest).toMatch(/^[0-9a-f]{64}$/)
     expect(first.graph.nodes[0]?.id).toBe("input")
     expect(first.graph.edges[0]).toMatchObject({ targetHandle: "in-0", sourceHandle: "out" })
+    expect(first.graph.nodes.find((item) => item.id === "layer")?.wheelAdapters).toEqual(["decode"])
     expect(first.packages.map((item) => item.id)).toEqual(["core.input", "test.layer"])
     expect(Object.keys(first.packages[1]?.files ?? {})).toEqual(["manifest.json", "pytorch.py", "stereotype.json"])
   })
@@ -59,5 +118,15 @@ describe("package bundle v1", () => {
     await expect(buildPackageBundle(
       [node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" })], [], broken,
     )).rejects.toThrow("has no PyTorch entrypoint")
+  })
+
+  it("rejects bindings that the concrete package does not declare", async () => {
+    const bound = {
+      ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }),
+      data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, wheelAdapters: ["sample"] },
+    }
+    await expect(buildPackageBundle([bound], [], new Map([["core.input", input], ["test.layer", layer]]))).rejects.toThrow(
+      "graph node 'layer' selects undeclared wheel adapter 'sample'",
+    )
   })
 })

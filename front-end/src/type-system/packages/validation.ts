@@ -1,10 +1,10 @@
 import { isVersion } from "./semver"
 import { isDType, type DType, type Dimension } from "../tensor-type"
-import type { Definition, Manifest, PackageKind, ParameterDefinition } from "./types"
+import type { Definition, Manifest, PackageKind, ParameterDefinition, WheelAdapterDefinition, WheelAdapterValueSchema } from "./types"
 
 const ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const COLOR = /^#[0-9a-fA-F]{6}$/
-const KINDS = new Set<PackageKind>(["input", "layer", "loss", "join", "subflow"])
+const KINDS = new Set<PackageKind>(["input", "layer", "loss", "join", "subflow", "output"])
 
 export function parseManifest(value: unknown): Manifest {
   const object = record(value, "manifest")
@@ -28,7 +28,7 @@ export function parseManifest(value: unknown): Manifest {
 export function parseDefinition(value: unknown): Definition {
   const object = record(value, "stereotype definition")
   for (const forbidden of ["id", "version", "dependencies", "entrypoints", "pytorchClass"]) if (forbidden in object) fail(`definition must not contain ${forbidden}`)
-  keys(object, ["name", "description", "kind", "view", "parameters"], "stereotype definition")
+  keys(object, ["name", "description", "kind", "objective", "wheelAdapters", "view", "parameters"], "stereotype definition")
   const name = string(object.name, "definition name")
   if (!name.trim()) fail("definition name must not be empty")
   const kind = string(object.kind, "definition kind") as PackageKind
@@ -42,7 +42,68 @@ export function parseDefinition(value: unknown): Definition {
     if (!parameterName) fail("parameter names must not be empty")
     parameters[parameterName] = parameter(parameterDefinition)
   }
-  return { name, description: optionalString(object.description, "definition description"), kind, view, parameters }
+  if (kind === "loss" && object.objective === undefined) fail("loss definitions must declare objective externalInputs")
+  const objective = object.objective === undefined ? undefined : parseObjective(object.objective, kind)
+  const wheelAdapters = object.wheelAdapters === undefined ? undefined : parseWheelAdapters(object.wheelAdapters)
+  return { name, description: optionalString(object.description, "definition description"), kind, ...(objective ? { objective } : {}), ...(wheelAdapters ? { wheelAdapters } : {}), view, parameters }
+}
+
+function parseWheelAdapters(value: unknown): readonly WheelAdapterDefinition[] {
+  if (!Array.isArray(value)) fail("wheelAdapters must be an array")
+  const names = new Set<string>()
+  return value.map((entry) => {
+    const object = record(entry, "wheel adapter")
+    keys(object, ["name", "entrypoint", "input", "output", "targetPolicy", "randomness"], "wheel adapter")
+    const name = string(object.name, "wheel adapter name")
+    if (!/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/.test(name) || names.has(name)) fail("wheel adapter name is invalid or duplicated")
+    const entrypoint = string(object.entrypoint, "wheel adapter entrypoint")
+    if (entrypoint !== "module.forward") fail("wheel adapter entrypoint must be module.forward")
+    if (object.targetPolicy !== "forbidden") fail("wheel adapter targetPolicy must be forbidden")
+    names.add(name)
+    const randomness = object.randomness === undefined ? undefined : parseAdapterRandomness(object.randomness)
+    return { name, entrypoint, input: parseAdapterSchema(object.input), output: parseAdapterSchema(object.output), targetPolicy: "forbidden" as const, ...(randomness ? { randomness } : {}) }
+  })
+}
+
+function parseAdapterSchema(value: unknown): WheelAdapterValueSchema {
+  const object = record(value, "wheel adapter value schema")
+  keys(object, ["type", "shape", "dtype"], "wheel adapter value schema")
+  const type = string(object.type, "wheel adapter value type")
+  if (type === "tensor") {
+    if (!Array.isArray(object.shape) || !object.shape.every(isDimension)) fail("wheel adapter tensor shape is invalid")
+    return { type, shape: object.shape as readonly Dimension[], dtype: dtype(object.dtype, "wheel adapter tensor dtype") }
+  }
+  if (type === "number" || type === "integer" || type === "boolean" || type === "string") return { type }
+  fail("wheel adapter value type is invalid")
+}
+
+function parseAdapterRandomness(value: unknown): { readonly mode: "none" } | { readonly mode: "seeded"; readonly seedInput: string } {
+  const object = record(value, "wheel adapter randomness")
+  keys(object, ["mode", "seedInput"], "wheel adapter randomness")
+  if (object.mode === "none") return { mode: "none" }
+  if (object.mode === "seeded" && typeof object.seedInput === "string" && object.seedInput.trim()) return { mode: "seeded", seedInput: object.seedInput }
+  fail("wheel adapter randomness is invalid")
+}
+
+function parseObjective(value: unknown, kind: PackageKind): { readonly externalInputs: readonly { readonly name: string; readonly source: "batch.targets"; readonly transform?: "flatten_batch" }[] } {
+  if (kind !== "loss") fail("only loss packages may declare an objective")
+  const object = record(value, "objective")
+  keys(object, ["externalInputs"], "objective")
+  if (!Array.isArray(object.externalInputs)) fail("objective externalInputs must be an array")
+  const names = new Set<string>()
+  const sources = new Set<string>()
+  const externalInputs = object.externalInputs.map((entry) => {
+    const item = record(entry, "objective external input")
+    keys(item, ["name", "source", "transform"], "objective external input")
+    const name = string(item.name, "objective external input name")
+    if (!name.trim() || names.has(name)) fail("objective external input names must be unique")
+    if (item.source !== "batch.targets" || sources.has(String(item.source))) fail("objective external input source is invalid or duplicated")
+    if (item.transform !== undefined && item.transform !== "flatten_batch") fail("objective external input transform is invalid")
+    names.add(name)
+    sources.add(String(item.source))
+    return { name, source: "batch.targets" as const, ...(item.transform === undefined ? {} : { transform: item.transform as "flatten_batch" }) }
+  })
+  return { externalInputs }
 }
 
 export function resolveParameters(definitions: Definition["parameters"], supplied: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {

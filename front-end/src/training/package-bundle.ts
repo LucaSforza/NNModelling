@@ -1,6 +1,7 @@
 import type { Edge, Node } from "@xyflow/svelte"
 import type { PackageExportInfo } from "../type-system/packages/types"
 import type { PackageIdentity } from "../core/types"
+import { parseDefinition } from "../type-system/packages/validation"
 
 export type PackageBundleGraph = {
   readonly nodes: readonly {
@@ -8,6 +9,7 @@ export type PackageBundleGraph = {
     readonly type: string
     readonly package: PackageIdentity
     readonly params: Readonly<Record<string, unknown>>
+    readonly wheelAdapters: readonly string[]
     readonly parentId: string | null
   }[]
   readonly edges: readonly {
@@ -43,7 +45,7 @@ export type PackageBundleV1 = {
   readonly digest: string
 }
 
-type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown> } }
+type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[] } }
 
 /** Build the content-addressed, semantic package transport without running Python. */
 export async function buildPackageBundle(
@@ -79,6 +81,7 @@ export async function buildPackageBundle(
     }
   }
   for (const node of graph.nodes) visit(node.package)
+  validateWheelAdapterBindings(graph, selected)
 
   const packages = await Promise.all([...selected.values()]
     .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
@@ -113,6 +116,26 @@ export async function buildPackageBundle(
   return { ...payload, digest: await sha256(canonicalJson(payload)) }
 }
 
+function validateWheelAdapterBindings(
+  graph: PackageBundleGraph,
+  selected: ReadonlyMap<string, PackageExportInfo>,
+): void {
+  const definitions = new Map<string, ReadonlySet<string>>()
+  for (const [id, packageInfo] of selected) {
+    const definition = parseDefinition(JSON.parse(packageInfo.definition))
+    definitions.set(id, new Set((definition.wheelAdapters ?? []).map((adapter) => adapter.name)))
+  }
+  for (const node of graph.nodes) {
+    const available = definitions.get(node.package.id) ?? new Set<string>()
+    for (const adapter of node.wheelAdapters) {
+      if (!adapter.trim()) throw new Error(`graph node '${node.id}' has an empty wheel adapter binding`)
+      if (!available.has(adapter)) {
+        throw new Error(`graph node '${node.id}' selects undeclared wheel adapter '${adapter}'`)
+      }
+    }
+  }
+}
+
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value))
 }
@@ -133,6 +156,7 @@ function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): PackageB
       type: node.type,
       package: { id: identity.id, version: identity.version, name: identity.name },
       params: (node.data?.params ?? {}) as Readonly<Record<string, unknown>>,
+      wheelAdapters: [...(node.data?.wheelAdapters ?? [])].sort(),
       parentId: node.parentId ?? null,
     }
   }).sort((left, right) => left.id.localeCompare(right.id))
