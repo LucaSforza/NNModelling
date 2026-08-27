@@ -13,11 +13,16 @@ and selected explicitly on graph nodes. They extend the generic installed-wheel
 facade without exporting arbitrary functions from `pytorch.py` or exposing the
 compiled graph.
 
-The declaration is `wheelAdapters` in `stereotype.json`. A v1 declaration has a
-stable name, the fixed entrypoint `module.forward`, tensor input and output
-schemas, and `targetPolicy: "forbidden"`. The node stores the selected adapter
-names. A package with no selected adapters retains the prediction-only wheel
-surface.
+The stereotype template is `wheelAdapters` in `stereotype.json`. A v1 template
+has a stable name, the fixed entrypoint `module.forward`, symbolic tensor input
+and output schemas, and `targetPolicy: "forbidden"`. The final graph binding is
+an object `{name, input, output}`: its tensor schemas are materialized from the
+concrete DiagramCore inference and validated against the symbolic template.
+The editor may hold selected names before bundling, but the serialized package
+binding must be an object; raw string selections are rejected by the compiler.
+A package with no selected adapters retains the prediction-only wheel surface.
+
+Stereotype template in `stereotype.json`:
 
 ```json
 {
@@ -25,11 +30,21 @@ surface.
     {
       "name": "decode",
       "entrypoint": "module.forward",
-      "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
-      "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+      "input": {"type": "tensor", "shape": ["B", "N"], "dtype": "float32"},
+      "output": {"type": "tensor", "shape": ["B", "M"], "dtype": "float32"},
       "targetPolicy": "forbidden"
     }
   ]
+}
+```
+
+Materialized graph binding after DiagramCore inference:
+
+```json
+{
+  "name": "decode",
+  "input": {"type": "tensor", "shape": [32, 4], "dtype": "float32"},
+  "output": {"type": "tensor", "shape": [32, 8], "dtype": "float32"}
 }
 ```
 
@@ -47,11 +62,14 @@ execute the objective region, or select a dataset adapter.
 
 ## Binding and state
 
-The frontend validates declarations and serializes selected names into the
-content-addressed package bundle. The compiler resolves each name against the
-referenced package definition, rejects duplicate public names and invalid
-targets, and binds it to the selected compiled node. The adapter wraps that
-node's existing module; it does not build another module or copy parameters.
+The frontend validates declarations and uses DiagramCore's inferred node input
+and output types to materialize each selected name as an explicit `{name,
+input, output}` binding in the content-addressed package bundle. The compiler
+resolves the binding name against the referenced package definition, validates
+the concrete schemas against the stereotype's symbolic template, rejects raw
+strings, duplicate public names and invalid targets, and binds it to the
+selected compiled node. The adapter wraps that node's existing module; it does
+not build another module or copy parameters.
 
 The wheel embeds the selected adapter descriptors in its immutable architecture
 metadata. On load, the runtime compiles the embedded graph, restores the one
@@ -69,8 +87,10 @@ subflow instance is therefore not a v1 capability.
 
 - `module.forward` is the only v1 adapter protocol; a Python symbol is not an
   export API.
-- Input and output schemas are tensor schemas with symbolic dimensions bound
-  by the input. Other public value types are not part of this v1 contract.
+- Selected v1 bindings carry tensor input and output schemas with concrete
+  DiagramCore-inferred shapes. The stereotype declaration may use symbolic
+  dimensions, but the final wheel descriptor does not carry those template
+  symbols.
 - Targets are forbidden, including implicit `batch.targets`; objective and
   loss execution remains training-only.
 - Package IDs, class names, display names and Python introspection cannot

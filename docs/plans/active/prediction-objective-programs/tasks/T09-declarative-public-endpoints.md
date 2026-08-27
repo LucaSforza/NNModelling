@@ -36,10 +36,13 @@ tests already cover the implemented runtime path.
 
 ## Evidence and starting point
 
-- `wheelAdapters` declarations are parsed in the frontend definition schema and
-  selected by names stored on graph nodes.
-- The compiler resolves the declaration and binds `module.forward` to the
-  existing compiled node module; it does not load an arbitrary Python symbol.
+- `wheelAdapters` declarations are parsed in the frontend definition schema;
+  DiagramCore inference materializes each selected adapter as an explicit
+  `{name, input, output}` binding on the graph node.
+- The compiler rejects raw string selections, validates the concrete binding
+  against the stereotype's symbolic template, and binds `module.forward` to
+  the existing compiled node module; it does not load an arbitrary Python
+  symbol.
 - The exporter records selected descriptors in wheel architecture metadata; the
   runtime checks that metadata against the compiled graph after strict shared-
   state restoration.
@@ -49,23 +52,35 @@ tests already cover the implemented runtime path.
 ## Implemented v1 contract
 
 Each stereotype package may publish zero or more `wheelAdapters` declarations in
-`stereotype.json`. Each v1 declaration has:
+`stereotype.json`. Each v1 declaration is a symbolic template with:
 
 - a stable name;
 - exactly `entrypoint: "module.forward"`;
-- tensor input and output schemas with shape and dtype;
+- tensor input and output schemas with symbolic shape dimensions and dtype;
 - exactly `targetPolicy: "forbidden"`.
 
-When a diagram explicitly selects an adapter name on a root-graph node, the
-compiler resolves the package declaration and binds the adapter to that node's
+When a diagram explicitly selects an adapter on a root-graph node, the
+frontend uses the node's successful DiagramCore inference to produce the
+concrete binding:
+
+```json
+{
+  "name": "decode",
+  "input": {"type": "tensor", "shape": [32, 4], "dtype": "float32"},
+  "output": {"type": "tensor", "shape": [32, 8], "dtype": "float32"}
+}
+```
+
+The compiler rejects a raw string selection and validates this binding against
+the declaration's symbolic template before binding the adapter to that node's
 existing module. The public call is:
 
 ```python
 model.adapter("decode").run(value)
 ```
 
-The runtime converts accepted values to a tensor, checks the declared input
-schema, calls only the bound module's `forward`, then checks the declared output
+The runtime converts accepted values to a tensor, checks the concrete input
+schema, calls only the bound module's `forward`, then checks the concrete output
 schema. The adapter receives no target and cannot execute objective nodes.
 
 The selected descriptors are copied into the wheel's immutable architecture
@@ -76,8 +91,9 @@ strictly, verifies descriptor equality, and returns the generic adapter facade.
 
 - No adapter is discovered from a Python symbol, package/class ID or display
   name.
-- Duplicate public names, missing declarations, non-module targets, objective
-  bindings and malformed tensor schemas fail validation.
+- Duplicate public names, missing declarations, raw string selections,
+  non-module targets, objective bindings, unavailable DiagramCore inference and
+  malformed or template-incompatible tensor schemas fail validation.
 - The adapter uses the same module store and safetensors state as prediction;
   it does not rebuild or duplicate parameters.
 - A wheel with no selected adapters preserves the prediction-only API.
@@ -107,15 +123,18 @@ strictly, verifies descriptor equality, and returns the generic adapter facade.
 
 ## Verification status
 
-Focused runtime and wheel tests pass: `29 passed` from
+Focused runtime and wheel tests pass: `31 passed` from
 `converted/src/tests/test_package_runtime.py` and
 `converted/src/tests/test_model_package.py`. Browser submission/download and
-clean-environment QA for a selected adapter remains pending.
+clean-environment QA for a selected adapter remains pending. The frontend test
+gate also passes (`129 passed`), including concrete binding materialization and
+template-compatibility cases.
 
 ## Acceptance criteria
 
-- [x] Adapter selection, fixed `module.forward` binding, tensor schemas and
-      target-forbidden validation are implemented.
+- [x] Explicit `{name, input, output}` binding, concrete DiagramCore schemas,
+      fixed `module.forward` binding, template validation and target-forbidden
+      validation are implemented.
 - [x] The generic `load_model().adapter(name).run(value)` facade is implemented
       without a public model-internals handle.
 - [x] Selected adapter metadata is recorded in the wheel and checked against
