@@ -242,7 +242,7 @@ export class DiagramCore {
     kind: "input" | "layer" | "loss",
     x: number,
     y: number,
-    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string },
+    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[] },
   ): Node {
     this._captureUndoState();
     const finalName = config?.name?.trim() || identity.name;
@@ -258,6 +258,7 @@ export class DiagramCore {
         name: finalName,
         color: config?.color ?? "#ffffff",
         params: clonePackageParams(config?.params),
+        ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
       },
     };
     this.nodes = [...this.nodes, newNode];
@@ -279,6 +280,7 @@ export class DiagramCore {
       params?: Record<string, unknown>;
       inputsCount?: number;
       parentId?: string;
+      wheelAdapters?: readonly string[];
     },
   ): Node {
     if (kind === "join") {
@@ -302,6 +304,7 @@ export class DiagramCore {
       params?: Record<string, unknown>;
       inputsCount?: number;
       parentId?: string;
+      wheelAdapters?: readonly string[];
     },
   ): Node {
     this._captureUndoState();
@@ -318,6 +321,7 @@ export class DiagramCore {
         color: config?.color ?? "#4779c4",
         params: clonePackageParams(config?.params),
         inputsCount: config?.inputsCount ?? 2,
+        ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
       },
     };
     this.nodes = [...this.nodes, node];
@@ -336,6 +340,7 @@ export class DiagramCore {
       height?: number;
       params?: Record<string, unknown>;
       parentId?: string;
+      wheelAdapters?: readonly string[];
     },
   ): Node {
     this._captureUndoState();
@@ -358,6 +363,7 @@ export class DiagramCore {
         isCollapsed: false,
         oldWidth: width,
         oldHeight: height,
+        ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
       },
     };
     this.nodes = [...this.nodes, node];
@@ -377,6 +383,7 @@ export class DiagramCore {
       height?: number;
       params?: Record<string, unknown>;
       inputsCount?: number;
+      wheelAdapters?: readonly string[];
     },
   ): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
@@ -397,6 +404,7 @@ export class DiagramCore {
         label: kind === "subflow" ? (config.name ?? candidate.data.label ?? candidate.data.name) : candidate.data.label,
         color: config.color ?? candidate.data.color,
         params: config.params === undefined ? candidate.data.params : clonePackageParams(config.params),
+        ...(config.wheelAdapters === undefined ? {} : { wheelAdapters: [...config.wheelAdapters] }),
         ...(kind === "join" ? { inputsCount: config.inputsCount ?? candidate.data.inputsCount ?? 2 } : {}),
       };
       return {
