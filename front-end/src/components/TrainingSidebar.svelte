@@ -279,7 +279,7 @@
   }
 
   async function buildRequest(): Promise<TrainingJobRequest> {
-    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports());
+    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports(), diagram.typeResult);
     const uploaded = await requireApi().uploadPackageBundle(bundle);
     const overrides = overridesText.split("\n").map((line) => line.trim()).filter(Boolean);
     return {
