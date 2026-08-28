@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob } from "../training/api";
+import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob, canonicalDatasetParameters } from "../training/api";
 import { trainingLogWindowUrl } from "../training/windows";
 
 afterEach(() => {
@@ -7,6 +7,24 @@ afterEach(() => {
 });
 
 describe("training job actions", () => {
+  it("submits only parameters from the current dataset schema", () => {
+    const dataset = {
+      target: "dataset.autoencoder_mnist.AutoencoderMNIST",
+      name: "AutoencoderMNIST",
+      doc: "",
+      num_classes: null,
+      parameters: [
+        { name: "batch_size", type: "int", default: 32, required: false },
+        { name: "num_workers", type: "int", default: 0, required: false },
+        { name: "train_size", type: "float", default: 0.8, required: false },
+      ],
+    };
+
+    expect(canonicalDatasetParameters(dataset, {
+      batch_size: "128", num_workers: "0", train_size: "0.8", root: "/tmp/old-editor",
+    })).toEqual({ batch_size: "128", num_workers: "0", train_size: "0.8" });
+  });
+
   it("allows cancellation before and during execution", () => {
     expect(canCancelTrainingJob("queued")).toBe(true);
     expect(canCancelTrainingJob("running")).toBe(true);

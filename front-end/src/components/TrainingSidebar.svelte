@@ -4,6 +4,7 @@
   import {
     BackendApiError,
     TrainingApiClient,
+    canonicalDatasetParameters,
     canCancelTrainingJob,
     type DatasetInfo,
     type DatasetParameter,
@@ -285,7 +286,12 @@
       schema_version: 1,
       network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
       training: {
-        dataset: { target: selectedDataset, parameters: datasetParams },
+        dataset: {
+          target: selectedDataset,
+          parameters: selectedDatasetInfo
+            ? canonicalDatasetParameters(selectedDatasetInfo, datasetParams)
+            : {},
+        },
         seed: coerce(seed, "int"),
         optimizer: { target: optimizerTarget, learning_rate: coerce(learningRate, "float") },
         trainer: {

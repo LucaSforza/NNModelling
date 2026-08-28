@@ -15,6 +15,22 @@ export interface DatasetInfo {
   num_classes: number | null;
 }
 
+/** Keep the submitted constructor arguments aligned with the registered schema.
+ *
+ * This also protects an already-open editor from stale fields left by an older
+ * dataset contract (for example the removed browser-controlled ``root``).
+ */
+export function canonicalDatasetParameters(
+  dataset: DatasetInfo,
+  values: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return Object.fromEntries(
+    dataset.parameters
+      .filter((parameter) => Object.hasOwn(values, parameter.name))
+      .map((parameter) => [parameter.name, values[parameter.name]!]),
+  );
+}
+
 export interface TrainingJobStatus {
   id: string;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
