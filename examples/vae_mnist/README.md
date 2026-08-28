@@ -17,12 +17,14 @@ Lo script legge direttamente il test set MNIST IDX già predisposto in
 `converted/data`, senza importare `torch` o `torchvision`, e invoca soltanto
 l’API pubblica della wheel: `load_model()`, `predict()` e gli adapter dichiarati
 `model.adapter("sample").run(...)` e `model.adapter("forward").run(...)`.
-Produce due immagini:
+Produce tre immagini:
 
 - `generated/reconstructions.png`: ogni originale affiancato alla propria
   ricostruzione deterministica ottenuta con `predict()`;
 - `generated/prior-samples.png`: immagini generate campionando il prior VAE
   tramite l’adapter `sample` e decodificandole tramite `forward`.
+- `generated/latent-interpolation-1-to-7.png`: interpolazione lineare nello
+  spazio latente tra un esempio di 1 e un esempio di 7.
 
 Il campionamento è intenzionalmente casuale; il parametro `--seed` resta nella
 traccia JSON come metadato dell’esperimento, ma non forza il generatore interno

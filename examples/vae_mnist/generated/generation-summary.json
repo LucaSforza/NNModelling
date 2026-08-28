@@ -1,43 +1,18 @@
 {
-  "latent_dim": 32,
+  "latent_interpolation": {
+    "from_digit": 1,
+    "latent_dim": 32,
+    "steps": 9,
+    "to_digit": 7
+  },
   "outputs": {
-    "generated": "generated.png",
+    "latent_interpolation": "latent-interpolation-1-to-7.png",
+    "prior_samples": "prior-samples.png",
     "reconstructions": "reconstructions.png"
   },
-  "package": "vae_mnist_trained-package.zip",
-  "package_format": "package-bundle/v1",
-  "package_sha256": "8e7fb645e1cdc3f094f4d2ff882069e8a8b943f18e1dcef6b10cafe2ee8a4150",
+  "package": "nnm_vae_mnist_beta001_val10",
+  "sample_count": 16,
   "seed": 42,
-  "training": {
-    "dataset": "dataset.autoencoder_mnist.AutoencoderMNIST",
-    "epochs": 5,
-    "history": [
-      {
-        "epoch": 1.0,
-        "train_loss": 0.7476688585382827,
-        "val_loss": 0.7153225401614575
-      },
-      {
-        "epoch": 2.0,
-        "train_loss": 0.7146400939276878,
-        "val_loss": 0.7113604152456243
-      },
-      {
-        "epoch": 3.0,
-        "train_loss": 0.7120149902840878,
-        "val_loss": 0.709850051301591
-      },
-      {
-        "epoch": 4.0,
-        "train_loss": 0.7108526867120823,
-        "val_loss": 0.709259459312926
-      },
-      {
-        "epoch": 5.0,
-        "train_loss": 0.7104564439109031,
-        "val_loss": 0.7085721277176066
-      }
-    ],
-    "num_parameters": 431504
-  }
+  "wheel": "nnm_vae_mnist_beta001_val10-0.1.0-py3-none-any.whl",
+  "wheel_sha256": "0bd76bf06bdb9001f3f5dcd18468ebc5fa1b3f25d54e39948bd1bca75b6a11f8"
 }
