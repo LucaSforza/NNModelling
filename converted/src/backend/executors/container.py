@@ -23,6 +23,18 @@ _IMAGE_DIGEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$"
 _ENGINE_FORBIDDEN = re.compile(r"[;&|<>`]")
 
 
+def _dataset_root() -> Path:
+    """Resolve the operator-managed, read-only dataset root.
+
+    The default is the repository's provisioned data directory for the local
+    deployment.  A deployment may replace it explicitly; jobs never provide
+    this path.
+    """
+
+    default = Path(__file__).resolve().parents[3] / "data"
+    return Path(os.environ.get("NNM_CONTAINER_DATA_ROOT", str(default))).expanduser().resolve()
+
+
 def _memory_gb() -> float:
     """Read host memory from Linux procfs, with a conservative fallback."""
 
@@ -173,8 +185,7 @@ class ContainerExecutor:
             engine=adapter,
             input_root=input_dir.resolve().parent,
             artifact_root=artifact_dir.resolve().parent,
-            dataset_root=Path(os.environ["NNM_CONTAINER_DATA_ROOT"]).resolve()
-            if os.environ.get("NNM_CONTAINER_DATA_ROOT") else None,
+            dataset_root=_dataset_root(),
             popen=self._popen_factory,
         )
         self._controller = controller
@@ -188,8 +199,7 @@ class ContainerExecutor:
             job_id=str(job["id"]), image=self.image, input_dir=Path(input_dir), artifact_dir=Path(artifact_dir),
             cpu=request.cpu, memory_gb=request.memory_gb, pid_limit=self.pid_limit,
             timeout_seconds=self.timeout_seconds, network=self.network,
-            dataset_dir=Path(os.environ["NNM_CONTAINER_DATA_ROOT"]).resolve()
-            if os.environ.get("NNM_CONTAINER_DATA_ROOT") else None,
+            dataset_dir=_dataset_root(),
         )
 
     def submit(

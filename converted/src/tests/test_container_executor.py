@@ -30,7 +30,16 @@ def test_build_command_is_explicit_and_mounts_input_read_only(tmp_path: Path) ->
     mounts = [command[index + 1] for index, value in enumerate(command) if value == "--mount"]
     assert any("dst=/input,readonly" in mount for mount in mounts)
     assert any("dst=/artifacts" in mount and "readonly" not in mount for mount in mounts)
+    assert any("dst=/app/data,readonly" in mount for mount in mounts)
+    assert command[command.index("--env") + 1:command.index("--env") + 2] == ["NNM_DATASET_ROOT=/app/data"]
     assert command[-7:] == ["/app/.venv/bin/python", "-m", "package_worker", "--input", "/input/job.json", "--artifacts", "/artifacts"]
+
+
+def test_dataset_root_can_be_overridden_only_by_operator(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from backend.executors.container import _dataset_root
+
+    monkeypatch.setenv("NNM_CONTAINER_DATA_ROOT", str(tmp_path))
+    assert _dataset_root() == tmp_path.resolve()
 
 
 def test_rejects_unpinned_images_and_shell_engine_values() -> None:

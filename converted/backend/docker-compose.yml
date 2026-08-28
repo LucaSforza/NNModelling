@@ -23,6 +23,7 @@ services:
       NNM_SESSION_TTL: ${NNM_SESSION_TTL:-24h}
       NNM_CONTAINER_ENGINE: ${NNM_CONTAINER_ENGINE:-podman}
       NNM_CONTAINER_IMAGE: ${NNM_CONTAINER_IMAGE:?set NNM_CONTAINER_IMAGE to a digest-pinned worker image}
+      NNM_CONTAINER_DATA_ROOT: /app/data
       NNM_CONTAINER_CONTROLLER_SOCKET: /run/nnm/controller.sock
       NNM_CONTAINER_CONTROLLER_TOKEN_FILE: /run/secrets/nnm-controller-token
     ports:
@@ -51,6 +52,7 @@ services:
     command: ["uv", "run", "python", "-m", "backend.container_controller", "serve", "/run/nnm/controller.sock", "@/run/secrets/nnm-controller-token", "/app/jobs", "/app/jobs", "${NNM_CONTAINER_ENGINE:-podman}"]
     volumes:
       - backend-jobs:/app/jobs
+      - ${NNM_CONTAINER_DATA_ROOT:-../data}:/app/data:ro
       - controller-socket:/run/nnm
       - ${NNM_CONTAINER_CONTROLLER_TOKEN_FILE:-../valkey-data/controller.token}:/run/secrets/nnm-controller-token:ro
       # This is deliberately mounted only in the controller service.

@@ -32,6 +32,12 @@ def test_dataset_parameters_are_typed_and_owned_by_dataset_request() -> None:
             training={**_training(), "dataset": {"target": "dataset.mnist.MNISTDataset", "parameters": {"nope": 1}}},
         )
 
+    with pytest.raises(ValidationError, match="unknown dataset parameter"):
+        JobSubmission(
+            network={"format": "package", "value": {"graph": {}, "bundle_ref": "bundle-1"}},
+            training={**_training(), "dataset": {"target": "dataset.mnist.MNISTDataset", "parameters": {"root": "/tmp"}}},
+        )
+
 
 def test_job_submission_accepts_only_package_network_format() -> None:
     """The public submission model has no NNTree compatibility path."""

@@ -27,6 +27,13 @@ _WORKER = ("/app/.venv/bin/python", "-m", "package_worker")
 _RPC_VERSION = 1
 
 
+def _dataset_root() -> Path:
+    """Resolve the operator-provisioned dataset directory for local control."""
+
+    default = Path(__file__).resolve().parents[2] / "data"
+    return Path(os.environ.get("NNM_CONTAINER_DATA_ROOT", str(default))).expanduser().resolve()
+
+
 class ContainerCapabilityError(RuntimeError):
     """The configured engine cannot satisfy a package job."""
 
@@ -381,7 +388,7 @@ def controller_main(argv: list[str]) -> int:
     except (OSError, ValueError) as exc:
         print(f"controller token unavailable: {exc}", file=sys.stderr)
         return 1
-    dataset_root = Path(os.environ["NNM_CONTAINER_DATA_ROOT"]) if os.environ.get("NNM_CONTAINER_DATA_ROOT") else None
+    dataset_root = _dataset_root()
     controller = ContainerController(engine=CliEngineAdapter(engine), input_root=Path(input_root), artifact_root=Path(artifact_root), dataset_root=dataset_root)
     serve_unix(controller, Path(socket_name), token=token)
     return 0

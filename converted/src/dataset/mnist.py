@@ -48,14 +48,16 @@ class MNISTDataset(Dataset):
             "std": [0.3081],
         }
 
-    def __init__(self, batch_size=32, num_workers=0, train_size=0.8, root: str | None = None) -> None:
+    def __init__(self, batch_size=32, num_workers=0, train_size=0.8) -> None:
         super().__init__()
 
         self.transform = transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         )
         # Load the MNIST dataset
-        dataset_root = Path(root or os.environ.get("NNM_DATASET_ROOT", "data"))
+        # Dataset storage is selected by the operator/container mount, never
+        # by a browser-supplied path.
+        dataset_root = Path(os.environ.get("NNM_DATASET_ROOT", "data"))
         self.dataset = datasets.MNIST(
             root=str(dataset_root), train=True, download=False, transform=self.transform
         )
