@@ -26,11 +26,7 @@ from backend.app import create_app
 from backend.auth import AuthError, AuthService, ValkeyAuthStore
 from backend.manager import JobManager
 from backend.store import ValkeyJobStore
-from tests.backend_helpers import (
-    classification_submission,
-    get_test_valkey_url,
-    valkey_required,
-)
+from tests.backend_helpers import get_test_valkey_url, package_submission, valkey_required
 
 
 pytestmark = pytest.mark.service
@@ -54,7 +50,7 @@ def test_job_store_persistence_round_trip(clean_valkey):
         "artifact_dir": "/tmp/job-1",
         "owner_connection_id": OWNER,
         "resources": {"cpu": 1, "memory_gb": 1, "gpu": 0},
-        "submission": {"network": {"format": "nntree", "value": {"root": "input"}}},
+        "submission": {"network": {"format": "package", "value": {"graph": {"nodes": [], "edges": []}, "bundle_ref": "0" * 64}}},
     }
     first = ValkeyJobStore(url)
     first.save_job("job-1", record)
@@ -217,8 +213,8 @@ def test_manager_recovery_on_persisted_valkey_state(tmp_path, clean_valkey):
     url = get_test_valkey_url()
     executor = _NoopExecutor()
     first_manager = JobManager(ValkeyJobStore(url), tmp_path / "artifacts", [executor])
-    queued = first_manager.submit(classification_submission(), owner_connection_id=OWNER)
-    running = first_manager.submit(classification_submission(), owner_connection_id=OWNER)
+    queued = first_manager.submit(package_submission(first_manager, OWNER), owner_connection_id=OWNER)
+    running = first_manager.submit(package_submission(first_manager, OWNER), owner_connection_id=OWNER)
     # Simulate a crash while the second job was executing: its persisted
     # record is flipped to "running" and the manager dies without cleanup.
     record = ValkeyJobStore(url).get_job(running.id)
@@ -252,7 +248,7 @@ def test_recovery_failed_job_removed_from_valkey_queue_and_contract_preserved(tm
     executor = _NoopExecutor()
     store = ValkeyJobStore(url)
     first_manager = JobManager(store, tmp_path / "artifacts", [executor])
-    queued = first_manager.submit(classification_submission(), owner_connection_id=OWNER)
+    queued = first_manager.submit(package_submission(first_manager, OWNER), owner_connection_id=OWNER)
     record = store.get_job(queued.id)
     assert record is not None
     record["status"] = "running"
@@ -289,7 +285,7 @@ def test_valkey_mark_failed_atomically_persists_and_dequeues(clean_valkey):
         "artifact_dir": "/tmp/job-1",
         "owner_connection_id": OWNER,
         "resources": {"cpu": 1, "memory_gb": 1, "gpu": 0},
-        "submission": {"network": {"format": "nntree", "value": {"root": "input"}}},
+        "submission": {"network": {"format": "package", "value": {"graph": {"nodes": [], "edges": []}, "bundle_ref": "0" * 64}}},
     }
     store.save_job("job-1", record)
     store.enqueue("job-1", priority=10, created_at=_iso(0))
@@ -323,7 +319,7 @@ def test_valkey_mark_failed_failure_leaves_no_partial_state_and_recovery_reconci
     executor = _NoopExecutor()
     store = ValkeyJobStore(url)
     manager = JobManager(store, tmp_path / "artifacts", [executor])
-    queued = manager.submit(classification_submission(), owner_connection_id=OWNER)
+    queued = manager.submit(package_submission(manager, OWNER), owner_connection_id=OWNER)
     record = store.get_job(queued.id)
     assert record is not None
     record["status"] = "running"
@@ -411,7 +407,7 @@ def test_package_export_failure_on_real_valkey_fails_job_atomically(tmp_path, cl
     owner = pairing.connection_id
 
     manager = JobManager(store, tmp_path / "jobs", [_SucceedingExecutor()])
-    queued = manager.submit(classification_submission(), owner_connection_id=owner)
+    queued = manager.submit(package_submission(manager, owner), owner_connection_id=owner)
     assert clean_valkey.zscore("queue:priority:10", queued.id) is not None
     assert clean_valkey.zscore("queue:priorities", "10") is not None
 

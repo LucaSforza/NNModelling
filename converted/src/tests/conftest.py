@@ -17,11 +17,9 @@ import pytest
 from tests.backend_helpers import get_test_valkey_url, valkey_required
 
 
-FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "examples" / "nntrees"
-
 # Gate markers that place a test in an explicit mandatory suite. Anything
 # without one of these is implicitly part of the fast gate.
-GATE_MARKERS = {"service", "e2e", "legacy_e2e"}
+GATE_MARKERS = {"service", "e2e"}
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -30,7 +28,7 @@ def pytest_collection_modifyitems(config, items):
 
     This keeps ``-m fast`` a deterministic, explicit selection of the intended
     fast suite while guaranteeing a test can never land in both the fast gate
-    and a mandatory service/e2e/legacy gate at the same time.
+    and a mandatory service/e2e gate at the same time.
     """
     del config
     for item in items:
@@ -108,40 +106,3 @@ def clean_valkey(valkey_client):
     valkey_client.flushdb()
     yield valkey_client
     valkey_client.flushdb()
-
-
-def load_json(name: str) -> dict:
-    path = FIXTURES_DIR / f"{name}.json"
-    if not path.exists():
-        raise FileNotFoundError(f"Fixture not found: {path}")
-    import json
-
-    with open(path) as f:
-        return json.load(f)
-
-
-# -- session-scoped JSON fixtures ---------------------------------------------------
-
-@pytest.fixture(scope="session")
-def transformer_classifier_json():
-    return load_json("transformer_classifier")
-
-
-@pytest.fixture(scope="session")
-def auto_encoder_json():
-    return load_json("auto_encoder")
-
-
-@pytest.fixture(scope="session")
-def auto_encoder_nested_json():
-    return load_json("auto_encoder_nested_submodels")
-
-
-@pytest.fixture(scope="session")
-def skip_connections_json():
-    return load_json("skip_connections_with_repetition")
-
-
-@pytest.fixture(scope="session")
-def mninst_skip_json():
-    return load_json("mninst_skip")

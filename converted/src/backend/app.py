@@ -26,7 +26,7 @@ from backend.auth import (
 )
 from backend.dataset_registry import discover_datasets
 from backend.manager import JobManager, PackageIntegrityError, _remove_file
-from backend.package_store import PackageStore
+from backend.package_store import BundleNotFoundError, PackageStore
 from backend.models import (
     JobStatus,
     JobSubmission,
@@ -314,6 +314,8 @@ def create_app(
     ) -> JobStatus:
         try:
             return app.state.manager.submit(submission, owner_connection_id=connection["id"])
+        except BundleNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Unknown package bundle") from exc
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -394,29 +396,6 @@ def create_app(
                 detail={"code": "package_integrity_error", "message": str(exc)},
             ) from exc
         return _verified_snapshot_response(path, filename, digest)
-
-    @app.get("/jobs/{job_id}/training-package")
-    async def download_training_package(
-        job_id: str,
-        connection: dict[str, Any] = Depends(current_connection),
-    ) -> FileResponse:
-        """Download the authenticated package graph and trained weights."""
-
-        try:
-            path, filename, digest = app.state.manager.training_package_download(
-                job_id,
-                owner_connection_id=connection["id"],
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Unknown job") from exc
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Trained package is not available") from exc
-        except PackageIntegrityError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "training_package_integrity_error", "message": str(exc)},
-            ) from exc
-        return _verified_snapshot_response(path, filename, digest, media_type="application/zip")
 
     @app.get("/jobs/{job_id}/events")
     def get_events(

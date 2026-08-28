@@ -14,12 +14,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from backend.config_service import build_job_hydra_configs
-from backend.executors import ContainerExecutor, Executor, LocalExecutor, SlurmExecutor
+from backend.executors import ContainerExecutor, Executor
 from backend.models import JobStatus, JobSubmission, ResourceRequest
 from backend.package_store import PackageStore
-from package_runtime import compile_package_graph
 from backend.store import JobStore, ValkeyJobStore, utc_now
+from model_package.adapters import adapter_spec_for_dataset
 from model_package.exporter import build_model_wheel
 
 
@@ -65,8 +64,6 @@ class JobManager:
         package_snapshot_dir: str | Path | None = None,
         package_store: PackageStore | None = None,
     ) -> None:
-        if not executors:
-            raise ValueError("At least one executor is required")
         self.store = store
         self.artifact_root = Path(artifact_root).resolve()
         self.artifact_root.mkdir(parents=True, exist_ok=True)
@@ -99,31 +96,13 @@ class JobManager:
         ).expanduser().resolve()
         package_store = PackageStore(os.getenv("NNM_BACKEND_PACKAGE_ROOT", str(artifact_root / "packages")))
         store = ValkeyJobStore(os.getenv("NNM_VALKEY_URL", "valkey://127.0.0.1:6379/0"))
-        executors: list[Executor] = [LocalExecutor(converted_dir)]
+        executors: list[Executor] = []
         container_image = os.getenv("NNM_CONTAINER_IMAGE")
         if container_image:
             executors.append(
                 ContainerExecutor(
                     engine=os.getenv("NNM_CONTAINER_ENGINE", "podman"),
                     image=container_image,
-                )
-            )
-        if os.getenv("NNM_ENABLE_SLURM", "0").lower() in {"1", "true", "yes"}:
-            slurm_gpu_type = os.getenv("NNM_SLURM_GPU_TYPE") or None
-            executors.append(
-                SlurmExecutor(
-                    converted_dir,
-                    unit_id=os.getenv("NNM_SLURM_UNIT_ID", "slurm-main"),
-                    partition=os.getenv("NNM_SLURM_PARTITION"),
-                    account=os.getenv("NNM_SLURM_ACCOUNT"),
-                    ssh_host=os.getenv("NNM_SLURM_SSH_HOST"),
-                    project_dir=os.getenv("NNM_SLURM_PROJECT_DIR", str(converted_dir)),
-                    capacity=ResourceRequest(
-                        cpu=int(os.getenv("NNM_SLURM_CPU", "1")),
-                        memory_gb=float(os.getenv("NNM_SLURM_MEMORY_GB", "1")),
-                        gpu=int(os.getenv("NNM_SLURM_GPU", "1")),
-                        gpu_type=slurm_gpu_type,
-                    ),
                 )
             )
         return cls(store, artifact_root, executors, package_store=package_store)
@@ -190,35 +169,32 @@ class JobManager:
     def submit(self, submission: JobSubmission, *, owner_connection_id: str) -> JobStatus:
         """Validate, materialize and enqueue a complete job document."""
 
+        if not self.executors:
+            raise ValueError(
+                "No container executor is configured; package jobs cannot be submitted"
+            )
         job_id = str(uuid.uuid4())
         created_at = utc_now()
-        artifact_dir = self.artifact_root / job_id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
         payload = submission.model_dump(mode="json")
+        # Resolve and validate the immutable bundle before creating any job
+        # directory.  In particular, validation must never load or execute
+        # package Python in the FastAPI process.
+        package_value = dict(submission.network.value)
+        bundle_ref = package_value["bundle_ref"]
+        stored = self.package_store.get_bundle(bundle_ref, owner_connection_id=owner_connection_id)
+        package_value = stored["bundle"]
+        if package_value.get("graph") != submission.network.value.get("graph"):
+            raise ValueError("package graph does not match the uploaded bundle")
+        artifact_dir = self.artifact_root / job_id
+        artifact_dir.mkdir(parents=True, exist_ok=False)
         payload["id"] = job_id
         payload["created_at"] = created_at
         payload["artifact_dir"] = str(artifact_dir)
         requested_path = artifact_dir / "requested_config.json"
         requested_path.write_text(json.dumps(submission.model_dump(mode="json"), indent=2), encoding="utf-8")
-        if submission.network.format == "nntree":
-            build_job_hydra_configs(payload, artifact_dir)
-        else:
-            package_value = dict(submission.network.value)
-            bundle_ref = package_value.get("bundle_ref")
-            if isinstance(bundle_ref, str):
-                stored = self.package_store.get_bundle(
-                    bundle_ref,
-                    owner_connection_id=owner_connection_id,
-                )
-                package_value = stored["bundle"]
-                if package_value.get("graph") != submission.network.value.get("graph"):
-                    raise ValueError("package graph does not match the uploaded bundle")
-            elif "packages" not in package_value:
-                raise ValueError("package jobs require bundle_ref or inline packages")
-            compile_package_graph(package_value)
-            (artifact_dir / "package.json").write_text(
-                json.dumps(package_value, sort_keys=True), encoding="utf-8"
-            )
+        (artifact_dir / "package.json").write_text(
+            json.dumps(package_value, sort_keys=True), encoding="utf-8"
+        )
         record = {
             "id": job_id,
             "status": "queued",
@@ -232,7 +208,6 @@ class JobManager:
             "heartbeat_at": None,
             "wandb_url": None,
             "model_package": None,
-            "training_package": None,
             "package_error": None,
             "artifact_dir": str(artifact_dir),
             "owner_connection_id": owner_connection_id,
@@ -382,31 +357,6 @@ class JobManager:
         if return_code == 0:
             if publish_wandb_url:
                 self._event(job_id, "wandb_ready", {"wandb_url": wandb_url})
-            if job.get("submission", {}).get("network", {}).get("format") == "package":
-                training_package = self._training_package_info(job_id)
-                if training_package is None:
-                    error = "Trained package archive is missing or invalid"
-                    self._set_status(
-                        job_id,
-                        "failed",
-                        finished_at=utc_now(),
-                        error=error,
-                        wandb_url=wandb_url,
-                    )
-                    self._drop_active(job_id)
-                    self._event(job_id, "failed", {"error": error, **details})
-                    return
-                self._set_status(
-                    job_id,
-                    "succeeded",
-                    finished_at=utc_now(),
-                    error=None,
-                    wandb_url=wandb_url,
-                    training_package=training_package,
-                )
-                self._drop_active(job_id)
-                self._event(job_id, "succeeded", details)
-                return
             # The wheel is part of the promised output of a successful job:
             # the job is never persisted as ``succeeded`` before the package
             # export committed. A packaging failure (missing/corrupt safe
@@ -555,54 +505,6 @@ class JobManager:
             raise PackageIntegrityError("Model package integrity check failed")
         return snapshot, wheel.name, computed
 
-    def training_package_download(self, job_id: str, *, owner_connection_id: str) -> tuple[Path, str, str]:
-        """Resolve and verify the trained package archive for download."""
-
-        job = self._owned_job(job_id, owner_connection_id)
-        package = job.get("training_package")
-        if not isinstance(package, dict) or not isinstance(package.get("filename"), str):
-            raise FileNotFoundError("Trained package is not available")
-        root = Path(job["artifact_dir"]).resolve()
-        filename = Path(package["filename"])
-        archive = (root / filename).resolve()
-        declared = package.get("sha256")
-        if (
-            filename.name != package["filename"]
-            or archive.suffix != ".zip"
-            or root not in archive.parents
-            or not archive.is_file()
-            or not isinstance(declared, str)
-            or not PACKAGE_SHA256_HEX.fullmatch(declared)
-        ):
-            raise FileNotFoundError("Trained package is not available")
-        snapshot, computed = _create_package_snapshot(
-            archive,
-            snapshot_dir=self.package_snapshot_dir,
-            suffix=".zip",
-        )
-        if not hmac.compare_digest(computed, declared.lower()):
-            _remove_file(snapshot)
-            raise PackageIntegrityError("Trained package integrity check failed")
-        return snapshot, archive.name, computed
-
-    def _training_package_info(self, job_id: str) -> dict[str, Any] | None:
-        """Build the public manifest for the worker's immutable archive."""
-
-        job = self.store.get_job(job_id)
-        if job is None:
-            return None
-        archive = Path(job["artifact_dir"]) / "trained-package.zip"
-        if not archive.is_file():
-            return None
-        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        return {
-            "schema_version": 1,
-            "format": "nnm-trained-package/v1",
-            "filename": archive.name,
-            "sha256": digest,
-            "size": archive.stat().st_size,
-        }
-
     def tail_logs(
         self,
         job_id: str,
@@ -717,7 +619,16 @@ class JobManager:
         artifact_dir = Path(job["artifact_dir"])
         package_name = job["submission"].get("package_name") or f"nnm_job_{job_id.replace('-', '')}"
         try:
-            build_model_wheel(artifact_dir, package_name=package_name, version="0.1.0")
+            package = json.loads((artifact_dir / "package.json").read_text(encoding="utf-8"))
+            dataset_target = job["submission"]["training"]["dataset"]["target"]
+            input_adapter = adapter_spec_for_dataset(dataset_target)
+            build_model_wheel(
+                artifact_dir,
+                package_name=package_name,
+                version="0.1.0",
+                package=package,
+                input_adapter=input_adapter,
+            )
             manifest_path = artifact_dir / "model-package.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception as exc:

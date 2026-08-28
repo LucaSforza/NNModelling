@@ -6,14 +6,15 @@ import json
 import os
 import re
 import shlex
-import shutil
-import signal
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
+from backend.container_controller import (
+    CliEngineAdapter, ContainerCapabilityError, ContainerController, ContainerControllerClient, ContainerJobSpec,
+)
 from backend.executors.base import FinishedCallback, HeartbeatCallback
 from backend.models import ResourceRequest
 
@@ -72,8 +73,8 @@ class ContainerExecutor:
             raise ValueError("pid_limit must be positive")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
-        if network not in {"none", "bridge"}:
-            raise ValueError("network must be 'none' or 'bridge'")
+        if network != "none":
+            raise ValueError("package workers require network='none'")
         self.capacity = capacity or ResourceRequest(
             cpu=os.cpu_count() or 1,
             memory_gb=_memory_gb(),
@@ -83,8 +84,8 @@ class ContainerExecutor:
         self.timeout_seconds = timeout_seconds
         self.network = network
         self._popen_factory = popen_factory
-        self._processes: dict[str, subprocess.Popen[bytes]] = {}
-        self._lock = threading.RLock()
+        self._controller: ContainerController | None = None
+        self._remote: ContainerControllerClient | None = None
 
     @staticmethod
     def _engine_argv(value: str) -> list[str]:
@@ -125,46 +126,71 @@ class ContainerExecutor:
 
     def build_command(self, job: dict[str, Any], artifact_dir: str | Path, input_dir: str | Path) -> list[str]:
         """Build the exact engine argv used for one package worker."""
+        artifact_path, input_path = Path(artifact_dir), Path(input_dir)
+        spec = self._spec(job, artifact_path, input_path)
+        engine_kind = "docker" if Path(self.engine[0]).name == "docker" else "podman"
+        return ContainerController(
+            engine=CliEngineAdapter(engine_kind, executable=self.engine[0]),
+            input_root=input_path.resolve().parent, artifact_root=artifact_path.resolve().parent,
+        ).command(spec)
 
+    def _controller_for(self, artifact_dir: Path, input_dir: Path) -> ContainerController:
+        """Create the narrow controller for the two manager-owned roots."""
+
+        # ``engine`` remains parsed here for manager compatibility; the
+        # controller receives only the executable, never request data.
+        # Wrapper commands retain Podman's secure defaults unless the invoked
+        # executable is explicitly Docker.
+        engine_kind = "docker" if Path(self.engine[0]).name == "docker" else "podman"
+        adapter = CliEngineAdapter(engine_kind, executable=self.engine[0])
+        # Production talks only to the operator-launched controller service.
+        # An injected popen factory is retained strictly for unit tests and
+        # never selects this branch in a deployed backend.
+        if self._popen_factory is subprocess.Popen:
+            socket_name = os.environ.get("NNM_CONTAINER_CONTROLLER_SOCKET")
+            token_file = os.environ.get("NNM_CONTAINER_CONTROLLER_TOKEN_FILE")
+            if not socket_name or not token_file:
+                raise ContainerCapabilityError(
+                    "container controller unavailable; configure its authenticated Unix socket"
+                )
+            try:
+                token = Path(token_file).read_bytes()
+            except OSError as exc:
+                raise ContainerCapabilityError("container controller token unavailable") from exc
+            if not token or len(token) > 128:
+                raise ContainerCapabilityError("container controller token is invalid")
+            try:
+                text_token = token.strip().decode("ascii")
+                if len(text_token) % 2 == 0 and text_token and all(c in "0123456789abcdefABCDEF" for c in text_token):
+                    token = bytes.fromhex(text_token)
+            except UnicodeDecodeError:
+                pass
+            if not token:
+                raise ContainerCapabilityError("container controller token is invalid")
+            self._remote = ContainerControllerClient(Path(socket_name), token)
+            return None  # type: ignore[return-value]
+        controller = ContainerController(
+            engine=adapter,
+            input_root=input_dir.resolve().parent,
+            artifact_root=artifact_dir.resolve().parent,
+            dataset_root=Path(os.environ["NNM_CONTAINER_DATA_ROOT"]).resolve()
+            if os.environ.get("NNM_CONTAINER_DATA_ROOT") else None,
+            popen=self._popen_factory,
+        )
+        self._controller = controller
+        return controller
+
+    def _spec(self, job: dict[str, Any], artifact_dir: str | Path, input_dir: str | Path) -> ContainerJobSpec:
         request = ResourceRequest.model_validate(job.get("resources", {}))
         if request.gpu:
             raise ValueError("GPU package jobs require a dedicated device policy")
-        job_id = str(job["id"])
-        artifact_path = Path(artifact_dir).resolve()
-        input_path = Path(input_dir).resolve()
-        return [
-            *self.engine,
-            "run",
-            "--rm",
-            "--name",
-            f"nnm-package-{job_id[:32]}",
-            "--read-only",
-            "--network",
-            self.network,
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--pids-limit",
-            str(self.pid_limit),
-            "--cpus",
-            str(request.cpu),
-            "--memory",
-            f"{request.memory_gb:g}g",
-            "--mount",
-            f"type=bind,src={input_path},dst=/input,readonly",
-            "--mount",
-            f"type=bind,src={artifact_path},dst=/artifacts",
-            *self._data_mount(),
-            self.image,
-            "/app/.venv/bin/python",
-            "-m",
-            "package_worker",
-            "--input",
-            "/input/job.json",
-            "--artifacts",
-            "/artifacts",
-        ]
+        return ContainerJobSpec(
+            job_id=str(job["id"]), image=self.image, input_dir=Path(input_dir), artifact_dir=Path(artifact_dir),
+            cpu=request.cpu, memory_gb=request.memory_gb, pid_limit=self.pid_limit,
+            timeout_seconds=self.timeout_seconds, network=self.network,
+            dataset_dir=Path(os.environ["NNM_CONTAINER_DATA_ROOT"]).resolve()
+            if os.environ.get("NNM_CONTAINER_DATA_ROOT") else None,
+        )
 
     def submit(
         self,
@@ -187,86 +213,36 @@ class ContainerExecutor:
             if package_file.is_file():
                 payload["package"] = json.loads(package_file.read_text(encoding="utf-8"))
             job_file.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-        stdout_file = artifact_path / "stdout.log"
-        stderr_file = artifact_path / "stderr.log"
-        stdout = stdout_file.open("ab")
-        stderr = stderr_file.open("ab")
-        command = self.build_command(job, artifact_path, input_path)
-        try:
-            process = self._popen_factory(
-                command,
-                stdout=stdout,
-                stderr=stderr,
-                start_new_session=True,
-            )
-        except Exception:
-            stdout.close()
-            stderr.close()
-            raise
-        stdout.close()
-        stderr.close()
-        with self._lock:
-            self._processes[job_id] = process
-        started = time.monotonic()
+        controller = self._controller_for(artifact_path, input_path)
+        if self._remote is not None:
+            result = self._remote.submit(self._spec(job, artifact_path, input_path))
+            threading.Thread(
+                target=self._monitor_remote,
+                args=(job_id, on_heartbeat, on_finished),
+                daemon=True,
+                name=f"nnm-controller-{job_id}",
+            ).start()
+            return result
+        result = controller.submit(
+            self._spec(job, artifact_path, input_path),
+            on_heartbeat=on_heartbeat,
+            on_finished=on_finished,
+        )
+        return result
 
-        def monitor() -> None:
-            timed_out = False
-            while process.poll() is None:
-                if time.monotonic() - started >= self.timeout_seconds:
-                    timed_out = True
-                    self.cancel(job_id)
-                    break
-                on_heartbeat({"pid": process.pid, "executor": self.name})
-                time.sleep(1.0)
-            return_code = process.returncode if process.returncode is not None else 1
-            on_heartbeat({"pid": process.pid, "executor": self.name, "finished": True, "timed_out": timed_out})
-            with self._lock:
-                self._processes.pop(job_id, None)
-            if "package_input_dir" not in job:
-                shutil.rmtree(input_path, ignore_errors=True)
-            on_finished(
-                return_code,
-                {
-                    "pid": process.pid,
-                    "stdout": str(stdout_file),
-                    "stderr": str(stderr_file),
-                    "timed_out": timed_out,
-                    "command": command,
-                },
-            )
-
-        threading.Thread(target=monitor, name=f"nnm-container-{job_id}", daemon=True).start()
-        return {"pid": process.pid, "stdout": str(stdout_file), "stderr": str(stderr_file), "command": command}
-
-    @staticmethod
-    def _data_mount() -> list[str]:
-        """Expose a pre-staged local dataset read-only inside the worker."""
-
-        data_root = os.environ.get("NNM_CONTAINER_DATA_ROOT")
-        if not data_root or not Path(data_root).is_dir():
-            return []
-        return [
-            "--mount",
-            f"type=bind,src={Path(data_root).resolve()},dst=/app/data,readonly",
-        ]
+    def _monitor_remote(self, job_id: str, on_heartbeat: HeartbeatCallback,
+                        on_finished: FinishedCallback) -> None:
+        assert self._remote is not None
+        while True:
+            status = self._remote.finished(job_id)
+            if status.get("state") == "finished":
+                on_finished(int(status["code"]), status)
+                return
+            on_heartbeat(self._remote.heartbeat(job_id))
+            time.sleep(1)
 
     def cancel(self, job_id: str) -> bool:
         """Terminate the engine process group, which stops the container."""
-
-        with self._lock:
-            process = self._processes.get(job_id)
-        if process is None or process.poll() is not None:
-            return False
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return False
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                return False
-            process.wait(timeout=5)
-        return True
+        if self._remote is not None:
+            return self._remote.cancel(job_id)
+        return self._controller.cancel(job_id) if self._controller is not None else False

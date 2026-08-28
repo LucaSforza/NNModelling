@@ -37,6 +37,34 @@ class ValidatedPackage:
     files: dict[str, PackageFile]
     manifest: dict[str, Any]
 
+    @property
+    def kind(self) -> str | None:
+        """Return the declarative stereotype kind, when supplied."""
+        definition = self.files.get("stereotype.json")
+        if definition is None:
+            return None
+        try:
+            value = json.loads(definition.content)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise PackageValidationError(f"package {self.package_id} has invalid stereotype.json")
+        kind = value.get("kind") if isinstance(value, Mapping) else None
+        return kind if isinstance(kind, str) else None
+
+    @property
+    def definition(self) -> dict[str, Any]:
+        """Return the validated declarative stereotype definition."""
+
+        definition = self.files.get("stereotype.json")
+        if definition is None:
+            return {}
+        try:
+            value = json.loads(definition.content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PackageValidationError(f"package {self.package_id} has invalid stereotype.json") from exc
+        if not isinstance(value, dict):
+            raise PackageValidationError(f"package {self.package_id} stereotype.json must be an object")
+        return value
+
 
 def canonical_bundle(bundle: Mapping[str, Any]) -> bytes:
     """Return the stable bytes used for upload and persistence digests."""
@@ -72,7 +100,15 @@ def validate_bundle(bundle: Mapping[str, Any]) -> ValidatedPackage:
         raise PackageValidationError("manifest.dependencies must be a string mapping")
     pytorch = entrypoints.get("pytorch") if isinstance(entrypoints, Mapping) else None
     pytorch_entrypoint = pytorch.get("file") if isinstance(pytorch, Mapping) else pytorch
-    if package_id != "core.input" and (not isinstance(pytorch_entrypoint, str) or pytorch_entrypoint not in raw_files):
+    definition = raw_files.get("stereotype.json")
+    package_kind = None
+    if isinstance(definition, Mapping) and isinstance(definition.get("content"), str):
+        try:
+            decoded_definition = json.loads(base64.b64decode(definition["content"], validate=True))
+            package_kind = decoded_definition.get("kind") if isinstance(decoded_definition, Mapping) else None
+        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    if package_kind != "input" and (not isinstance(pytorch_entrypoint, str) or pytorch_entrypoint not in raw_files):
         raise PackageValidationError("manifest.entrypoints.pytorch must reference a package file")
 
     files: dict[str, PackageFile] = {}
@@ -93,7 +129,11 @@ def validate_bundle(bundle: Mapping[str, Any]) -> ValidatedPackage:
     return ValidatedPackage(package_id, version, dict(dependencies), files, dict(manifest))
 
 
-def load_builder(package: ValidatedPackage) -> Any:
+def load_builder(
+    package: ValidatedPackage,
+    *,
+    stereotype_runtime_module: types.ModuleType | None = None,
+) -> Any:
     """Load a package builder without honoring arbitrary import paths."""
 
     raw_entrypoint = package.manifest["entrypoints"]["pytorch"]
@@ -105,7 +145,7 @@ def load_builder(package: ValidatedPackage) -> Any:
     module.__file__ = entrypoint
     module.__package__ = ""
     globals_dict = module.__dict__
-    globals_dict["__builtins__"] = _safe_builtins()
+    globals_dict["__builtins__"] = _safe_builtins(stereotype_runtime_module)
     globals_dict["__name__"] = module.__name__
     try:
         exec(compile(tree, entrypoint, "exec"), globals_dict, globals_dict)
@@ -141,7 +181,7 @@ def _validate_source(tree: ast.Module, filename: str) -> None:
             raise PackageValidationError(f"global declarations are not allowed in {filename}")
 
 
-def _safe_builtins() -> dict[str, Any]:
+def _safe_builtins(stereotype_runtime_module: types.ModuleType | None = None) -> dict[str, Any]:
     names = (
         "bool", "dict", "enumerate", "Exception", "float", "int", "isinstance", "len", "list",
         "max", "min", "range", "str", "tuple", "zip", "ValueError", "TypeError", "RuntimeError",
@@ -149,10 +189,31 @@ def _safe_builtins() -> dict[str, Any]:
     )
     import builtins
 
-    return {name: getattr(builtins, name) for name in names} | {"__import__": _restricted_import}
+    return {name: getattr(builtins, name) for name in names} | {
+        "__import__": lambda name, globals=None, locals=None, fromlist=(), level=0: _restricted_import(
+            name,
+            globals,
+            locals,
+            fromlist,
+            level,
+            stereotype_runtime_module=stereotype_runtime_module,
+        )
+    }
 
 
-def _restricted_import(name: str, globals: Any = None, locals: Any = None, fromlist: tuple[str, ...] = (), level: int = 0) -> Any:
+def _restricted_import(
+    name: str,
+    globals: Any = None,
+    locals: Any = None,
+    fromlist: tuple[str, ...] = (),
+    level: int = 0,
+    *,
+    stereotype_runtime_module: types.ModuleType | None = None,
+) -> Any:
     if level or name.split(".")[0] not in {"torch", "typing", "copy", "stereotype_runtime"}:
         raise ImportError(f"package import is not allowed: {name}")
+    if stereotype_runtime_module is not None and name == "stereotype_runtime.pytorch":
+        return stereotype_runtime_module
+    if stereotype_runtime_module is not None and name == "stereotype_runtime":
+        return types.SimpleNamespace(pytorch=stereotype_runtime_module)
     return __import__(name, globals, locals, fromlist, level)

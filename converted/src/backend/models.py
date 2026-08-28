@@ -1,15 +1,11 @@
-"""Pydantic models for the remote-training API.
-
-The ``nntree`` network variant is deprecated compatibility surface; package
-jobs are the forward path and use a separate network format.
-"""
+"""Typed public models for the package-training API."""
 
 from __future__ import annotations
 
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 GPU_TYPE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -18,11 +14,11 @@ PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
 
 
 class NetworkPayload(BaseModel):
-    """A compiled NNTree or package graph included in a training job."""
+    """The package graph and immutable bundle reference for a job."""
 
     model_config = ConfigDict(extra="forbid")
 
-    format: Literal["nntree", "package"] = "nntree"
+    format: Literal["package"] = "package"
     value: dict[str, Any]
 
     @field_validator("value")
@@ -30,11 +26,9 @@ class NetworkPayload(BaseModel):
     def validate_network_value(cls, value: dict[str, Any], info: Any) -> dict[str, Any]:
         """Require the minimal shape of the selected transport format."""
 
-        if info.data.get("format") == "package":
-            has_inline_packages = isinstance(value.get("packages"), list)
-            has_bundle_ref = isinstance(value.get("bundle_ref"), str) and bool(value["bundle_ref"])
-            if not isinstance(value.get("graph"), dict) or not (has_inline_packages or has_bundle_ref):
-                raise ValueError("package network requires graph plus packages or bundle_ref")
+        has_bundle_ref = isinstance(value.get("bundle_ref"), str) and bool(value["bundle_ref"])
+        if not isinstance(value.get("graph"), dict) or not has_bundle_ref:
+            raise ValueError("package network requires graph plus bundle_ref")
         return value
 
 
@@ -105,6 +99,63 @@ class ResourceRequest(BaseModel):
         return value
 
 
+class DatasetRequest(BaseModel):
+    """Dataset constructor and bounded split configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(min_length=1, max_length=240)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_registered_parameters(self) -> "DatasetRequest":
+        from backend.dataset_registry import validate_dataset_parameters
+
+        self.parameters = validate_dataset_parameters(self.target, self.parameters)
+        return self
+
+
+class OptimizerRequest(BaseModel):
+    """Optimizer target and learning rate understood by the worker."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(default="torch.optim.Adam", min_length=1, max_length=240)
+    learning_rate: float = Field(default=0.001, gt=0, allow_inf_nan=False)
+
+
+class TrainerRequest(BaseModel):
+    """Training controls exposed by the UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_epochs: int = Field(default=20, ge=1, le=100_000)
+    accelerator: Literal["auto", "cpu", "cuda"] = "auto"
+    patience: int = Field(default=3, ge=0, le=100_000)
+    min_delta: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+
+
+class WandbRequest(BaseModel):
+    """Explicitly configured experiment logging mode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project: str = Field(default="NeuralNetworks", max_length=200)
+    mode: Literal["disabled", "offline", "online"] = "disabled"
+
+
+class TrainingRequest(BaseModel):
+    """Complete, validated training contract sent by the frontend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: DatasetRequest
+    seed: int = Field(default=0, ge=0, le=2**63 - 1)
+    optimizer: OptimizerRequest = Field(default_factory=OptimizerRequest)
+    trainer: TrainerRequest = Field(default_factory=TrainerRequest)
+    wandb: WandbRequest = Field(default_factory=WandbRequest)
+
+
 class JobSubmission(BaseModel):
     """Complete request submitted to the training backend."""
 
@@ -112,7 +163,7 @@ class JobSubmission(BaseModel):
 
     schema_version: int = Field(default=1, ge=1)
     network: NetworkPayload
-    training: dict[str, Any]
+    training: TrainingRequest
     resources: ResourceRequest = Field(default_factory=ResourceRequest)
     priority: int = Field(default=0, ge=0, le=1_000_000)
     package_name: str | None = Field(default=None, max_length=100)
@@ -180,16 +231,6 @@ class ModelPackageInfo(BaseModel):
     input_adapter: dict[str, Any]
 
 
-class TrainingPackageInfo(BaseModel):
-    """Digest-verified archive containing a package graph and trained weights."""
-
-    schema_version: int
-    format: Literal["nnm-trained-package/v1"]
-    filename: str
-    sha256: str
-    size: int = Field(ge=0)
-
-
 class JobStatus(BaseModel):
     """Public job metadata returned by the API."""
 
@@ -205,7 +246,6 @@ class JobStatus(BaseModel):
     heartbeat_at: str | None = None
     wandb_url: str | None = None
     model_package: ModelPackageInfo | None = None
-    training_package: TrainingPackageInfo | None = None
     package_error: str | None = None
     artifact_dir: str
 

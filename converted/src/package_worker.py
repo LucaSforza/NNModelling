@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib
-import importlib.util
-import inspect
 import json
 import random
-import zipfile
 from pathlib import Path
 from typing import Any
 
 import torch
 from safetensors.torch import save_file
 
-from package_runtime import compile_package_graph
+from package_runtime import CompiledPrograms, compile_package_graph
 
 
 def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
@@ -25,7 +20,10 @@ def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
     request = json.loads(input_path.read_text(encoding="utf-8"))
     package = request.get("package")
     if not isinstance(package, dict):
-        return _run_legacy(request, input_path.parent, artifacts_path)
+        raise ValueError("package is required")
+    training = _training_config(request)
+    seed = _seed_from_training(training)
+    _seed_everything(seed)
     model = compile_package_graph(package)
     summary = train(model, request, artifacts_path)
     result = {
@@ -42,92 +40,37 @@ def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
         json.dumps(result, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    _write_trained_package(package, artifacts_path)
     return result
 
 
-def _run_legacy(request: dict[str, Any], package_root: Path, artifacts_path: Path) -> dict[str, Any]:
-    """Keep the old path working while NNTree/container callers migrate."""
+def train(model: CompiledPrograms, request: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:
+    """Run the typed package training contract inside the worker."""
 
-    packages = request.get("packages", [])
-    if not isinstance(packages, list):
-        raise TypeError("packages must be a list")
-    loaded = [_load_legacy_package(package_root, package) for package in packages]
-    by_identity = {f"{item['id']}@{item['version']}": item for item in loaded}
-    builds = []
-    for invocation in request.get("builds", []):
-        identity = str(invocation["package"])
-        package = by_identity.get(identity)
-        if package is None:
-            raise ValueError(f"build references undeclared package: {identity}")
-        module = package["build"](
-            invocation.get("parameters", {}),
-            invocation.get("context", {"inputs": [], "output": {}}),
-            invocation.get("services", {}),
-        )
-        builds.append({"package": identity, "module": type(module).__name__})
-    result = {
-        "schema_version": 1,
-        "packages": [{"id": item["id"], "version": item["version"]} for item in loaded],
-        "builds": builds,
-    }
-    artifacts_path.mkdir(parents=True, exist_ok=True)
-    (artifacts_path / "package-worker-result.json").write_text(
-        json.dumps(result, indent=2), encoding="utf-8"
-    )
-    return result
-
-
-def _load_legacy_package(package_root: Path, package: dict[str, Any]) -> dict[str, Any]:
-    """Load the pre-bundle worker fixture used by the compatibility test."""
-
-    package_id = str(package["id"])
-    version = str(package["version"])
-    root = (package_root / str(package.get("path", f"packages/{package_id}/{version}"))).resolve()
-    if package_root.resolve() not in root.parents and root != package_root.resolve():
-        raise ValueError("package path escapes input root")
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("id") != package_id or manifest.get("version") != version:
-        raise ValueError("package identity mismatch")
-    entrypoint = root / str(package.get("entrypoint", "pytorch.py"))
-    module_name = "nnm_legacy_" + hashlib.sha256(f"{package_id}@{version}".encode()).hexdigest()[:16]
-    spec = importlib.util.spec_from_file_location(module_name, entrypoint)
-    if spec is None or spec.loader is None:
-        raise ImportError("cannot load package entrypoint")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    build = getattr(module, "build", None)
-    if not callable(build):
-        raise TypeError("package entrypoint must export build")
-    return {"id": package_id, "version": version, "build": build}
-
-
-def train(model: torch.nn.Module, request: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:
-    """Run a small, deterministic PyTorch loop using the registered dataset."""
-
-    training = _training_config(request)
+    training = _normalized_training(_training_config(request))
+    _validate_training_support(training)
     dataset_config = training.get("dataset", {})
-    target = str(dataset_config.get("target", "dataset.autoencoder_mnist.AutoencoderMNIST"))
+    target = str(dataset_config["target"])
     dataset_class = _load_dataset_class(target)
-    dataset = dataset_class(**_dataset_parameters(dataset_class, dataset_config.get("parameters", {})))
+    dataset = dataset_class(**_dataset_parameters(target, dataset_config["parameters"]))
     train_loader, validation_loader, _ = dataset.division()
 
-    seed = int(training.get("seed", 0))
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
+    device = _training_device(training["trainer"]["accelerator"])
+    model.to(device)
     model.train()
     optimizer = _optimizer(model, training.get("optimizer", {}))
     max_epochs = max(1, int(training.get("trainer", {}).get("max_epochs", 1)))
+    patience = int(training["trainer"].get("patience", 3))
+    min_delta = float(training["trainer"].get("min_delta", 0.0))
     history: list[dict[str, float]] = []
+    best_validation = float("inf")
+    stale_epochs = 0
 
     for epoch in range(max_epochs):
         total = 0.0
         batches = 0
         for inputs, targets in train_loader:
             optimizer.zero_grad(set_to_none=True)
-            outputs = model(inputs, targets)
-            loss = _loss(outputs, targets)
+            loss = model.objective(inputs.to(device), targets.to(device))
             if not torch.isfinite(loss):
                 raise RuntimeError("package training produced a non-finite loss")
             loss.backward()
@@ -135,12 +78,19 @@ def train(model: torch.nn.Module, request: dict[str, Any], artifacts_path: Path)
             total += float(loss.detach())
             batches += 1
         train_loss = total / max(1, batches)
-        validation_loss = _evaluate(model, validation_loader)
+        validation_loss = _evaluate(model, validation_loader, device)
         history.append({"epoch": float(epoch + 1), "train_loss": train_loss, "val_loss": validation_loss})
         print(
             json.dumps({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": validation_loss}),
             flush=True,
         )
+        if validation_loss < best_validation - min_delta:
+            best_validation = validation_loss
+            stale_epochs = 0
+        else:
+            stale_epochs += 1
+            if stale_epochs > patience:
+                break
 
     artifacts_path.mkdir(parents=True, exist_ok=True)
     tensors = {
@@ -153,8 +103,9 @@ def train(model: torch.nn.Module, request: dict[str, Any], artifacts_path: Path)
     save_file(tensors, str(artifacts_path / "weights.safetensors"))
     summary = {
         "dataset": target,
-        "epochs": max_epochs,
+        "epochs": len(history),
         "history": history,
+        "config": training,
         "num_parameters": sum(parameter.numel() for parameter in model.parameters()),
     }
     (artifacts_path / "training-summary.json").write_text(
@@ -176,58 +127,73 @@ def _training_config(request: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _write_trained_package(package: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:
-    """Bundle the exact graph resources and trained weights for inference."""
+def _seed_from_training(training: dict[str, Any]) -> int:
+    value = training.get("seed", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("training.seed must be a non-negative integer")
+    return value
 
-    archive_path = artifacts_path / "trained-package.zip"
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "package.json",
-            json.dumps(package, indent=2, sort_keys=True),
-        )
-        for name in ("weights.safetensors", "training-summary.json", "package-worker-result.json"):
-            archive.write(artifacts_path / name, name)
-    digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
-    return {
-        "schema_version": 1,
-        "format": "nnm-trained-package/v1",
-        "filename": archive_path.name,
-        "sha256": digest,
-        "size": archive_path.stat().st_size,
-    }
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+def _normalized_training(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the public request without duplicating dataset settings."""
+    if not isinstance(raw, dict):
+        raise ValueError("training must be an object")
+    dataset = raw.get("dataset")
+    if not isinstance(dataset, dict) or not isinstance(dataset.get("target"), str):
+        raise ValueError("training.dataset.target is required")
+    parameters = dict(dataset.get("parameters", {}))
+    if any(name in raw for name in ("batch_size", "num_workers", "train_size")):
+        raise ValueError("loader settings belong in training.dataset.parameters")
+    result = dict(raw)
+    result["dataset"] = {"target": dataset["target"], "parameters": parameters}
+    result["optimizer"] = dict(raw.get("optimizer", {}))
+    result["trainer"] = dict(raw.get("trainer", {}))
+    result["trainer"].setdefault("max_epochs", 20)
+    result["trainer"].setdefault("accelerator", "auto")
+    result["trainer"].setdefault("patience", 3)
+    result["trainer"].setdefault("min_delta", 0.0)
+    result.setdefault("seed", 0)
+    result.setdefault("wandb", {"mode": "disabled", "project": "NeuralNetworks"})
+    if "overrides" in result:
+        raise ValueError("training.overrides is not part of the package training contract")
+    return result
+
+
+def _validate_training_support(training: dict[str, Any]) -> None:
+    wandb = training.get("wandb", {})
+    if isinstance(wandb, dict) and wandb.get("mode", "disabled") != "disabled":
+        raise ValueError("W&B logging is not available in the package worker")
+    _seed_from_training(training)
+    trainer = training["trainer"]
+    accelerator = trainer.get("accelerator", "auto")
+    if accelerator not in {"auto", "cpu", "cuda"}:
+        raise ValueError(f"unsupported accelerator: {accelerator}")
+
+
+def _training_device(accelerator: str) -> torch.device:
+    if accelerator == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA accelerator requested but no CUDA device is available")
+    return torch.device("cuda" if accelerator == "cuda" else "cpu")
 
 
 def _load_dataset_class(target: str) -> type[Any]:
-    if not target.startswith("dataset.") or target.count(".") < 2:
-        raise ValueError("dataset target must be a trusted dataset module")
-    module_name, class_name = target.rsplit(".", 1)
-    module = importlib.import_module(module_name)
-    candidate = getattr(module, class_name, None)
-    if not inspect.isclass(candidate):
-        raise ValueError(f"unknown dataset target: {target}")
-    return candidate
+    from backend.dataset_registry import _dataset_class
+
+    return _dataset_class(target)
 
 
-def _dataset_parameters(dataset_class: type[Any], raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError("dataset parameters must be an object")
-    result: dict[str, Any] = {}
-    for name, parameter in inspect.signature(dataset_class).parameters.items():
-        if name not in raw or raw[name] in (None, ""):
-            continue
-        value = raw[name]
-        default = parameter.default
-        try:
-            if isinstance(default, bool):
-                value = str(value).lower() == "true"
-            elif isinstance(default, int):
-                value = int(value)
-            elif isinstance(default, float):
-                value = float(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"invalid dataset parameter {name}") from exc
-        result[name] = value
-    return result
+def _dataset_parameters(target: str, raw: Any) -> dict[str, Any]:
+    from backend.dataset_registry import validate_dataset_parameters
+
+    return validate_dataset_parameters(target, raw)
 
 
 def _optimizer(model: torch.nn.Module, config: Any) -> torch.optim.Optimizer:
@@ -240,23 +206,13 @@ def _optimizer(model: torch.nn.Module, config: Any) -> torch.optim.Optimizer:
     return optimizer_class(model.parameters(), lr=learning_rate)
 
 
-def _loss(outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    if outputs.ndim == 0:
-        return outputs
-    if outputs.shape == targets.shape:
-        return torch.nn.functional.mse_loss(outputs, targets)
-    if targets.dtype in (torch.int64, torch.long) and outputs.ndim == 2:
-        return torch.nn.functional.cross_entropy(outputs, targets)
-    raise ValueError(f"model output shape {tuple(outputs.shape)} does not match target {tuple(targets.shape)}")
-
-
 @torch.no_grad()
-def _evaluate(model: torch.nn.Module, loader: Any) -> float:
+def _evaluate(model: CompiledPrograms, loader: Any, device: torch.device) -> float:
     model.eval()
     total = 0.0
     batches = 0
     for inputs, targets in loader:
-        total += float(_loss(model(inputs, targets), targets))
+        total += float(model.objective(inputs.to(device), targets.to(device)))
         batches += 1
     model.train()
     return total / max(1, batches)

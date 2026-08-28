@@ -5,7 +5,8 @@ from __future__ import annotations
 import inspect
 import importlib
 import pkgutil
-from typing import Any, get_type_hints
+from types import UnionType
+from typing import Any, get_args, get_origin, get_type_hints
 
 from dataset.ds import Dataset
 
@@ -85,6 +86,80 @@ def discover_datasets() -> list[DatasetInfo]:
                 )
             )
     return sorted(result, key=lambda item: item.target)
+
+
+def validate_dataset_parameters(target: str, raw: Any) -> dict[str, Any]:
+    """Coerce and validate constructor parameters from the registered schema.
+
+    Dataset constructors are the single owner of loader settings.  The worker
+    and API use this same registry path, so unknown fields cannot silently
+    disappear and browser strings are converted before construction.
+    """
+
+    if not isinstance(raw, dict):
+        raise ValueError("dataset parameters must be an object")
+    dataset_class = _dataset_class(target)
+    try:
+        signature = inspect.signature(dataset_class.__init__)
+        hints = get_type_hints(dataset_class.__init__)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"cannot inspect registered dataset {target}") from exc
+    allowed = {
+        name: parameter
+        for name, parameter in signature.parameters.items()
+        if name != "self" and parameter.kind not in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        )
+    }
+    unknown = sorted(set(raw) - set(allowed))
+    if unknown:
+        raise ValueError(f"unknown dataset parameter(s): {', '.join(unknown)}")
+    result: dict[str, Any] = {}
+    for name, value in raw.items():
+        if value in (None, ""):
+            continue
+        result[name] = _coerce_parameter(name, value, hints.get(name), allowed[name])
+    return result
+
+
+def _dataset_class(target: str) -> type[Dataset]:
+    allowed = {item.target for item in discover_datasets()}
+    if target not in allowed:
+        raise ValueError(f"dataset target is not registered: {target}")
+    module_name, class_name = target.rsplit(".", 1)
+    candidate = getattr(importlib.import_module(module_name), class_name, None)
+    if not inspect.isclass(candidate) or not issubclass(candidate, Dataset):
+        raise ValueError(f"unknown dataset target: {target}")
+    return candidate
+
+
+def _coerce_parameter(name: str, value: Any, annotation: Any, parameter: inspect.Parameter) -> Any:
+    """Apply the primitive type declared by the trusted constructor."""
+
+    options = get_args(annotation)
+    if options and (get_origin(annotation) in (UnionType,)):
+        annotation = next((item for item in options if item is not type(None)), str)
+    if annotation in (None, inspect.Parameter.empty):
+        annotation = type(parameter.default) if parameter.default is not inspect.Parameter.empty else str
+    try:
+        if annotation is bool:
+            if isinstance(value, bool):
+                return value
+            if str(value).lower() in {"true", "1"}:
+                return True
+            if str(value).lower() in {"false", "0"}:
+                return False
+            raise ValueError
+        if annotation is int:
+            return int(value)
+        if annotation is float:
+            return float(value)
+        if annotation is str:
+            return str(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid dataset parameter {name}") from exc
+    return value
 
 
 def _num_classes(dataset_class: type[Dataset], config: dict[str, Any] | None = None) -> int | None:

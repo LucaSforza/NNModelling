@@ -12,6 +12,8 @@ admin_token_file := env_var_or_default("NNM_ADMIN_TOKEN_FILE", valkey_data_dir /
 admin_url := env_var_or_default("NNM_ADMIN_URL", "http://127.0.0.1:" + api_port)
 container_engine := env_var_or_default("NNM_CONTAINER_ENGINE", "podman")
 container_image := env_var_or_default("NNM_CONTAINER_IMAGE", "")
+controller_socket := env_var_or_default("NNM_CONTAINER_CONTROLLER_SOCKET", "/tmp/nnm-controller/controller.sock")
+controller_token_file := env_var_or_default("NNM_CONTAINER_CONTROLLER_TOKEN_FILE", valkey_data_dir / "controller.token")
 
 default:
     @just --list
@@ -27,7 +29,12 @@ admin-init:
 
 # Start the FastAPI backend in the foreground.
 backend: admin-init
-    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_VALKEY_URL="{{valkey_url}}" NNM_ADMIN_TOKEN_FILE="{{admin_token_file}}" uv run uvicorn backend.app:app --host "{{api_host}}" --port "{{api_port}}"
+    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_VALKEY_URL="{{valkey_url}}" NNM_ADMIN_TOKEN_FILE="{{admin_token_file}}" NNM_CONTAINER_IMAGE="{{container_image}}" NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_CONTROLLER_SOCKET="{{controller_socket}}" NNM_CONTAINER_CONTROLLER_TOKEN_FILE="{{controller_token_file}}" uv run uvicorn backend.app:app --host "{{api_host}}" --port "{{api_port}}"
+
+# Start the trusted container controller separately. Only this process needs
+# access to the local Podman/Docker socket; FastAPI connects through its RPC.
+controller: admin-init
+    mkdir -p "$(dirname '{{controller_socket}}')" "{{valkey_data_dir}}"; if [[ ! -s "{{controller_token_file}}" ]]; then (umask 077; python -c 'import secrets; print(secrets.token_hex(32))' > "{{controller_token_file}}"); fi; cd "{{converted_dir}}"; UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_CONTAINER_DATA_ROOT="${NNM_CONTAINER_DATA_ROOT:-}" uv run python -m backend.container_controller serve "{{controller_socket}}" @"{{controller_token_file}}" "{{converted_dir}}/jobs" "{{converted_dir}}/jobs" "{{container_engine}}"
 
 # Check that the API is reachable.
 health:
