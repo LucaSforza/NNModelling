@@ -45,6 +45,20 @@ batch has explicit `inputs` and `targets` fields at the worker boundary. A
 target is not represented by a normal graph edge or a second top-level model
 input.
 
+## Dataset-owned training settings
+
+Dataset-specific settings are part of the registered dataset schema, not a
+second global training configuration. In v1 this includes batch size, worker
+count and split policy. The browser selects a dataset and submits only values
+accepted by that schema; the worker validates and serializes the schema once.
+Duplicated global fields, Hydra-style overrides, and silent precedence between
+dataset and global values are invalid.
+
+Evaluation is deterministic for stochastic model components. A VAE
+reparameterization uses its mean in eval mode; random latent sampling is an
+explicitly declared wheel adapter with a versioned randomness policy, never an
+implicit behavior of prediction.
+
 ## Declarative objective bindings
 
 Every package with `kind: "loss"` declares its external objective inputs in
@@ -80,6 +94,19 @@ inspect Python signatures to discover this contract.
 
 Named or structured multi-target batches are deferred. Adding them requires a
 new versioned binding source; v1 does not interpret arbitrary object paths.
+
+An external input may also declare a versioned, data-independent adaptation
+before it is passed to the objective. The current v1 adaptation is
+`flatten_batch`, which preserves dimension zero and flattens all remaining
+dimensions. This is useful when a reconstruction objective's model branch
+declares a flattened output while the dataset exposes image-shaped targets:
+
+```json
+{ "name": "target", "source": "batch.targets", "transform": "flatten_batch" }
+```
+
+The adaptation belongs to the objective package declaration, not to a
+package-ID branch, output-shape heuristic, or dataset-specific worker rule.
 
 ## Graph roles and partitioning
 

@@ -102,6 +102,10 @@ strictly, verifies descriptor equality, and returns the generic adapter facade.
 - The metadata validator recognizes optional randomness fields, but seeded
   sampling behavior has not been established by the current tests or browser
   QA.
+- A stochastic capability such as VAE latent sampling is not part of ordinary
+  prediction. Its owning stereotype declares it as an adapter and declares a
+  randomness policy; evaluation remains deterministic. Seed control must be
+  defined before a stochastic adapter is accepted as complete.
 
 ## Invariants
 
@@ -145,6 +149,9 @@ template-compatibility cases.
       selected adapter is verified through the real UI.
 - [ ] A VAE example exercises a real public adapter through the installed wheel
       and receives visual QA.
+- [ ] Repeated ordinary VAE predictions are deterministic, while the selected
+      sampling adapter demonstrates its declared stochastic behavior without
+      exposing internal modules or objective inputs.
 
 ## Required handoff
 

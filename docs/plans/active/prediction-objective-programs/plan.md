@@ -67,10 +67,15 @@ NNTree fixtures as active verification inputs.
 - replace the frontend single-terminal rule with role-aware completion;
 - compile shared modules into prediction and objective programs;
 - normalize registered dataset batches to explicit inputs and targets;
+- make registered dataset schemas the sole owner of dataset-specific training
+  settings (batch size, workers and split policy), with no duplicated global
+  or Hydra-style overrides;
 - remove all inferred-loss and signature-dispatch behavior;
 - make exported wheels invoke only the prediction program;
 - support an opt-in wheel-adapter surface declared by stereotype packages, for
   model capabilities beyond prediction without exposing compiler internals;
+- make evaluation deterministic for stochastic model components, while
+  exposing stochastic sampling only through an explicitly declared adapter;
 - reject incompatible worker images with a typed protocol error;
 - prove the complete ResNet and VAE browser-to-wheel paths.
 
@@ -114,6 +119,10 @@ NNTree fixtures as active verification inputs.
 - Dataset adapters remain preprocessing boundaries from an external value to a
   declared model input. They cannot sample a model distribution, decode a
   latent tensor or obtain model modules.
+- Dataset registration owns `batch_size`, `num_workers` and split policy. The
+  worker rejects duplicated global controls or silently merged UI defaults.
+- Stochastic modules use deterministic evaluation semantics; random sampling is
+  a separate stereotype-declared adapter with an explicit randomness policy.
 - A public wheel adapter must have declared input/output contracts, a target
   policy and, where relevant, an explicit randomness policy. It cannot invoke
   the training-only objective region or receive implicit `batch.targets`.
@@ -162,8 +171,13 @@ returns a typed compatibility failure rather than executing older semantics.
    no output-shape/dtype fallback exists.
 5. Add failing wheel tests showing that a training graph containing a loss
    still exposes target-free prediction.
-6. Implement the smallest code needed to make each layer pass in order.
-7. Rebuild the worker image and run browser-level ResNet and VAE acceptance.
+6. Add request/schema tests proving dataset-owned batch and split settings are
+   transmitted once and conflicting global settings fail.
+7. Add eval-mode tests for deterministic VAE reconstruction and adapter tests
+   proving stochastic sampling is explicit and declared.
+8. Implement the smallest code needed to make each layer pass in order.
+9. Rebuild the worker image and run long-enough browser-level ResNet and VAE
+   acceptance, then exercise both downloaded wheels in clean environments.
 
 ## Task graph
 
@@ -228,6 +242,10 @@ module.
 - [ ] VAE with explicit Output, MSE, KL and scalar addition trains from the
       browser and its downloaded wheel reconstructs `[B, 1, 28, 28]` through
       `predict_tensor()`.
+- [ ] Dataset-specific batch size, worker count and split settings have one
+      registered owner and conflicting legacy/global values are rejected.
+- [ ] VAE reconstruction is deterministic in evaluation; random latent
+      sampling is reachable only through its explicitly selected adapter.
 - [ ] The VAE example uses only the installed wheel's public API and produces a
       visually inspected reconstruction sheet. It does not claim latent-space
       interpolation until a public endpoint contract exists.

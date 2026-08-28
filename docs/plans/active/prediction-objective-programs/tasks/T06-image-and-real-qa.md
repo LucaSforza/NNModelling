@@ -49,7 +49,7 @@ through downloaded, clean-environment wheels.
 3. Build a fresh worker image, record its digest and verify Podman and Docker
    command parity with fake-engine tests before real-engine smoke checks.
 4. Through the Codex in-app Browser, train the explicit-loss ResNet on bounded
-   MNIST and download its wheel.
+   MNIST for a meaningful number of epochs, and download its wheel.
 5. Through the same UI, train the explicit-output VAE and download its wheel.
 6. Install each wheel in a clean temporary environment. Verify ResNet logits
    and VAE reconstructions through only `load_model().predict_tensor()`.
@@ -57,6 +57,12 @@ through downloaded, clean-environment wheels.
    reconstruction sheet. Do not simulate a latent interpolation with an
    input-space morph: latent traversal waits for an explicit public endpoint
    contract (T09).
+8. Verify evaluation reconstruction twice with identical inputs and verify
+   that stochastic latent sampling is available only through the selected,
+   declared adapter. Record loss curves and inspected image paths.
+9. Add a ResNet example using only its installed wheel and demonstrate logits
+   on a small input fixture, confirming the exported state is the completed
+   browser job's state.
 
 ## Out of scope
 
@@ -70,11 +76,15 @@ through downloaded, clean-environment wheels.
 - [ ] Browser job logs expose the expected worker protocol and immutable image
       digest.
 - [ ] ResNet and VAE jobs reach `succeeded` with explicit objectives.
+- [ ] Both jobs run enough epochs to assess learning rather than only worker
+      startup; curves and outputs are reviewed.
 - [ ] Both browser download controls produce verified wheels.
 - [ ] Clean installs pass the output-shape assertions without targets.
 - [ ] The VAE example contains no checkout runtime or internal model access.
 - [ ] Actual image outputs are visually inspected and poor results are reported
       rather than described as successful interpolation.
+- [ ] Deterministic VAE evaluation and explicit stochastic-adapter behavior are
+      exercised through the downloaded wheel.
 
 T09 has focused Python and clean-wheel coverage, but no browser submission,
 download and installed-wheel exercise for a selected adapter has been recorded
