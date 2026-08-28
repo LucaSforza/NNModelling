@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 import torch
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 
 from model_package.adapters import adapter_spec_for_dataset
-from model_package.exporter import build_model_wheel
+from model_package.exporter import _architecture_fingerprint, build_model_wheel
 from package_runtime.compiler import compile_package_graph
 
 
@@ -101,6 +101,24 @@ def _cleanup(name: str, wheel: Path) -> None:
             del sys.modules[module_name]
 
 
+def _wheel_fingerprint(wheel: Path, name: str) -> str:
+    with zipfile.ZipFile(wheel) as archive:
+        architecture = json.loads(archive.read(f"nnm_{name}/architecture.json"))
+    return architecture["architecture_fingerprint"]
+
+
+def _save_checkpoint(path: Path, state_dict: dict[str, torch.Tensor], fingerprint: str | None) -> None:
+    metadata = {} if fingerprint is None else {"nnm_architecture_fingerprint": fingerprint}
+    save_file(state_dict, str(path), metadata=metadata)
+
+
+def test_architecture_fingerprint_is_canonical_and_non_recursive() -> None:
+    architecture = {"format": "package-model/v1", "package": {"graph": {"nodes": []}}}
+    reordered = {"package": {"graph": {"nodes": []}}, "format": "package-model/v1"}
+    assert _architecture_fingerprint(architecture) == _architecture_fingerprint(reordered)
+    assert _architecture_fingerprint({**architecture, "architecture_fingerprint": "ignored"}) == _architecture_fingerprint(architecture)
+
+
 def test_classifier_wheel_exposes_logits_without_a_target(tmp_path: Path) -> None:
     bundle = _bundle(
         [
@@ -123,6 +141,102 @@ def test_classifier_wheel_exposes_logits_without_a_target(tmp_path: Path) -> Non
         assert output.shape == (4, 3)
     finally:
         _cleanup("classifier", wheel)
+
+
+def test_wheel_model_facade_loads_embedded_and_compatible_override(tmp_path: Path) -> None:
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input"},
+            {
+                "id": "linear",
+                "type": "layer",
+                "package": {"id": "core.linear", "version": "0.1.0"},
+                "parameters": {"in_features": 2, "out_features": 2},
+            },
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    wheel, module = _wheel_model(tmp_path, bundle, "model")
+    try:
+        fingerprint = _wheel_fingerprint(wheel, "model")
+        checkpoint = tmp_path / "override.safetensors"
+        with zipfile.ZipFile(wheel) as archive:
+            embedded_path = tmp_path / "embedded.safetensors"
+            embedded_path.write_bytes(archive.read("nnm_model/weights.safetensors"))
+        state_dict = load_file(str(embedded_path))
+        _save_checkpoint(checkpoint, state_dict, fingerprint)
+        value = torch.randn(3, 2)
+        embedded = module.Model().predict_tensor(value)
+        overridden = module.Model(checkpoint).predict_tensor(value)
+        assert torch.equal(embedded, overridden)
+        assert isinstance(module.load_model(), module.Model)
+        assert module.InferenceModel is module.Model
+    finally:
+        _cleanup("model", wheel)
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_kind", "message"),
+    [
+        ("metadata", "fingerprint"),
+        ("fingerprint", "fingerprint"),
+        ("missing_keys", "keys mismatch"),
+        ("extra_keys", "keys mismatch"),
+        ("shape", "shape mismatch"),
+        ("dtype", "dtype mismatch"),
+    ],
+)
+def test_model_rejects_incompatible_weight_override(tmp_path: Path, checkpoint_kind: str, message: str) -> None:
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input"},
+            {
+                "id": "linear",
+                "type": "layer",
+                "package": {"id": "core.linear", "version": "0.1.0"},
+                "parameters": {"in_features": 2, "out_features": 2},
+            },
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    wheel, module = _wheel_model(tmp_path, bundle, f"reject_{checkpoint_kind}")
+    try:
+        name = f"reject_{checkpoint_kind}"
+        fingerprint = _wheel_fingerprint(wheel, name)
+        state_dict = {name: tensor.clone() for name, tensor in compile_package_graph(bundle).state_dict().items()}
+        if checkpoint_kind == "missing_keys":
+            state_dict.pop(next(iter(state_dict)))
+        elif checkpoint_kind == "extra_keys":
+            state_dict["unexpected"] = torch.zeros(1)
+        elif checkpoint_kind == "shape":
+            first = next(iter(state_dict))
+            state_dict[first] = torch.zeros((1,), dtype=state_dict[first].dtype)
+        elif checkpoint_kind == "dtype":
+            first = next(iter(state_dict))
+            state_dict[first] = state_dict[first].double()
+        checkpoint = tmp_path / f"{checkpoint_kind}.safetensors"
+        checkpoint_fingerprint = (
+            None
+            if checkpoint_kind == "metadata"
+            else "wrong"
+            if checkpoint_kind == "fingerprint"
+            else fingerprint
+        )
+        _save_checkpoint(checkpoint, state_dict, checkpoint_fingerprint)
+        with pytest.raises(ValueError, match=message):
+            module.Model(weights=checkpoint)
+    finally:
+        _cleanup(name, wheel)
 
 
 def test_wheel_exposes_selected_stereotype_adapter_without_model_internals(tmp_path: Path) -> None:

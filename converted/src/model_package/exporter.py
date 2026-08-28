@@ -18,6 +18,7 @@ from package_runtime.compiler import adapter_descriptors
 PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*(?:[A-Za-z0-9.+-]*)\Z")
 RUNTIME_FILES = ("runtime.py", "adapters.py")
+ARCHITECTURE_FINGERPRINT = "nnm_architecture_fingerprint"
 
 
 def build_model_wheel(
@@ -50,6 +51,7 @@ def build_model_wheel(
         "input_adapter": dict(input_adapter or {"kind": "tensor", "version": 1}),
         "adapters": adapter_descriptors(package),
     }
+    architecture["architecture_fingerprint"] = _architecture_fingerprint(architecture)
     dist_dir = artifact_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
     wheel_name = f"{module_name}-{version}-py3-none-any.whl"
@@ -59,11 +61,12 @@ def build_model_wheel(
         package_dir = staging / module_name
         package_dir.mkdir()
         (package_dir / "__init__.py").write_text(
-            "from .runtime import InferenceModel, load_model\n\n__all__ = ['InferenceModel', 'load_model']\n",
+            "from .runtime import InferenceModel, Model, load_model\n\n"
+            "__all__ = ['Model', 'load_model', 'InferenceModel']\n",
             encoding="utf-8",
         )
         (package_dir / "architecture.json").write_text(json.dumps(architecture, sort_keys=True), encoding="utf-8")
-        shutil.copy2(weights_path, package_dir / "weights.safetensors")
+        _vendor_weights(weights_path, package_dir / "weights.safetensors", architecture["architecture_fingerprint"])
         _copy_runtime(package_dir)
         dist_info = staging / f"{module_name}-{version}.dist-info"
         dist_info.mkdir()
@@ -81,6 +84,7 @@ def build_model_wheel(
         "sha256": _sha256(wheel_path),
         "input_adapter": architecture["input_adapter"],
         "adapters": architecture["adapters"],
+        "architecture_fingerprint": architecture["architecture_fingerprint"],
     }
     (artifact_path / "model-package.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return wheel_path
@@ -98,6 +102,25 @@ def _validate_safe_weights(weights_path: Path) -> None:
     with safe_open(str(weights_path), framework="pt") as handle:
         if not handle.keys():
             raise ValueError("weights.safetensors contains no tensors")
+
+
+def _vendor_weights(source: Path, destination: Path, fingerprint: str) -> None:
+    """Write a validated, metadata-bearing copy of the training state."""
+
+    from safetensors.torch import save_file
+    from safetensors import safe_open
+
+    with safe_open(str(source), framework="pt") as handle:
+        tensors = {name: handle.get_tensor(name) for name in handle.keys()}
+    save_file(tensors, str(destination), metadata={ARCHITECTURE_FINGERPRINT: fingerprint})
+
+
+def _architecture_fingerprint(architecture: Mapping[str, Any]) -> str:
+    """Hash architecture metadata without recursively hashing its own digest."""
+
+    payload = {key: value for key, value in architecture.items() if key != "architecture_fingerprint"}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _copy_runtime(package_dir: Path) -> None:
