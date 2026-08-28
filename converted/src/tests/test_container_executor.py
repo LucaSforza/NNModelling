@@ -15,11 +15,16 @@ from backend.container_controller import ContainerCapabilityError
 IMAGE = "registry.example/nnm-worker@sha256:" + "a" * 64
 
 
-def test_build_command_is_explicit_and_mounts_input_read_only(tmp_path: Path) -> None:
+def test_build_command_is_explicit_and_mounts_input_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     input_dir = tmp_path / "input"
     artifact_dir = tmp_path / "artifacts"
+    dataset_dir = tmp_path / "data"
     input_dir.mkdir()
     artifact_dir.mkdir()
+    dataset_dir.mkdir()
+    monkeypatch.setenv("NNM_CONTAINER_DATA_ROOT", str(dataset_dir))
     executor = ContainerExecutor(engine="docker-podman", image=IMAGE, pid_limit=32)
 
     command = executor.build_command({"id": "job-1", "resources": {"cpu": 2, "memory_gb": 3}}, artifact_dir, input_dir)
@@ -65,6 +70,10 @@ def test_package_worker_reads_training_from_backend_submission_envelope() -> Non
 
 
 def test_submit_uses_fake_engine_and_reports_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset_dir = tmp_path / "data"
+    dataset_dir.mkdir()
+    monkeypatch.setenv("NNM_CONTAINER_DATA_ROOT", str(dataset_dir))
+
     class FakeProcess:
         pid = 1234
         returncode = 0
