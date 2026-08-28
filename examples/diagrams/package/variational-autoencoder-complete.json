@@ -38,6 +38,7 @@
         "label": "Encoder",
         "color": "#4779c4",
         "params": { "times": 1 },
+        "wheelAdapters": ["encode"],
         "isCollapsed": false,
         "oldWidth": 800,
         "oldHeight": 900
@@ -93,7 +94,7 @@
         "package": { "id": "core.scale", "version": "0.1.0", "name": "Scale" },
         "name": "kl_scale",
         "color": "#4779c4",
-        "params": { "factor": 0.1 }
+        "params": { "factor": 0.001 }
       }
     },
     {

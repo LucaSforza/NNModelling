@@ -4,6 +4,14 @@
   "kind": "subflow",
   "wheelAdapters": [
     {
+      "name": "encode",
+      "entrypoint": "module.forward",
+      "input": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },
+      "output": { "type": "tensor", "shape": ["B", "M"], "dtype": "float32" },
+      "targetPolicy": "forbidden",
+      "randomness": { "mode": "none" }
+    },
+    {
       "name": "forward",
       "entrypoint": "module.forward",
       "input": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },

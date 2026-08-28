@@ -88,11 +88,18 @@ describe("new core standard-library packages", () => {
     for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.output", "core.reparameterize", "core.repeat", "core.scale", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(id)
     }
-    expect(host.packageDefinition("core.repeat")?.wheelAdapters).toEqual([expect.objectContaining({
-      name: "forward",
-      entrypoint: "module.forward",
-      targetPolicy: "forbidden",
-    })])
+    expect(host.packageDefinition("core.repeat")?.wheelAdapters).toEqual([
+      expect.objectContaining({
+        name: "encode",
+        entrypoint: "module.forward",
+        targetPolicy: "forbidden",
+      }),
+      expect.objectContaining({
+        name: "forward",
+        entrypoint: "module.forward",
+        targetPolicy: "forbidden",
+      }),
+    ])
     expect(host.packageDefinition("core.reparameterize")?.wheelAdapters).toEqual([expect.objectContaining({
       name: "sample",
       entrypoint: "module.sample",
