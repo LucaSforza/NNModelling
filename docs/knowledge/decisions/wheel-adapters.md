@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Declarative wheel adapters
@@ -54,7 +54,9 @@ Materialized graph binding after DiagramCore inference:
 The public call is deliberately generic:
 
 ```python
-model = load_model()
+from nnm_example import Model
+
+model = Model()
 result = model.adapter("decode").run(value)
 ```
 
@@ -77,10 +79,11 @@ not build another module or copy parameters.
 The wheel embeds the selected adapter descriptors in its immutable architecture
 metadata. On load, the runtime compiles the embedded graph, restores the one
 shared state dict strictly, and rejects metadata that differs from the
-compiled selections. The facade exposes only `load_model`, prediction methods,
-and the generic `adapter(name).run(value)` handle. Graph modules, module maps,
-compiler services, package catalogs and subflow implementation objects are not
-part of this contract.
+compiled selections. The facade exposes only `Model`, the compatibility
+`load_model` factory, prediction methods and the generic
+`adapter(name).run(value)` handle. Graph modules, module maps, compiler
+services, package catalogs and subflow implementation objects are not part of
+this contract.
 
 The current implementation accepts adapter selections on the root graph. A
 selection in a nested compilation scope is rejected; direct public binding to a
@@ -112,8 +115,9 @@ subflow instance is therefore not a v1 capability.
   before adapter use; malformed or unavailable selections fail explicitly.
 - An adapter observes the same trained parameters as prediction and cannot
   create a second trainable state.
-- Adding no adapter does not change prediction behavior or the existing
-  `load_model().predict_tensor()`/`predict()` API.
+- Adding no adapter does not change prediction behavior or the public
+  `Model().predict_tensor()`/`predict()` API; `load_model()` remains a
+  compatibility factory for the same facade.
 - Wheel metadata is immutable and versioned. A metadata mismatch is a load
   error, not a fallback to an internal graph node.
 

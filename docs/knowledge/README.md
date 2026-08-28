@@ -29,3 +29,4 @@ Current decisions:
 - [Editable edge routing](decisions/editable-edge-routing.md)
 - [Package backend standard and least-privilege execution](decisions/package-backend-standard.md)
 - [Prediction and objective program separation](decisions/prediction-objective-programs.md)
+- [Declarative wheel adapters](decisions/wheel-adapters.md)

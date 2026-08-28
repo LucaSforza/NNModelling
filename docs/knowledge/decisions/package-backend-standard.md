@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Package backend standard and least-privilege execution
@@ -25,6 +25,10 @@ executor, request variant, fallback, or dependency of package jobs.
 
 The public model artifact remains one portable Python wheel. A raw checkpoint
 archive is an internal worker artifact, not a second download contract.
+Installed wheels may accept a consumer-supplied safetensors override for the
+same packaged architecture, but the backend does not publish that override as
+a separate artifact. The wheel remains complete and loads its embedded weights
+when no override is supplied.
 
 ## Terminology
 

@@ -27,9 +27,10 @@ even when the source training graph contains an objective region.
 
 ## Invariants
 
-- `load_model`, `predict_tensor` and `predict` are the complete public API for
-  this task's prediction-only wheel v1. Any stereotype-declared wheel adapter
-  is the separate, opt-in T09 surface documented in the
+- `Model`, the compatibility `load_model` factory, `predict_tensor` and
+  `predict` are the complete public API for this task's prediction-only wheel
+  v1. Any stereotype-declared wheel adapter is the separate, opt-in T09 surface
+  documented in the
   [wheel-adapter decision](../../../../knowledge/decisions/wheel-adapters.md);
   it does not change this task's target-free prediction path.
 - The wheel is independent of the checkout and training dataset.
@@ -43,10 +44,13 @@ even when the source training graph contains an objective region.
 2. Export the explicit prediction descriptor and required package closure.
 3. Load the shared trained state and expose only prediction through the public
    facade.
-4. Delete `_load_resolved_config()`, YAML/JSON fallback handling, the legacy
+4. Make `Model()` load embedded weights by default and accept only a strictly
+   compatible, architecture-fingerprinted local safetensors override;
+   `load_model()` delegates to the same facade.
+5. Delete `_load_resolved_config()`, YAML/JSON fallback handling, the legacy
    GraphNet/config branch and internal-access assumptions once package-native
    fixtures cover their remaining invariants.
-5. Replace the current resolved-config/NNTree model-package documentation with
+6. Replace the current resolved-config/NNTree model-package documentation with
    the package graph and explicit prediction-descriptor contract once tests
    prove the new wheel behavior.
 
@@ -54,6 +58,8 @@ even when the source training graph contains an objective region.
 
 - [ ] Classifier `predict_tensor` returns `[B, C]` logits without a target.
 - [ ] VAE `predict_tensor` returns the declared reconstruction tensor.
+- [ ] `from nnm_<suffix> import Model` loads embedded weights, while an
+      incompatible local safetensors override fails before inference.
 - [ ] Tests do not access `.network`, `modules_by_id` or repository runtime
       imports.
 - [ ] Objective modules are not invoked during inference.

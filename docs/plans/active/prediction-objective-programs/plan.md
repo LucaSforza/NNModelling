@@ -142,7 +142,7 @@ registered dataset
 
 trained shared state + PredictionProgram
     -> portable wheel
-    -> load_model().predict_tensor(inputs)
+    -> Model().predict_tensor(inputs)
 
 selected, stereotype-declared wheel adapter
     -> versioned wheel manifest -> generic adapter dispatcher

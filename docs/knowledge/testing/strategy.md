@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-22
+updated: 2026-08-28
 ---
 
 # Testing strategy
@@ -44,8 +44,9 @@ Pytest markers define increasing backend boundaries:
 | `e2e` | full backend jobs with real API/store/scheduler/executor |
 | `legacy_e2e` | optional historical training/inference that may download MNIST |
 
-These tests cover the existing Python system. They do not prove package-format
-compilation, which is not implemented yet.
+Package-runtime and model-wheel tests additionally cover package-format
+compilation. They do not replace a clean-environment installation and inference
+check for the downloadable artifact.
 
 ## MCP
 
@@ -63,4 +64,7 @@ change requires matching frontend handler and MCP proxy coverage.
 - Remote backend lifecycle change: fast tests, then service/E2E tests in
   proportion to the boundary changed.
 - Portable inference-wheel change: exporter tests plus the relevant
-  download/install/load/predict E2E.
+  download/install/import-`Model`/load/predict E2E in a clean `uv` project.
+- Downloadable-model example change: install the produced wheel as a dependency
+  of the standalone example, run it without the repository on `PYTHONPATH`, and
+  exercise every public prediction or adapter path shown to the user.

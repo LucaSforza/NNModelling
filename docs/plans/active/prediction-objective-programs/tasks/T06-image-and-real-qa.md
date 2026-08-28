@@ -12,6 +12,7 @@ write_scope:
   - converted/src/tests/test_backend_e2e.py
   - front-end/src/__tests__/
   - examples/vae_mnist/
+  - examples/resnet_mnist/
   - docs/plans/active/prediction-objective-programs/evidence/
 ---
 
@@ -51,12 +52,14 @@ through downloaded, clean-environment wheels.
 4. Through the Codex in-app Browser, train the explicit-loss ResNet on bounded
    MNIST for a meaningful number of epochs, and download its wheel.
 5. Through the same UI, train the explicit-output VAE and download its wheel.
-6. Install each wheel in a clean temporary environment. Verify ResNet logits
-   and VAE reconstructions through only `load_model().predict_tensor()`.
-7. Rewrite the VAE example to use only the public wheel API and render a
-   reconstruction sheet. Do not simulate a latent interpolation with an
-   input-space morph: latent traversal waits for an explicit public endpoint
-   contract (T09).
+6. Install each wheel as a dependency of a clean temporary `uv` project.
+   Import `Model` directly from its declared `nnm_<suffix>` package and verify
+   ResNet logits and VAE reconstructions without the checkout on `PYTHONPATH`.
+7. Rewrite the VAE and ResNet examples as standalone `uv` consumer projects
+   following the [model-package example
+   contract](../../../../knowledge/contracts/model-package.md). Do not use
+   wheel-path import tricks, redundant package-name arguments or resources
+   from `converted/`.
 8. Verify evaluation reconstruction twice with identical inputs and verify
    that stochastic latent sampling is available only through the selected,
    declared adapter. Record loss curves and inspected image paths.
@@ -80,7 +83,8 @@ through downloaded, clean-environment wheels.
       startup; curves and outputs are reviewed.
 - [ ] Both browser download controls produce verified wheels.
 - [ ] Clean installs pass the output-shape assertions without targets.
-- [ ] The VAE example contains no checkout runtime or internal model access.
+- [ ] Both examples import `Model` from the installed distribution and contain
+      no checkout runtime, data dependency or internal model access.
 - [ ] Actual image outputs are visually inspected and poor results are reported
       rather than described as successful interpolation.
 - [ ] Deterministic VAE evaluation and explicit stochastic-adapter behavior are
