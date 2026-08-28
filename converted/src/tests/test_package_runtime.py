@@ -408,7 +408,7 @@ def build(parameters, context, services): return torch.nn.Linear(2, 2, bias=Fals
     output = _package("demo.output", "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n", definition={"kind": "output"})
     graph = {"nodes": [
         {"id": "input", "type": "input"},
-        {"id": "decoder", "type": "layer", "package": {"id": "demo.decoder", "version": "0.1.0"}, "wheelAdapters": [{"name": "decode", "input": {"type": "tensor", "shape": [3, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": [3, 2], "dtype": "float32"}}]},
+            {"id": "decoder", "type": "layer", "package": {"id": "demo.decoder", "version": "0.1.0"}, "wheelAdapters": [{"name": "decode", "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}]},
         {"id": "output", "type": "layer", "package": {"id": "demo.output", "version": "0.1.0"}},
     ], "edges": [
         {"source": "input", "target": "decoder", "targetHandle": "in-0"},
@@ -438,7 +438,7 @@ def build(parameters, context, services): return torch.nn.Identity()
     }
     package = _package("demo.adapter-shape", source, definition=definition)
     graph = _graph("demo.adapter-shape")
-    graph["nodes"][1]["wheelAdapters"] = [{"name": "decode", "input": {"type": "tensor", "shape": [2, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": [2, 2], "dtype": "float32"}}]
+    graph["nodes"][1]["wheelAdapters"] = [{"name": "decode", "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}]
     model = compile_package_graph({"packages": [package], "graph": graph})
 
     output = model.adapter("decode")([[1, 2], [3, 4]])
@@ -471,7 +471,7 @@ def build(parameters, context, services): return Flatten()
     }
     package = _package("demo.adapter-output", source, definition=definition)
     graph = _graph("demo.adapter-output")
-    graph["nodes"][1]["wheelAdapters"] = [{"name": "flatten", "input": {"type": "tensor", "shape": [3, 2, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": [3, 4], "dtype": "float32"}}]
+    graph["nodes"][1]["wheelAdapters"] = [{"name": "flatten", "input": {"type": "tensor", "shape": ["B", 2, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"}}]
     model = compile_package_graph({"packages": [package], "graph": graph})
     assert tuple(model.adapter("flatten")(torch.ones(3, 2, 2)).shape) == (3, 4)
 
@@ -501,7 +501,7 @@ def build(parameters, context, services): return Flatten()
         "input": {"type": "tensor", "shape": ["B", "B", 2], "dtype": "float32"},
     }]}
     bad_symbol_package = _package("demo.adapter-output", source, definition=bad_symbol_definition)
-    with pytest.raises(PackageValidationError, match="inconsistent"):
+    with pytest.raises(PackageValidationError, match="preserve batch symbol"):
         compile_package_graph({"packages": [bad_symbol_package], "graph": graph}).adapter("flatten")(torch.ones(3, 2, 2))
 
 
@@ -538,6 +538,53 @@ def build(parameters, context, services): return torch.nn.Linear(4, 784)
     incompatible_graph = {**graph, "nodes": [{**graph["nodes"][0]}, {**graph["nodes"][1], "wheelAdapters": [incompatible]}]}
     with pytest.raises(PackageValidationError, match="dimension .* incompatible"):
         compile_package_graph({"packages": [package], "graph": incompatible_graph})
+
+
+def test_wheel_adapter_concrete_schema_accepts_dynamic_batch_symbol() -> None:
+    source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "identity",
+            "entrypoint": "module.forward",
+            "input": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "targetPolicy": "forbidden",
+        }],
+    }
+    package = _package("demo.dynamic-batch", source, definition=definition)
+    graph = _graph("demo.dynamic-batch")
+    graph["nodes"][1]["wheelAdapters"] = [{
+        "name": "identity",
+        "input": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+        "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+    }]
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    assert tuple(model.adapter("identity")(torch.ones(7, 4)).shape) == (7, 4)
+
+
+@pytest.mark.parametrize("shape", [["N", 4], [4, "B"], ["B", "M"]])
+def test_wheel_adapter_rejects_noncanonical_concrete_shape_symbols(shape: list[object]) -> None:
+    source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "identity",
+            "entrypoint": "module.forward",
+            "input": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "targetPolicy": "forbidden",
+        }],
+    }
+    package = _package("demo.invalid-concrete", source, definition=definition)
+    graph = _graph("demo.invalid-concrete")
+    graph["nodes"][1]["wheelAdapters"] = [{
+        "name": "identity",
+        "input": {"type": "tensor", "shape": shape, "dtype": "float32"},
+        "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+    }]
+    with pytest.raises(PackageValidationError, match="shape must use B only as its first dimension"):
+        compile_package_graph({"packages": [package], "graph": graph})
 
 
 @pytest.mark.parametrize(
@@ -582,7 +629,7 @@ def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> Non
     output = _package("demo.output-with-empty-selection", "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n", definition={"kind": "output"})
     graph = {"nodes": [
         {"id": "input", "type": "input", "wheelAdapters": []},
-        {"id": "selected", "type": "layer", "package": {"id": "demo.selected-adapter", "version": "0.1.0"}, "wheelAdapters": [{"name": "decode", "input": {"type": "tensor", "shape": [2, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": [2, 2], "dtype": "float32"}}]},
+            {"id": "selected", "type": "layer", "package": {"id": "demo.selected-adapter", "version": "0.1.0"}, "wheelAdapters": [{"name": "decode", "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}]},
         {"id": "loss", "type": "layer", "package": {"id": "demo.loss-with-empty-selection", "version": "0.1.0"}, "wheelAdapters": []},
         {"id": "output", "type": "layer", "package": {"id": "demo.output-with-empty-selection", "version": "0.1.0"}, "wheelAdapters": []},
     ], "edges": [

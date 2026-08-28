@@ -389,6 +389,15 @@ def _bind_adapter_declaration(
             )
         _validate_concrete_tensor_schema(concrete, declaration["name"], field)
 
+    input_shape = selection["input"]["shape"]
+    output_shape = selection["output"]["shape"]
+    input_batch = bool(input_shape and input_shape[0] == "B")
+    output_batch = bool(output_shape and output_shape[0] == "B")
+    if input_batch != output_batch:
+        raise PackageValidationError(
+            f"wheel adapter {declaration['name']!r} binding must keep batch dimension B on input and output"
+        )
+
     bindings: dict[str, int] = {}
     _match_declared_shape(
         declaration["input"]["shape"], selection["input"]["shape"], bindings,
@@ -412,10 +421,16 @@ def _bind_adapter_declaration(
 def _validate_concrete_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> None:
     shape = schema.get("shape")
     if not isinstance(shape, list) or any(
-        not (isinstance(item, int) and not isinstance(item, bool) and item > 0)
-        for item in shape
+        not (
+            (isinstance(item, int) and not isinstance(item, bool) and item > 0)
+            or (item == "B" and index == 0)
+        )
+        for index, item in enumerate(shape)
     ):
-        raise PackageValidationError(f"wheel adapter {name!r} {role} binding shape must be positive integers")
+        raise PackageValidationError(
+            f"wheel adapter {name!r} {role} binding shape must use B only as its first dimension "
+            "and positive integers elsewhere"
+        )
     if schema.get("dtype") not in _ADAPTER_DTYPES:
         raise PackageValidationError(f"wheel adapter {name!r} {role} binding dtype is invalid")
 
@@ -425,11 +440,21 @@ def _concrete_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _match_declared_shape(
-    declared: list[Any], concrete: list[int], bindings: dict[str, int], name: str, role: str,
+    declared: list[Any], concrete: list[Any], bindings: dict[str, int], name: str, role: str,
 ) -> None:
     if len(declared) != len(concrete):
         raise PackageValidationError(f"wheel adapter {name!r} {role} binding rank is incompatible")
     for index, (expected, actual) in enumerate(zip(declared, concrete)):
+        if actual == "B":
+            if index != 0 or expected != "B":
+                raise PackageValidationError(
+                    f"wheel adapter {name!r} {role} binding batch symbol B is incompatible"
+                )
+            continue
+        if expected == "B":
+            raise PackageValidationError(
+                f"wheel adapter {name!r} {role} binding must preserve batch symbol B"
+            )
         if isinstance(expected, int):
             if expected != actual:
                 raise PackageValidationError(
