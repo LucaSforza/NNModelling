@@ -8,6 +8,10 @@
     "inference": {
       "language": "lua",
       "file": "inference.lua"
+    },
+    "pytorch": {
+      "language": "python",
+      "file": "pytorch.py"
     }
   }
 }

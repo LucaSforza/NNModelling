@@ -2,6 +2,7 @@
   "name": "MSE Loss",
   "description": "Computes a scalar mean-squared-error regression objective.",
   "kind": "loss",
+  "objective": { "externalInputs": [{ "name": "target", "source": "batch.targets", "transform": "flatten_batch" }] },
   "view": {
     "color": "#b85c5c",
     "width": 180,

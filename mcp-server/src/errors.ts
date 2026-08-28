@@ -14,10 +14,8 @@
 /**
  * Error type hierarchy for the NNModelling MCP server.
  *
- * Only pipeline errors and the base class remain. Validation errors
- * (stereotype not found, invalid connection, etc.) are now handled by
- * the BrowserRPCHandler in the browser and propagated as plain Error
- * messages via the RPC response.
+ * Browser and protocol errors are represented by the base class. Validation
+ * errors are handled by BrowserRPCHandler and propagated as plain messages.
  */
 
 // ── Base Error ──────────────────────────────────
@@ -30,25 +28,5 @@ export class MCPServerError extends Error {
   ) {
     super(message);
     this.name = "MCPServerError";
-  }
-}
-
-// ── Pipeline Errors ────────────────────────────
-
-export class ConversionFailedError extends MCPServerError {
-  constructor(reason: string) {
-    super("CONVERSION_FAILED", reason);
-  }
-}
-
-export class TrainingFailedError extends MCPServerError {
-  constructor(reason: string) {
-    super("TRAINING_FAILED", reason);
-  }
-}
-
-export class InferenceFailedError extends MCPServerError {
-  constructor(reason: string) {
-    super("INFERENCE_FAILED", reason);
   }
 }

@@ -239,7 +239,7 @@ export class DiagramCore {
   /** Create a node backed by a versioned package identity. */
   public addPackageModule(
     identity: PackageIdentity,
-    kind: "input" | "layer" | "loss",
+    kind: "input" | "layer" | "loss" | "output",
     x: number,
     y: number,
     config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[] },
@@ -269,7 +269,7 @@ export class DiagramCore {
   /** Create any package kind from declarative metadata, without package-ID cases. */
   public addPackageNode(
     identity: PackageIdentity,
-    kind: "input" | "layer" | "loss" | "join" | "subflow",
+    kind: "input" | "layer" | "loss" | "join" | "subflow" | "output",
     x: number,
     y: number,
     config?: {
@@ -375,7 +375,7 @@ export class DiagramCore {
   public updatePackageNode(
     id: string,
     identity: PackageIdentity,
-    kind: "input" | "layer" | "loss" | "join" | "subflow",
+    kind: "input" | "layer" | "loss" | "join" | "subflow" | "output",
     config: {
       name?: string;
       color?: string;

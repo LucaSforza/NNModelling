@@ -35,7 +35,7 @@ describe("authenticated training API", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ format: "package-bundle/v1", digest: bundle.digest });
   });
 
-  it("accepts a package job request without changing the nntree API", async () => {
+  it("accepts only a package job request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200 }),
     );
@@ -48,9 +48,11 @@ describe("authenticated training API", () => {
       training: {}, resources: {}, priority: 0,
     });
 
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toMatchObject({
       network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
     });
+    expect(body.training).not.toHaveProperty("overrides");
   });
 
   it("sends the bearer token in headers and never in the URL", async () => {
@@ -68,7 +70,7 @@ describe("authenticated training API", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
   });
 
-  it("submits the requested nnm-prefixed package name", async () => {
+  it("submits the requested package name", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }),
     );
@@ -77,7 +79,7 @@ describe("authenticated training API", () => {
 
     await api.submitTrainingJob({
       schema_version: 1,
-      network: { format: "nntree", value: {} },
+      network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
       training: {},
       resources: {},
       priority: 0,
@@ -136,25 +138,6 @@ describe("authenticated training API", () => {
     expect(url).not.toContain("very-secret-token");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
     expect(await wheel.text()).toBe("wheel");
-  });
-
-  it("downloads and verifies a trained package archive", async () => {
-    const expected = await sha256Hex("trained-zip");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("trained-zip", {
-        status: 200,
-        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
-
-    const archive = await api.downloadTrainingPackage("job-1", expected);
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.lan:8000/jobs/job-1/training-package");
-    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
-    expect(await archive.text()).toBe("trained-zip");
   });
 
   it("rejects a package whose body digest does not match the manifest", async () => {

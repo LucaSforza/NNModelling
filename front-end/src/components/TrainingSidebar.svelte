@@ -55,17 +55,13 @@
   let datasetParams = $state<Record<string, string>>({});
   let maxEpochs = $state("20");
   let learningRate = $state("0.001");
-  let batchSize = $state("32");
-  let numWorkers = $state("4");
-  let trainSize = $state("0.8");
   let optimizerTarget = $state("torch.optim.Adam");
-  let accelerator = $state("auto");
+  let accelerator = $state<"auto" | "cpu" | "cuda">("auto");
   let patience = $state("3");
   let minDelta = $state("0");
   let seed = $state("42");
   let wandbProject = $state("NeuralNetworks");
-  let wandbMode = $state("online");
-  let overridesText = $state("");
+  let wandbMode = $state<"disabled" | "offline" | "online">("disabled");
   let cpu = $state("4");
   let memoryGb = $state("8");
   let gpu = $state("0");
@@ -271,7 +267,10 @@
     datasetParams = { ...datasetParams, [parameter.name]: value };
   }
 
-  function coerce(value: string, type: string): unknown {
+  function coerce(value: string, type: "int"): number;
+  function coerce(value: string, type: "float"): number;
+  function coerce(value: string, type: "bool"): boolean;
+  function coerce(value: string, type: string): number | boolean | string {
     if (type === "int") return Number.parseInt(value, 10);
     if (type === "float") return Number.parseFloat(value);
     if (type === "bool") return value === "true";
@@ -279,17 +278,14 @@
   }
 
   async function buildRequest(): Promise<TrainingJobRequest> {
+    if (!selectedDataset) throw new Error("Seleziona un dataset prima di accodare il training");
     const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports(), diagram.typeResult);
     const uploaded = await requireApi().uploadPackageBundle(bundle);
-    const overrides = overridesText.split("\n").map((line) => line.trim()).filter(Boolean);
     return {
       schema_version: 1,
       network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
       training: {
         dataset: { target: selectedDataset, parameters: datasetParams },
-        batch_size: coerce(batchSize, "int"),
-        num_workers: coerce(numWorkers, "int"),
-        train_size: coerce(trainSize, "float"),
         seed: coerce(seed, "int"),
         optimizer: { target: optimizerTarget, learning_rate: coerce(learningRate, "float") },
         trainer: {
@@ -299,7 +295,6 @@
           min_delta: coerce(minDelta, "float"),
         },
         wandb: { project: wandbProject, mode: wandbMode },
-        overrides,
       },
       resources: {
         cpu: coerce(cpu, "int"),
@@ -426,23 +421,6 @@
     }
   }
 
-  async function downloadTrainingPackage(job: TrainingJobStatus) {
-    if (!job.training_package) return;
-    try {
-      const blob = await requireApi().downloadTrainingPackage(job.id, job.training_package.sha256);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = job.training_package.filename;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      handleConnectionError(error);
-    }
-  }
-
   function requireApi(): TrainingApiClient {
     if (!api) throw new Error("Collega prima un backend");
     return api;
@@ -557,16 +535,11 @@
           </label>
         {/each}
       {/if}
-      <div class="grid">
-        <label>Batch size<input type="number" bind:value={batchSize} /></label>
-        <label>Worker<input type="number" bind:value={numWorkers} /></label>
-        <label>Train split<input type="number" step="0.01" bind:value={trainSize} /></label>
-        <label>Seed<input type="number" bind:value={seed} /></label>
-      </div>
+      <label>Seed<input type="number" bind:value={seed} /></label>
     </section>
 
     <section>
-      <h3>Hydra</h3>
+      <h3>Ottimizzazione</h3>
       <label>Optimizer target<input bind:value={optimizerTarget} /></label>
       <div class="grid">
         <label>Learning rate<input type="number" step="0.0001" bind:value={learningRate} /></label>
@@ -575,9 +548,6 @@
         <label>Patience<input type="number" bind:value={patience} /></label>
         <label>Min delta<input type="number" step="0.001" bind:value={minDelta} /></label>
       </div>
-      <label>Override Hydra (una per riga)
-        <textarea bind:value={overridesText} placeholder="trainer.max_epochs=10"></textarea>
-      </label>
     </section>
 
     <section>
@@ -620,8 +590,6 @@
           <button onclick={() => openLogWindow(job.id)}>Apri terminale</button>
           {#if job.model_package}
             <button onclick={() => void downloadModelPackage(job)}>Scarica wheel</button>
-          {:else if job.training_package}
-            <button onclick={() => void downloadTrainingPackage(job)}>Scarica pacchetto trainato</button>
           {:else if job.package_error}
             <small>Export wheel non riuscito: {job.package_error}</small>
           {/if}
@@ -652,8 +620,7 @@
   h2, h3 { margin: 0 0 10px; } h3 { font-size: 1rem; }
   section { border-bottom: 1px solid #e5e7eb; padding: 12px 0; }
   label { display: flex; flex-direction: column; gap: 4px; margin: 7px 0; font-size: .82rem; }
-  input, select, textarea { box-sizing: border-box; width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
-  textarea { min-height: 62px; font-family: monospace; }
+  input, select { box-sizing: border-box; width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .grid label { margin: 0; }
   button { padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; cursor: pointer; }
   button:hover { background: #e2e8f0; } button:disabled { cursor: wait; opacity: .6; }

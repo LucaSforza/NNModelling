@@ -164,7 +164,7 @@ export class PackageLoader {
         if (inputs.length !== 0) return expected(`package '${reference.id}' requires no inputs`)
         return this.infer(reference.id, { kind, inputs: [] }, reference.parameters)
       }
-      if (kind === "layer" || kind === "loss" || kind === "subflow") {
+      if (kind === "layer" || kind === "loss" || kind === "output" || kind === "subflow") {
         if (inputs.length !== 1) return expected(`package '${reference.id}' requires one input`)
         const input = inputs[0]!
         return this.infer(reference.id, kind === "subflow" ? { kind, inputs: [input], inferSubflow: () => expected("subflow unavailable") } : { kind, inputs: [input] }, reference.parameters)

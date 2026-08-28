@@ -62,9 +62,9 @@ describe("BrowserRPC package-only boundary", () => {
     expect(sent[1]?.error?.message).toContain("Unknown method")
   })
 
-  test("keeps conversion outside the package frontend boundary", () => {
+  test("rejects removed conversion RPC methods", () => {
     const { handler, sent } = harness()
     handler.handleMessage({ data: JSON.stringify({ id: "compile", method: "compile_nntree", params: {} }) })
-    expect(sent[0]?.error?.message).toContain("Compilation is unavailable")
+    expect(sent[0]?.error?.message).toContain("Unknown method")
   })
 })

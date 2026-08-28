@@ -21,9 +21,9 @@
         "params": {
           "shape": [
             "B",
-            3,
-            224,
-            224
+            1,
+            28,
+            28
           ],
           "dtype": "float32"
         },
@@ -50,11 +50,11 @@
         "name": "stem_conv",
         "color": "#20b2aa",
         "params": {
-          "in_channels": 3,
+          "in_channels": 1,
           "out_channels": 64,
-          "kernel_size": 7,
-          "stride": 2,
-          "padding": 3
+          "kernel_size": 3,
+          "stride": 1,
+          "padding": 1
         },
         "isInput": false,
         "isLoss": false
@@ -103,7 +103,9 @@
         "stereotype": "ReLU",
         "name": "stem_relu",
         "color": "#f4a460",
-        "params": {},
+        "params": {
+          "inplace": false
+        },
         "isInput": false,
         "isLoss": false
       }
@@ -206,7 +208,9 @@
         "stereotype": "ReLU",
         "name": "block_relu",
         "color": "#f4a460",
-        "params": {},
+        "params": {
+          "inplace": false
+        },
         "isInput": false,
         "isLoss": false
       }
@@ -306,7 +310,9 @@
         "stereotype": "ReLU",
         "name": "output_relu",
         "color": "#f4a460",
-        "params": {},
+        "params": {
+          "inplace": false
+        },
         "isInput": false,
         "isLoss": false
       }
@@ -355,7 +361,8 @@
         "name": "flatten",
         "color": "#a9a9a9",
         "params": {
-          "start_dim": 1
+          "start_dim": 1,
+          "end_dim": -1
         },
         "isInput": false,
         "isLoss": false
@@ -381,10 +388,36 @@
         "color": "#4779c4",
         "params": {
           "in_features": 64,
-          "out_features": 1000
+          "out_features": 10
         },
         "isInput": false,
         "isLoss": false
+      }
+    },
+    {
+      "id": "prediction-output",
+      "type": "custom",
+      "position": { "x": 900, "y": 2020 },
+      "width": 140,
+      "height": 80,
+      "data": {
+        "package": { "id": "core.output", "version": "0.1.0", "name": "Output" },
+        "name": "prediction_output",
+        "color": "#4d9b72",
+        "params": {}
+      }
+    },
+    {
+      "id": "classification-loss",
+      "type": "custom",
+      "position": { "x": 900, "y": 2160 },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": { "id": "core.cross-entropy", "version": "0.1.0", "name": "Cross Entropy" },
+        "name": "classification_loss",
+        "color": "#b85c5c",
+        "params": {}
       }
     }
   ],
@@ -583,6 +616,24 @@
           "points": []
         }
       }
+    },
+    {
+      "id": "classifier-prediction-output-0",
+      "source": "classifier",
+      "target": "prediction-output",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": { "route": { "points": [] } }
+    },
+    {
+      "id": "classifier-classification-loss-0",
+      "source": "classifier",
+      "target": "classification-loss",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": { "route": { "points": [] } }
     }
   ],
   "layoutDirection": "vertical"

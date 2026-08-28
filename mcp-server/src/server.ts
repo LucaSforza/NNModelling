@@ -31,7 +31,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import * as pipelineMod from "./pipeline.js";
 import { BrowserRPCClient } from "./browser-client.js";
 import { RemoteTrainingClient } from "./remote-training.js";
 
@@ -56,11 +55,9 @@ import * as remoteTrainingTools from "./tools/remote-training.js";
  * Shared context object passed as the first argument to every MCP tool handler.
  * Provides access to:
  *   - browser:      BrowserRPCClient for sending RPC calls to the browser
- *   - pipeline:     Python subprocess interface (executeConversion, etc.)
  */
 export interface ServerContext {
   browser: BrowserRPCClient;
-  pipeline: typeof pipelineMod;
   remoteTraining?: RemoteTrainingClient;
 }
 
@@ -132,7 +129,6 @@ export async function createServer(
   // ── Step 3: Build ServerContext ──────────────────────────────────────
   const ctx: ServerContext = {
     browser,
-    pipeline: pipelineMod,
     remoteTraining: new RemoteTrainingClient(options.backendUrl),
   };
 

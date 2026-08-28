@@ -42,7 +42,6 @@ function createMockBrowser(): BrowserRPCClient {
 function createTestContext(): ServerContext {
   return {
     browser: createMockBrowser(),
-    pipeline: null as unknown as ServerContext["pipeline"],
   };
 }
 
@@ -306,16 +305,6 @@ describe("conversion tools", () => {
   beforeEach(() => {
     ctx = createTestContext();
     mockBrowser = ctx.browser;
-  });
-
-  it("compile_nntree calls browser with correct method", async () => {
-    const expectedResult = { json: '{"root": "n1", "nodes": {}}' };
-    (mockBrowser.call as ReturnType<typeof vi.fn>).mockResolvedValue(expectedResult);
-
-    const result = await conversionTools.compile_nntree.handler(ctx, {});
-
-    expect(mockBrowser.call).toHaveBeenCalledWith("compile_nntree", {});
-    expect(result).toEqual(expectedResult);
   });
 
   it("export_diagram calls browser with correct method", async () => {

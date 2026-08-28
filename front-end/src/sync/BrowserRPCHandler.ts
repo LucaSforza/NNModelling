@@ -15,9 +15,6 @@
 // Browser-side RPC handler. Receives JSON-RPC requests from the MCP server
 // via WebSocket, dispatches them to the browser's Diagram instance, and
 // returns results. The browser is the single source of truth for diagram state.
-// The compile_nntree RPC below is deprecated compatibility surface; package
-// export is the forward path for backend execution.
-//
 // Protocol:
 //   Server → Client: { id: string, method: string, params?: Record<string, unknown> }
 //   Client → Server: { id: string, result?: unknown }
@@ -247,10 +244,7 @@ export class BrowserRPCHandler {
           result = this.handleSelectAll();
           break;
 
-        // ── Compilation / Serialization ───────────────────────────
-        case "compile_nntree":
-          result = this.handleCompileNntree();
-          break;
+        // ── Serialization ────────────────────────────────────────
         case "export_diagram":
           result = this.handleExportDiagram();
           break;
@@ -800,11 +794,7 @@ export class BrowserRPCHandler {
     return { nodeCount: allIds.length };
   }
 
-  // ── Compilation / Serialization Handlers ────────────────────────────
-
-  private handleCompileNntree(): Record<string, unknown> {
-    throw new Error("Compilation is unavailable until the package backend runtime exists");
-  }
+  // ── Serialization Handlers ─────────────────────────────────────────
 
   private handleExportDiagram(): Record<string, unknown> {
     return { json: this.diagram.exportToJson(), nodeCount: this.diagram.nodes.length, edgeCount: this.diagram.edges.length };

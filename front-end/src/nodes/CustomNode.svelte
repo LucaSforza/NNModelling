@@ -112,7 +112,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   </div>
 {/if}
 
-<!-- Loss remains terminal for conversion/runtime, but its source handle and
+<!-- Loss remains terminal for the objective program, but its source handle and
      rank-1 output expose the conceptual result in the visual type system. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="output-handle-wrapper" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>

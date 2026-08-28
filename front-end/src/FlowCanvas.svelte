@@ -410,9 +410,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     }
   }
 
-  async function handleConversion() {
-    alert("Conversione non disponibile: il backend package non è ancora installato.");
-  }
 </script>
 
 <svelte:window onkeydown={handleKeyDown} />
@@ -463,9 +460,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         {#if loadError}
           <div class="load-error" role="alert">{loadError}</div>
         {/if}
-        <button onclick={handleConversion} class="toolbar-btn"
-          >📦 Converti in Python</button
-        >
         <button onclick={handleExportPng} class="toolbar-btn"
           >🖼️ Esporta PNG</button
         >

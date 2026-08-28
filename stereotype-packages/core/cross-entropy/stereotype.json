@@ -2,6 +2,7 @@
   "name": "Cross Entropy",
   "description": "Computes a scalar cross-entropy training objective.",
   "kind": "loss",
+  "objective": { "externalInputs": [{ "name": "target", "source": "batch.targets" }] },
   "view": {
     "color": "#b85c5c",
     "width": 180,

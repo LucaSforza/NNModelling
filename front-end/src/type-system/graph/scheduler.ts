@@ -21,7 +21,72 @@ export class PackageGraphScheduler {
       .filter((edge) => topLevelIds.has(edge.source) && topLevelIds.has(edge.target))
       .map(edge => edge.source))
     const terminals = topLevel.filter(node => !outgoing.has(node.id)).map(node => node.id)
-    return { nodes: results, order, terminals, complete: terminals.length === 1 }
+    const roleInfo = this.trainingRoles(snapshot, topLevel, terminals)
+    const allResolved = topLevel.every(node => results.get(node.id)?.status === "success")
+    const trainingComplete = allResolved && roleInfo.trainingComplete
+    const complete = allResolved && (terminals.length === 1 || trainingComplete)
+    return {
+      nodes: results,
+      order,
+      terminals,
+      complete,
+      predictionTerminals: roleInfo.predictionTerminals,
+      objectiveTerminals: roleInfo.objectiveTerminals,
+      trainingComplete,
+      trainingDiagnostics: roleInfo.diagnostics,
+    }
+  }
+
+  private trainingRoles(snapshot: TypeGraphSnapshot, topLevel: readonly Node[], terminals: readonly string[]) {
+    const kindOf = (node: Node): string | undefined => {
+      const identity = packageIdentity(node)
+      return identity ? this.host.packageDefinition(identity.id)?.kind : undefined
+    }
+    const topLevelIds = new Set(topLevel.map(node => node.id))
+    const predictionTerminals = terminals.filter(id => kindOf(topLevel.find(node => node.id === id)!) === "output")
+    const losses = topLevel.filter(node => kindOf(node) === "loss").map(node => node.id)
+    const objectiveIds = new Set(losses)
+    const outgoing = new Map<string, string[]>()
+    for (const edge of snapshot.edges) {
+      if (topLevelIds.has(edge.source) && topLevelIds.has(edge.target)) {
+        const targets = outgoing.get(edge.source) ?? []
+        targets.push(edge.target)
+        outgoing.set(edge.source, targets)
+      }
+    }
+    const pending = [...losses]
+    while (pending.length) {
+      const source = pending.pop()!
+      for (const target of outgoing.get(source) ?? []) {
+        if (!objectiveIds.has(target)) { objectiveIds.add(target); pending.push(target) }
+      }
+    }
+    const objectiveTerminals = [...objectiveIds].filter(id => !(outgoing.get(id) ?? []).some(target => objectiveIds.has(target)))
+    const diagnostics: string[] = []
+    const topInputs = topLevel.filter(node => kindOf(node) === "input")
+    const reachable = new Set<string>()
+    const reachableQueue = topInputs.map(node => node.id)
+    while (reachableQueue.length) {
+      const id = reachableQueue.shift()!
+      if (reachable.has(id)) continue
+      reachable.add(id)
+      reachableQueue.push(...(outgoing.get(id) ?? []))
+    }
+    if (topInputs.length !== 1) diagnostics.push(`training graph requires exactly one top-level input; found ${topInputs.length}`)
+    if (predictionTerminals.length !== 1) diagnostics.push(`training graph requires exactly one prediction Output terminal; found ${predictionTerminals.length}`)
+    if (objectiveTerminals.length !== 1) diagnostics.push(`training graph requires exactly one objective terminal; found ${objectiveTerminals.length}`)
+    for (const node of topLevel) {
+      const kind = kindOf(node)
+      if (kind === "output" && objectiveIds.has(node.id)) diagnostics.push("prediction Output cannot be inside the objective region")
+      if (!reachable.has(node.id)) diagnostics.push(`training graph node '${node.id}' is disconnected from the top-level input`)
+    }
+    for (const id of objectiveIds) {
+      const node = topLevel.find(candidate => candidate.id === id)
+      if (node && kindOf(node) === "join" && !(snapshot.edges.some(edge => edge.target === id && topLevelIds.has(edge.source)))) {
+        diagnostics.push(`objective join '${id}' has no graph operands`)
+      }
+    }
+    return { predictionTerminals, objectiveTerminals, diagnostics, trainingComplete: diagnostics.length === 0 && losses.length > 0 }
   }
 
   private inferScope(
@@ -88,7 +153,7 @@ export class PackageGraphScheduler {
     if (definition.kind === "input") {
       if (inputs.length !== 0) return { status: "error", message: "input package cannot have graph inputs" }
       context = { kind: "input", inputs: [] }
-    } else if (definition.kind === "layer" || definition.kind === "loss") {
+    } else if (definition.kind === "layer" || definition.kind === "loss" || definition.kind === "output") {
       if (inputs.length !== 1) return { status: "unresolved", reason: `package '${identity.id}' requires one graph input` }
       context = { kind: definition.kind, inputs: [inputs[0]!] }
     } else if (definition.kind === "join") {

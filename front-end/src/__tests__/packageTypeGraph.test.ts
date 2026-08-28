@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, test } from "vitest"
 
 import { DiagramCore } from "../core/DiagramCore"
-import type { Node } from "../core/types"
+import type { Node, PackageIdentity } from "../core/types"
 import { coreForkPackage } from "../type-system/bundled/core-fork"
 import { coreInputPackage } from "../type-system/bundled/core-input"
+import { coreOutputPackage } from "../type-system/bundled/core-output"
+import mseManifest from "../../../stereotype-packages/core/mse-loss/manifest.json?raw"
+import mseDefinition from "../../../stereotype-packages/core/mse-loss/stereotype.json?raw"
+import mseInference from "../../../stereotype-packages/core/mse-loss/inference.lua?raw"
 import { TypeSystemHost } from "../type-system/host"
 import { PackageGraphScheduler } from "../type-system/graph/scheduler"
 
@@ -15,7 +19,7 @@ afterEach(async () => {
   for (const host of hosts.splice(0).reverse()) await host.dispose()
 })
 
-function packageNode(id: string, identity: typeof inputIdentity | typeof forkIdentity, params: Record<string, unknown> = {}): Node {
+function packageNode(id: string, identity: PackageIdentity, params: Record<string, unknown> = {}): Node {
   return {
     id,
     type: "custom",
@@ -25,10 +29,13 @@ function packageNode(id: string, identity: typeof inputIdentity | typeof forkIde
 }
 
 async function createScheduler(): Promise<PackageGraphScheduler> {
-  const host = await TypeSystemHost.create([coreInputPackage, coreForkPackage])
+  const msePackage = { resources: { "manifest.json": mseManifest, "stereotype.json": mseDefinition, "inference.lua": mseInference } }
+  const host = await TypeSystemHost.create([coreInputPackage, coreForkPackage, coreOutputPackage, msePackage])
   hosts.push(host)
   await host.activate("core.input")
   await host.activate("core.fork")
+  await host.activate("core.output")
+  await host.activate("core.mse-loss")
   return new PackageGraphScheduler(host)
 }
 
@@ -73,6 +80,40 @@ describe("versioned package graph inference", () => {
     expect(scheduler.infer({ nodes: [input], edges: [{ id: "cycle", source: "input", target: "input" }] }).complete).toBe(false)
     expect(scheduler.infer({ nodes: [input], edges: [] }).terminals).toEqual(["input"])
     expect(scheduler.infer({ nodes: [input, fork], edges: [] }).terminals).toEqual(["input", "fork"])
+  })
+
+  test("accepts explicit prediction and objective terminals", async () => {
+    const scheduler = await createScheduler()
+    const input = packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float32" })
+    const fork = packageNode("fork", forkIdentity)
+    const output = packageNode("output", { id: "core.output", version: "0.1.0", name: "Output" })
+    const loss = packageNode("loss", { id: "core.mse-loss", version: "0.1.0", name: "MSE Loss" })
+    const edges = [
+      { id: "input-fork", source: "input", target: "fork", sourceHandle: "out", targetHandle: "in" },
+      { id: "fork-output", source: "fork", target: "output", sourceHandle: "out", targetHandle: "in" },
+      { id: "fork-loss", source: "fork", target: "loss", sourceHandle: "out", targetHandle: "in" },
+    ]
+    const result = scheduler.infer({ nodes: [input, fork, output, loss], edges })
+    expect(result.predictionTerminals).toEqual(["output"])
+    expect(result.objectiveTerminals).toEqual(["loss"])
+    expect(result.trainingComplete).toBe(true)
+    expect(result.complete).toBe(true)
+    expect(result.trainingDiagnostics).toEqual([])
+  })
+
+  test("reports disconnected outputs and missing objective roles", async () => {
+    const scheduler = await createScheduler()
+    const input = packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float32" })
+    const output = packageNode("output", { id: "core.output", version: "0.1.0", name: "Output" })
+    const result = scheduler.infer({
+      nodes: [input, output],
+      edges: [],
+    })
+    expect(result.trainingComplete).toBe(false)
+    expect(result.trainingDiagnostics).toEqual(expect.arrayContaining([
+      "training graph requires exactly one objective terminal; found 0",
+      "training graph node 'output' is disconnected from the top-level input",
+    ]))
   })
 
   test("round-trips exact package identity through DiagramCore persistence", () => {
