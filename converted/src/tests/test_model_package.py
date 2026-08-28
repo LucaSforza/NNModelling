@@ -147,7 +147,7 @@ def test_wheel_exposes_selected_stereotype_adapter_without_model_internals(tmp_p
         "graph": {
             "nodes": [
                 {"id": "input", "type": "input"},
-                {"id": "decoder", "type": "layer", "package": {"id": "demo.decoder", "version": "0.1.0"}, "wheelAdapters": [{"name": "decode", "input": {"type": "tensor", "shape": [3, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": [3, 2], "dtype": "float32"}}]},
+                {"id": "decoder", "type": "layer", "package": {"id": "demo.decoder", "version": "0.1.0"}, "wheelAdapters": [{"name": "decode", "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}]},
                 {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}},
             ],
             "edges": [
