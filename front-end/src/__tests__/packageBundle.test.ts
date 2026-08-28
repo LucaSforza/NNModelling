@@ -55,6 +55,7 @@ describe("package bundle v1", () => {
     ]) {
       expect(() => parseDefinition({ name: "Adapter", kind: "layer", wheelAdapters: [adapter], view: { color: "#000000", width: 80, height: 40 }, parameters: {} })).toThrow()
     }
+    expect(parseDefinition({ name: "Sampler", kind: "layer", wheelAdapters: [{ name: "sample", entrypoint: "module.sample", input: { type: "tensor", shape: ["B", 2], dtype: "float32" }, output: { type: "tensor", shape: ["B", 2], dtype: "float32" }, targetPolicy: "forbidden" }], view: { color: "#000000", width: 80, height: 40 }, parameters: {} }).wheelAdapters?.[0].entrypoint).toBe("module.sample")
   })
 
   it("parses explicit objective bindings and output roles", () => {

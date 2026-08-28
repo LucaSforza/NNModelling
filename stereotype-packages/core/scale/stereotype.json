@@ -1,0 +1,9 @@
+{
+  "name": "Scale",
+  "description": "Multiplies every input value by a declared scalar factor.",
+  "kind": "layer",
+  "view": { "color": "#4779c4", "width": 180, "height": 100 },
+  "parameters": {
+    "factor": { "type": "number", "default": 1.0, "position": "bottom" }
+  }
+}

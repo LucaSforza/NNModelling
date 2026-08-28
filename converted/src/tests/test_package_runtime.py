@@ -79,6 +79,30 @@ def build(parameters, context: BuildContext, services: NoServices):
     assert torch.equal(model.prediction(torch.tensor([[2.0, -1.0]])), torch.tensor([[2.0, -1.0]]))
 
 
+def test_reparameterize_is_deterministic_in_eval_but_stochastic_in_train() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/reparameterize/pytorch.py").read_text()
+    model = compile_package_graph({
+        "packages": [_package("core.reparameterize", source)],
+        "graph": _graph("core.reparameterize", parameters={"epsilon_scale": 1.0}),
+    })
+    packed = torch.tensor([[1.0, 2.0, 0.0, 0.0]])
+    model.eval()
+    assert torch.equal(model.prediction(packed), model.prediction(packed))
+    model.train()
+    assert not torch.equal(model.prediction(packed), model.prediction(packed))
+
+
+def test_scale_package_multiplies_objective_scalar_without_worker_logic() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/scale/pytorch.py").read_text()
+    model = compile_package_graph({
+        "packages": [_package("core.scale", source)],
+        "graph": _graph("core.scale", parameters={"factor": 0.1}),
+    })
+    assert torch.equal(model.prediction(torch.tensor([5.0])), torch.tensor([0.5]))
+
+
 def test_positional_encoding_package_adds_fixed_sinusoidal_table() -> None:
     root = Path(__file__).parents[3]
     source = (root / "stereotype-packages/core/positional-encoding/pytorch.py").read_text()
@@ -607,6 +631,42 @@ def test_wheel_adapter_requires_fixed_target_free_protocol(entrypoint: str, mess
     graph["nodes"][1]["wheelAdapters"] = [{"name": "decode", "input": {"type": "tensor", "shape": [2, 2], "dtype": "float32"}, "output": {"type": "tensor", "shape": [2, 2], "dtype": "float32"}}]
     with pytest.raises(PackageValidationError, match=message):
         compile_package_graph({"packages": [package], "graph": graph})
+
+
+def test_wheel_adapter_can_expose_declared_sample_capability() -> None:
+    source = """
+import torch
+from stereotype_runtime.pytorch import BuildContext, NoServices
+class Sampler(torch.nn.Module):
+    def forward(self, value):
+        return value
+    def sample(self, value):
+        return value + torch.randn_like(value)
+def build(parameters, context: BuildContext, services: NoServices):
+    return Sampler()
+"""
+    definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "sample", "entrypoint": "module.sample",
+            "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "targetPolicy": "forbidden", "randomness": {"mode": "random"},
+        }],
+    }
+    package = _package("demo.sampler", source, definition=definition)
+    graph = _graph("demo.sampler")
+    graph["nodes"][1]["wheelAdapters"] = [{
+        "name": "sample", "input": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+        "output": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+    }]
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    torch.manual_seed(7)
+    first = model.adapter("sample")(torch.zeros(2, 2))
+    torch.manual_seed(7)
+    second = model.adapter("sample")(torch.zeros(2, 2))
+    assert torch.equal(first, second)
+    assert not torch.equal(first, torch.zeros(2, 2))
 
 
 def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> None:

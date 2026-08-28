@@ -24,6 +24,7 @@ export type WheelAdapterValueSchema =
 
 export type WheelAdapterRandomness =
   | { readonly mode: "none" }
+  | { readonly mode: "random" }
   | { readonly mode: "seeded"; readonly seedInput: string }
 
 export type WheelAdapterDefinition = {

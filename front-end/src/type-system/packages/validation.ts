@@ -57,7 +57,7 @@ function parseWheelAdapters(value: unknown): readonly WheelAdapterDefinition[] {
     const name = string(object.name, "wheel adapter name")
     if (!/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/.test(name) || names.has(name)) fail("wheel adapter name is invalid or duplicated")
     const entrypoint = string(object.entrypoint, "wheel adapter entrypoint")
-    if (entrypoint !== "module.forward") fail("wheel adapter entrypoint must be module.forward")
+    if (entrypoint !== "module.forward" && entrypoint !== "module.sample") fail("wheel adapter entrypoint must be module.forward or module.sample")
     if (object.targetPolicy !== "forbidden") fail("wheel adapter targetPolicy must be forbidden")
     names.add(name)
     const randomness = object.randomness === undefined ? undefined : parseAdapterRandomness(object.randomness)
@@ -77,10 +77,11 @@ function parseAdapterSchema(value: unknown): WheelAdapterValueSchema {
   fail("wheel adapter value type is invalid")
 }
 
-function parseAdapterRandomness(value: unknown): { readonly mode: "none" } | { readonly mode: "seeded"; readonly seedInput: string } {
+function parseAdapterRandomness(value: unknown): { readonly mode: "none" } | { readonly mode: "random" } | { readonly mode: "seeded"; readonly seedInput: string } {
   const object = record(value, "wheel adapter randomness")
   keys(object, ["mode", "seedInput"], "wheel adapter randomness")
   if (object.mode === "none") return { mode: "none" }
+  if (object.mode === "random") return { mode: "random" }
   if (object.mode === "seeded" && typeof object.seedInput === "string" && object.seedInput.trim()) return { mode: "seeded", seedInput: object.seedInput }
   fail("wheel adapter randomness is invalid")
 }

@@ -343,8 +343,8 @@ def _validate_adapter_declaration(
     name, entrypoint = raw.get("name"), raw.get("entrypoint")
     if not isinstance(name, str) or not name:
         raise PackageValidationError(f"wheel adapter on {node_id} has an invalid name")
-    if entrypoint != "module.forward":
-        raise PackageValidationError(f"wheel adapter {name!r} must use the module.forward protocol")
+    if entrypoint not in {"module.forward", "module.sample"}:
+        raise PackageValidationError(f"wheel adapter {name!r} must use the module.forward or module.sample protocol")
     if raw.get("targetPolicy") != "forbidden":
         raise PackageValidationError(f"wheel adapter {name!r} targetPolicy must be forbidden")
     input_schema = raw.get("input")
@@ -357,7 +357,7 @@ def _validate_adapter_declaration(
         raise PackageValidationError(f"wheel adapter {name!r} must declare a tensor output")
     _validate_tensor_schema(output, name, "output")
     randomness = raw.get("randomness", {"mode": "none"})
-    if not isinstance(randomness, Mapping) or randomness.get("mode") not in {"none", "seeded"}:
+    if not isinstance(randomness, Mapping) or randomness.get("mode") not in {"none", "random", "seeded"}:
         raise PackageValidationError(f"wheel adapter {name!r} has unsupported randomness policy")
     if randomness.get("mode") == "seeded" and (
         not isinstance(randomness.get("seedInput"), str) or not randomness["seedInput"].strip()
@@ -715,19 +715,24 @@ def _outgoing(incoming: dict[str, list[dict[str, Any]]], source: str) -> list[di
 
 
 class _BoundModule:
-    """Narrow callable capability passed to the fixed module.forward adapter."""
+    """Narrow callable capability passed to an allowlisted module adapter."""
 
     __slots__ = ("_module",)
 
     def __init__(self, module: torch.nn.Module) -> None:
         self._module = module
 
-    def __call__(self, value: torch.Tensor) -> torch.Tensor:
+    def __call__(self, value: torch.Tensor, entrypoint: str) -> torch.Tensor:
         devices = {parameter.device for parameter in self._module.parameters()}
         devices.update(buffer.device for buffer in self._module.buffers())
         if len(devices) == 1:
             value = value.to(next(iter(devices)))
-        return self._module(value)
+        if entrypoint == "module.forward":
+            return self._module(value)
+        sampler = self._module.sample
+        if not callable(sampler):
+            raise PackageValidationError("wheel adapter module.sample is not implemented by the stereotype")
+        return sampler(value)
 
 
 class _CompiledAdapter:
@@ -742,9 +747,11 @@ class _CompiledAdapter:
         tensor = _adapter_input_tensor(value, input_schema, self.descriptor["name"])
         bindings: dict[str, int] = {}
         _match_adapter_shape(tensor.shape, input_schema["shape"], bindings, "input")
-        output = self._module(tensor)
+        output = self._module(tensor, self.descriptor["entrypoint"])
         if not isinstance(output, torch.Tensor):
-            raise PackageValidationError("wheel adapter module.forward must return a torch.Tensor")
+            raise PackageValidationError(
+                f"wheel adapter {self.descriptor['entrypoint']} must return a torch.Tensor"
+            )
         output_schema = self.descriptor["output"]
         if output.dtype != _adapter_dtype(output_schema["dtype"]):
             raise TypeError(

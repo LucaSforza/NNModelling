@@ -48,6 +48,9 @@ import reparameterizeInference from "../../../stereotype-packages/core/reparamet
 import repeatManifest from "../../../stereotype-packages/core/repeat/manifest.json?raw"
 import repeatDefinition from "../../../stereotype-packages/core/repeat/stereotype.json?raw"
 import repeatInference from "../../../stereotype-packages/core/repeat/inference.lua?raw"
+import scaleManifest from "../../../stereotype-packages/core/scale/manifest.json?raw"
+import scaleDefinition from "../../../stereotype-packages/core/scale/stereotype.json?raw"
+import scaleInference from "../../../stereotype-packages/core/scale/inference.lua?raw"
 import subflowProxyManifest from "../../../stereotype-packages/core/subflow-proxy/manifest.json?raw"
 import subflowProxyDefinition from "../../../stereotype-packages/core/subflow-proxy/stereotype.json?raw"
 import subflowProxyInference from "../../../stereotype-packages/core/subflow-proxy/inference.lua?raw"
@@ -67,6 +70,7 @@ const packages: readonly PackageSelection[] = [
   packageSelection(outputManifest, outputDefinition, outputInference),
   packageSelection(reparameterizeManifest, reparameterizeDefinition, reparameterizeInference),
   packageSelection(repeatManifest, repeatDefinition, repeatInference),
+  packageSelection(scaleManifest, scaleDefinition, scaleInference),
   packageSelection(horizontalRepeatManifest, horizontalRepeatDefinition, horizontalRepeatInference),
   packageSelection(subflowProxyManifest, subflowProxyDefinition, subflowProxyInference),
 ]
@@ -81,12 +85,17 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, loss, and output packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.output", "core.reparameterize", "core.repeat", "core.horizontal-repeat", "core.subflow-proxy"]) {
+    for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.kl-divergence", "core.mse-loss", "core.output", "core.reparameterize", "core.repeat", "core.scale", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(id)
     }
     expect(host.packageDefinition("core.repeat")?.wheelAdapters).toEqual([expect.objectContaining({
       name: "forward",
       entrypoint: "module.forward",
+      targetPolicy: "forbidden",
+    })])
+    expect(host.packageDefinition("core.reparameterize")?.wheelAdapters).toEqual([expect.objectContaining({
+      name: "sample",
+      entrypoint: "module.sample",
       targetPolicy: "forbidden",
     })])
     expect(host.packageDefinition("core.subflow-proxy")?.wheelAdapters).toBeUndefined()

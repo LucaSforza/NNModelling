@@ -66,7 +66,8 @@
         "package": { "id": "core.reparameterize", "version": "0.1.0", "name": "Reparameterize" },
         "name": "sample_z",
         "color": "#8b6bb8",
-        "params": { "epsilon_scale": 1 }
+        "params": { "epsilon_scale": 1 },
+        "wheelAdapters": ["sample"]
       }
     },
     {
@@ -80,6 +81,19 @@
         "name": "kl_loss",
         "color": "#8b6bb8",
         "params": {}
+      }
+    },
+    {
+      "id": "kl-scale",
+      "type": "custom",
+      "position": { "x": 690, "y": 1290 },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": { "id": "core.scale", "version": "0.1.0", "name": "Scale" },
+        "name": "kl_scale",
+        "color": "#4779c4",
+        "params": { "factor": 0.1 }
       }
     },
     {
@@ -292,7 +306,8 @@
     { "id": "decoder-reconstruction-loss", "source": "decoder", "target": "reconstruction-loss", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
     { "id": "decoder-prediction-output", "source": "decoder", "target": "prediction-output", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
     { "id": "reconstruction-loss-vae-loss", "source": "reconstruction-loss", "target": "vae-loss", "sourceHandle": "out", "targetHandle": "in-0", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "kl-loss-vae-loss", "source": "kl-loss", "target": "vae-loss", "sourceHandle": "out", "targetHandle": "in-1", "type": "editable", "data": { "route": { "points": [] } } },
+    { "id": "kl-loss-kl-scale", "source": "kl-loss", "target": "kl-scale", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
+    { "id": "kl-scale-vae-loss", "source": "kl-scale", "target": "vae-loss", "sourceHandle": "out", "targetHandle": "in-1", "type": "editable", "data": { "route": { "points": [] } } },
     { "id": "encoder-hidden-relu", "source": "encoder-hidden", "target": "encoder-relu", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
     { "id": "encoder-relu-latent", "source": "encoder-relu", "target": "encoder-latent", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
     { "id": "encoder-latent-fork", "source": "encoder-latent", "target": "latent-params-fork", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
