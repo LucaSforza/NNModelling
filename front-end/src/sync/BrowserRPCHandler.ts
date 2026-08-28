@@ -845,8 +845,40 @@ export class BrowserRPCHandler {
       errors.push(`Found ${inputNodes.length} Input nodes. Exactly 1 Input node is required.`);
     }
 
-    const terminals = topLevelNodes.filter((node) => !this.diagram.edges.some((edge) => edge.source === node.id && topLevelNodes.some((candidate) => candidate.id === edge.target)));
-    if (terminals.length !== 1) errors.push(`Complete package graph requires exactly one terminal; found ${terminals.length}.`);
+    const topLevelIds = new Set(topLevelNodes.map((node) => node.id));
+    const outgoing = new Map<string, string[]>();
+    for (const edge of this.diagram.edges) {
+      if (!topLevelIds.has(edge.source) || !topLevelIds.has(edge.target)) continue;
+      const targets = outgoing.get(edge.source) ?? [];
+      targets.push(edge.target);
+      outgoing.set(edge.source, targets);
+    }
+    const terminals = topLevelNodes.filter((node) => !(outgoing.get(node.id)?.length));
+    const lossNodes = topLevelNodes.filter((node) => kindOf(node) === "loss");
+
+    if (lossNodes.length === 0) {
+      if (terminals.length !== 1) errors.push(`Complete package graph requires exactly one terminal; found ${terminals.length}.`);
+    } else {
+      // Training graphs have two role-specific terminals: prediction and objective.
+      const objectiveNodes = new Set(lossNodes.map((node) => node.id));
+      const pending = [...objectiveNodes];
+      while (pending.length > 0) {
+        const nodeId = pending.pop()!;
+        for (const target of outgoing.get(nodeId) ?? []) {
+          if (objectiveNodes.has(target)) continue;
+          objectiveNodes.add(target);
+          pending.push(target);
+        }
+      }
+      const predictionTerminals = terminals.filter((node) => kindOf(node) === "output" && !objectiveNodes.has(node.id));
+      const objectiveTerminals = terminals.filter((node) => objectiveNodes.has(node.id));
+      if (predictionTerminals.length !== 1) {
+        errors.push(`Training package graph requires exactly one prediction output terminal; found ${predictionTerminals.length}.`);
+      }
+      if (objectiveTerminals.length !== 1) {
+        errors.push(`Training package graph requires exactly one objective terminal; found ${objectiveTerminals.length}.`);
+      }
+    }
 
     // Detect orphan nodes (no incoming or outgoing connections, except Input/Loss)
     for (const node of topLevelNodes) {
@@ -867,7 +899,7 @@ export class BrowserRPCHandler {
         warnings.push(
           `Node "${node.data.name}" (${node.id}) has no incoming connections.`,
         );
-      } else if (!hasOutgoing && node.type !== "join") {
+      } else if (!hasOutgoing && node.type !== "join" && kind !== "output") {
         // Join nodes may not have outgoing edges if they are the last (output) node
         warnings.push(
           `Node "${node.data.name}" (${node.id}) has no outgoing connections.`,

@@ -9,11 +9,23 @@ const linear = {
   id: "core.linear", version: "0.1.0",
   definition: { name: "Linear", kind: "layer", parameters: { width: { type: "integer", default: 4 } }, view: { color: "#000000", width: 140, height: 60 } },
 }
+const output = {
+  id: "core.output", version: "0.1.0",
+  definition: { name: "Output", kind: "output", parameters: {}, view: { color: "#000000", width: 4, height: 4 } },
+}
+const mseLoss = {
+  id: "core.mse-loss", version: "0.1.0",
+  definition: { name: "MSE Loss", kind: "loss", parameters: {}, view: { color: "#000000", width: 4, height: 4 } },
+}
+const add = {
+  id: "core.add", version: "0.1.0",
+  definition: { name: "Add", kind: "join", parameters: {}, view: { color: "#000000", width: 4, height: 4 } },
+}
 
 function harness() {
   const sent: Array<Record<string, unknown>> = []
   const diagram: any = {
-    nodes: [], edges: [], packageCatalog: [input, linear], typeResult: null,
+    nodes: [], edges: [], packageCatalog: [input, linear, output, mseLoss, add], typeResult: null,
     refreshTypes() {
       this.typeResult = { nodes: new Map(), order: [], terminals: [], complete: false }
       return this.typeResult
@@ -66,5 +78,29 @@ describe("BrowserRPC package-only boundary", () => {
     const { handler, sent } = harness()
     handler.handleMessage({ data: JSON.stringify({ id: "compile", method: "compile_nntree", params: {} }) })
     expect(sent[0]?.error?.message).toContain("Unknown method")
+  })
+
+  test("accepts separate prediction and objective terminals", () => {
+    const { handler, diagram, sent } = harness()
+    const node = (id: string, pkg: typeof input, type = "custom") => ({
+      id, type, parentId: null, data: { package: { id: pkg.id, version: pkg.version, name: pkg.definition.name }, name: id, params: {} },
+    })
+    diagram.nodes = [
+      node("input", input),
+      node("encoder", linear),
+      node("prediction", output),
+      node("reconstruction", mseLoss),
+      node("objective", add, "join"),
+    ]
+    diagram.edges = [
+      { source: "input", target: "encoder" },
+      { source: "encoder", target: "prediction" },
+      { source: "encoder", target: "reconstruction" },
+      { source: "reconstruction", target: "objective" },
+    ]
+
+    handler.handleMessage({ data: JSON.stringify({ id: "validate", method: "validate_graph", params: {} }) })
+
+    expect(sent[0]?.result).toEqual({ valid: true, errors: [], warnings: [] })
   })
 })
