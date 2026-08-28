@@ -18,6 +18,9 @@ has a stable name, the fixed entrypoint `module.forward`, symbolic tensor input
 and output schemas, and `targetPolicy: "forbidden"`. The final graph binding is
 an object `{name, input, output}`: its tensor schemas are materialized from the
 concrete DiagramCore inference and validated against the symbolic template.
+Concrete binding shapes retain the dynamic batch symbol `B` only in position
+zero; every non-batch dimension is a positive integer. Input and output must
+either both preserve `B` in position zero or both use concrete first dimensions.
 The editor may hold selected names before bundling, but the serialized package
 binding must be an object; raw string selections are rejected by the compiler.
 A package with no selected adapters retains the prediction-only wheel surface.
@@ -43,8 +46,8 @@ Materialized graph binding after DiagramCore inference:
 ```json
 {
   "name": "decode",
-  "input": {"type": "tensor", "shape": [32, 4], "dtype": "float32"},
-  "output": {"type": "tensor", "shape": [32, 8], "dtype": "float32"}
+  "input": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+  "output": {"type": "tensor", "shape": ["B", 8], "dtype": "float32"}
 }
 ```
 
@@ -87,10 +90,11 @@ subflow instance is therefore not a v1 capability.
 
 - `module.forward` is the only v1 adapter protocol; a Python symbol is not an
   export API.
-- Selected v1 bindings carry tensor input and output schemas with concrete
-  DiagramCore-inferred shapes. The stereotype declaration may use symbolic
-  dimensions, but the final wheel descriptor does not carry those template
-  symbols.
+- Selected v1 bindings carry tensor input and output schemas with
+  DiagramCore-inferred shapes. The only dynamic symbol permitted in a concrete
+  binding is `B` at the first dimension; all remaining dimensions are positive
+  integers, and input/output agree on whether that leading `B` is present. The
+  final wheel descriptor carries no other stereotype template symbols.
 - Targets are forbidden, including implicit `batch.targets`; objective and
   loss execution remains training-only.
 - Package IDs, class names, display names and Python introspection cannot
