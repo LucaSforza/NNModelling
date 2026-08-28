@@ -6,9 +6,8 @@ updated: 2026-08-12
 
 # Remote-training architecture
 
-The current checkout still implements the historical NNTree training backend
-and the experimental package path from PR44. The accepted package-only target,
-including its least-privilege Podman/Docker controller, is defined in the
+The backend is package-native. The accepted package-only target, including its
+least-privilege Podman/Docker controller, is defined in the
 [package backend decision](../decisions/package-backend-standard.md) and the
 [active implementation plan](../../plans/active/package-backend-standard/plan.md).
 
@@ -17,7 +16,7 @@ TrainingSidebar or MCP HTTP client
   -> FastAPI (`converted/src/backend/app.py`)
   -> Valkey job store and event streams
   -> JobManager priority/FIFO scheduler
-  -> current local/Slurm or experimental package executor
+  -> Podman/Docker container controller
   -> training artifacts
 ```
 
@@ -26,10 +25,9 @@ TrainingSidebar or MCP HTTP client
 `JobSubmission` is versioned and rejects unknown top-level fields. Version 1
 contains:
 
-- `network`: currently `nntree`; the accepted target is a `package` bundle
-  reference plus semantic graph;
-- `training`: dataset, optimizer, trainer, W&B, early stopping and overrides;
-- `resources`: CPU, memory, GPU and optional Slurm selectors;
+- `network`: a `package` bundle reference plus semantic graph;
+- `training`: dataset, optimizer, trainer, W&B and early stopping;
+- `resources`: CPU, memory, GPU and optional controller selectors;
 - `priority` and optional `nnm_<name>` package name.
 
 The current public lifecycle is:
@@ -50,18 +48,17 @@ and must be reassessed against current code before becoming a new plan.
 
 - The frontend and optional MCP client use the same FastAPI state; MCP does not
   duplicate jobs or scheduling.
-- The accepted target validates typed package/training data and never imports
-  package Python in FastAPI.
+- The API validates typed package/training data and never imports package
+  Python in FastAPI.
 - The accepted target launches exactly one short-lived worker container per job
   through a Podman/Docker controller.
 - Artifacts default to `converted/jobs/<job-id>/` and may be relocated with
   `NNM_BACKEND_ARTIFACT_ROOT`.
-- Current dataset discovery and package execution are being replaced by the
-  registered-dataset and worker-only policy in the accepted target.
+- Dataset discovery and package execution follow the registered-dataset and
+  worker-only policy.
 - Job access is scoped to an authenticated browser connection; see
   [Pairing and ownership](../contracts/pairing.md).
-- The current legacy path may emit a portable wheel; the accepted package path
-  must emit the same contract. See
+- The package path emits the portable wheel contract. See
   [Model packages](../contracts/model-package.md).
 
 ## Principal code
@@ -70,7 +67,7 @@ and must be reassessed against current code before becoming a new plan.
 - `converted/src/backend/models.py`: public request and status contracts.
 - `converted/src/backend/store.py`: persistence and queue operations.
 - `converted/src/backend/manager.py`: scheduling and lifecycle coordination.
-- `converted/src/backend/executors/`: local and Slurm boundaries.
+- `converted/src/backend/container_controller.py`: Podman/Docker boundary.
 - `front-end/src/components/TrainingSidebar.svelte`: browser workflow.
 - `front-end/src/training/api.ts`: browser REST/SSE client.
 - `mcp-server/src/remote-training.ts`: optional authenticated HTTP client.

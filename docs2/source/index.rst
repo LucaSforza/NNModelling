@@ -1,50 +1,30 @@
 NNModelling Documentation
 =========================
 
-**NNModelling** is a Domain-Specific Language (DSL) for designing neural
-networks using a visual node editor. Diagrams are compiled to production-ready
-PyTorch code via the Lightning framework and configured with Hydra.
+NNModelling is a browser-owned visual DSL for package-native neural networks.
+The editor's ``DiagramCore`` owns the graph and package type inference runs
+locally in isolated Lua runtimes.
 
-The project consists of three main packages:
+The supported workflow is:
 
-* **front-end/** — A Svelte 5 visual editor built with Svelte Flow (TypeScript)
-* **converted/** — Python codegen target (PyTorch + Lightning + Hydra)
-* **mcp-server/** — An MCP server that proxies diagram state from the browser
-  to LLM agents
+.. code-block:: text
 
-Editor highlights include recursive **automatic layout**: one toolbar menu can
-arrange an entire model vertically or horizontally, resize nested subflows
-around their contents, rotate connection handles, and preserve the result
-through undo/redo and diagram save/load. See :ref:`automatic-layout`.
+   package definitions -> DiagramCore -> authenticated package bundle
+   -> FastAPI -> Podman/Docker worker -> portable prediction wheel
+
+The MCP server is a thin browser proxy. It does not compile legacy graph
+formats or execute Python on the host.
 
 .. toctree::
    :maxdepth: 2
-   :caption: User Guide
 
    user_guide
    training_user_guide
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Administration
-
    training_admin_guide
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Reference
-
    architecture
    stereotypes
    python_api
    typescript_api
    type_system
    examples
-   license
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+license

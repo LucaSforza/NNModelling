@@ -25,7 +25,8 @@ MCP client
 - `mcp-server/src/browser-client.ts` accepts browser connections, assigns
   sequential tab IDs, selects an active tab and correlates pending requests.
 - `mcp-server/src/tools/` exposes narrow MCP adapters.
-- `mcp-server/src/pipeline.ts` owns the Python subprocess boundary.
+- `mcp-server/src/tools/` contains browser proxies only; package compilation
+  and training are performed by the authenticated backend API.
 
 ## RPC contract
 
@@ -36,8 +37,8 @@ MCP client
 ```
 
 Requests time out at the server boundary. Browser-side failures are returned as
-plain error messages; pipeline failures use the MCP server's dedicated error
-types.
+plain error messages. The MCP server does not create Python conversion or
+training subprocesses.
 
 ## Multi-tab behavior
 
@@ -53,7 +54,6 @@ types.
 - Standard handles are `in` and `out`; join targets use `in-0`, `in-1`, etc.
 - Browser mutations must trigger Svelte reactivity and one logical graph-change
   notification.
-- NNTree conversion tools query the selected browser at execution time.
 - The server keeps an ESM-safe projection of stereotype JSON instead of
   importing the Vite loader.
 

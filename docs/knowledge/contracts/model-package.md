@@ -1,43 +1,40 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-27
 ---
 
 # Portable model-package contract
 
-A successful training job may produce a deterministic pure-Python wheel for
-inference without the NNModelling checkout, Lightning, W&B or the training
-dataset.
+A successful package-native training job produces a deterministic pure-Python
+wheel for inference without the NNModelling checkout, Hydra/OmegaConf,
+Lightning, W&B, or the training dataset.
 
-## Inputs and outputs
+## Artifact and wheel contents
 
-`build_model_wheel()` requires a resolved configuration and a valid non-empty
-`weights.safetensors`. The package name must match
-`nnm_[A-Za-z][A-Za-z0-9_]*`.
-
-The job artifact contains:
+`build_model_wheel()` requires the validated package bundle used by the worker
+and a non-empty `weights.safetensors`. Resolved NNTree/Hydra configurations are
+not accepted. The artifact contains:
 
 ```text
 weights.safetensors
-resolved_config.yaml or resolved_config.json
+package.json
+training-summary.json
 model-package.json
-dist/nnm_<name>-<version>-py3-none-any.whl
+dist/nnm_<name>-<version>-<wheel>.whl
 ```
 
-The manifest schema records package name, version, relative wheel path, SHA-256
-digest and declarative input-adapter specification. The API streams the server-
-selected wheel after checking job ownership; clients do not provide filesystem
-paths.
+The wheel embeds the package graph, package dependency closure and restricted
+package compiler/runtime needed to build it. It also contains the safe tensor
+state and declarative input-adapter specification. It does not embed objective
+execution: the architecture declares the prediction program, and the runtime
+loads the shared trained state into that prediction view.
 
-## Wheel contents
+The manifest records package name, version, relative wheel path, SHA-256
+digest, and adapter specification. The backend streams the server-selected
+wheel after checking job ownership; clients cannot provide filesystem paths.
 
-- rewritten architecture with package-local custom operation targets;
-- safetensors weights;
-- inference runtime and trusted input-adapter registry;
-- standard wheel metadata and RECORD hashes.
-
-Public API:
+## Public API
 
 ```python
 from nnm_example import load_model
@@ -47,10 +44,18 @@ output = model.predict_tensor(batch)
 output = model.predict(value)
 ```
 
-`predict_tensor` is the universal tensor boundary. `predict` uses the packaged
-adapter specification. Adapters are declarative; the browser cannot inject
-Python code into a package.
+`predict_tensor` accepts an already-preprocessed batch and invokes only the
+explicit prediction program. It never requires, fabricates, or infers a
+dataset target; objective nodes such as Cross Entropy, MSE, and KL are not
+executed. `predict` uses the packaged adapter specification. Adapters are
+declarative, so the browser cannot inject Python code into a package.
 
-The exporter is `converted/src/model_package/exporter.py`; runtime and adapters
-live beside it. Full-path verification is in
+Safetensors are restored with strict state-dict loading against the one shared
+compiled module store. A missing, extra, or incompatible tensor therefore
+fails package loading instead of silently producing a partially initialized
+model.
+
+The exporter is `converted/src/model_package/exporter.py`; runtime and
+adapters live beside it. Full-path verification is in
+`converted/src/tests/test_model_package.py` and
 `converted/src/tests/test_backend_e2e.py`.

@@ -17,7 +17,7 @@ lives under `docs2/`.
 | `front-end/` | Svelte editor, graph mutations, package catalog, Lua type inference and browser RPC | Browser `DiagramCore` |
 | `stereotype-packages/` | Independently identified definitions, Lua inference and future PyTorch entrypoints | Package manifest and resources |
 | `mcp-server/` | Thin proxy to the selected browser tab | No diagram or type state |
-| `converted/` | Existing Python conversion, runtime, training and remote backend | Python configs and backend stores |
+| `converted/` | Package compiler/runtime, authenticated API, scheduler and worker controller | Valkey job state and backend stores |
 | `examples/` | Package-format editable diagrams and historical compiled fixtures | Format-specific fixtures |
 
 ## Current frontend flow
@@ -46,9 +46,9 @@ package-ID inference switch.
 
 ## Backend boundary
 
-The current checkout still contains the historical NNTree backend and the
-experimental package integration; package-format diagrams are not yet a
-completed backend path. The accepted target is documented in the
+The backend standard is package-native. Historical NNTree conversion artifacts
+are archived and are not an input to the public backend path. The accepted
+target is documented in the
 [package backend decision](../decisions/package-backend-standard.md) and
 implemented by the active
 [package-backend-standard plan](../../plans/active/package-backend-standard/plan.md).
@@ -72,7 +72,7 @@ and the [model-package contract](../contracts/model-package.md).
 - Every edge connects endpoints in the same immediate containment scope.
 - Hidden children of collapsed subflows remain part of graph semantics.
 - Editable package diagrams and historical compiled NNTree fixtures are
-  different formats and are never interchangeable.
+  different formats; only package bundles may enter the backend.
 - Presentation metadata, including automatic layout and editable edge routes,
   does not affect package semantics.
 
