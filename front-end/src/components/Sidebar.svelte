@@ -41,6 +41,10 @@ Licensed under the GNU General Public License v3 or later.
     params: {} as Record<string, unknown>,
     wheelAdapters: [] as string[],
   });
+  // Svelte Flow owns live resizer dimensions. Keep them unless the user
+  // explicitly edits the corresponding form field; otherwise saving a label
+  // or parameter would write the stale package defaults back to the node.
+  let geometryDirty = $state({ width: false, height: false });
   let packageSelection = $state<ActivePackageMetadata | null>(null);
   let sidebarWidth = $state(320);
   let isDragging = $state(false);
@@ -88,6 +92,8 @@ Licensed under the GNU General Public License v3 or later.
   });
 
   function loadExistingNode(node: Node) {
+    geometryDirty.width = false;
+    geometryDirty.height = false;
     const identity = nodePackageIdentity(node);
     if (identity) {
       packageSelection = diagram.packageCatalog.find((metadata) => packageMatches(metadata, identity)) ?? null;
@@ -108,6 +114,8 @@ Licensed under the GNU General Public License v3 or later.
   }
 
   function resetForm() {
+    geometryDirty.width = false;
+    geometryDirty.height = false;
     packageSelection = null;
     form.name = "";
     form.color = "#4779c4";
@@ -154,11 +162,12 @@ Licensed under the GNU General Public License v3 or later.
   function handleManualUpdate() {
     if (!selectedNode) return;
     if (isPackageNode && packageSelection) {
+      const currentNode = diagram.getNodeById(selectedNode.id);
       diagram.updatePackageNode(selectedNode.id, packageIdentity(packageSelection), packageSelection.definition.kind, {
         name: form.name,
         color: form.color,
-        width: form.width,
-        height: form.height,
+        width: geometryDirty.width ? form.width : currentNode?.width,
+        height: geometryDirty.height ? form.height : currentNode?.height,
         params: form.params,
         wheelAdapters: form.wheelAdapters,
         inputsCount: Number(selectedNode.data.inputsCount ?? 2),
@@ -285,8 +294,8 @@ Licensed under the GNU General Public License v3 or later.
 
       <div class="row">
         <label>Colore <input type="color" bind:value={form.color} oninput={handleManualUpdate} /></label>
-        <label>Width <input type="number" bind:value={form.width} oninput={handleManualUpdate} /></label>
-        <label>Height <input type="number" bind:value={form.height} oninput={handleManualUpdate} /></label>
+        <label>Width <input type="number" bind:value={form.width} oninput={() => { geometryDirty.width = true; handleManualUpdate(); }} /></label>
+        <label>Height <input type="number" bind:value={form.height} oninput={() => { geometryDirty.height = true; handleManualUpdate(); }} /></label>
       </div>
 
       {#if !isEditing || isPackageNode}

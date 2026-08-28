@@ -134,4 +134,35 @@ describe("package model editor acceptance", () => {
       status: "error", message: "Linear expects dtype float16, got float32",
     })
   })
+
+  test("preserves a resized collapsed subflow when other package fields are saved", () => {
+    const diagram = new MemoryDiagram()
+    const subflow = diagram.addPackageNode(
+      { id: "core.subflow-proxy", version: "0.1.0", name: "Subflow" },
+      "subflow",
+      0,
+      0,
+      { width: 250, height: 50 },
+    )
+    diagram.nodes = diagram.nodes.map((node) => node.id === subflow.id
+      ? {
+          ...node,
+          data: { ...node.data, isCollapsed: true, oldWidth: 640, oldHeight: 360 },
+        }
+      : node)
+
+    diagram.updatePackageNode(
+      subflow.id,
+      { id: "core.subflow-proxy", version: "0.1.0", name: "Subflow" },
+      "subflow",
+      { name: "Encoder" },
+    )
+
+    const saved = diagram.nodes.find((node) => node.id === subflow.id)
+    expect(saved).toMatchObject({
+      width: 250,
+      height: 50,
+      data: { isCollapsed: true, oldWidth: 640, oldHeight: 360, name: "Encoder" },
+    })
+  })
 })
