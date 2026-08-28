@@ -8,6 +8,7 @@ skills-lock.json
 
 # Dependencies
 node_modules/
+__pycache__/
 
 # Build output
 dist/
