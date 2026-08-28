@@ -99,6 +99,39 @@ def _prediction_image(prediction: Any, size: tuple[int, int] = (28, 28)) -> Imag
     return Image.frombytes("L", size, pixels)
 
 
+def _save_image_grid(images: list[Image.Image], path: Path) -> None:
+    """Save a square-ish grid of generated images without inspecting model internals."""
+
+    columns = min(4, len(images))
+    rows = (len(images) + columns - 1) // columns
+    width, height = images[0].size
+    sheet = Image.new("L", (columns * width, rows * height), color=255)
+    for index, image in enumerate(images):
+        sheet.paste(image, ((index % columns) * width, (index // columns) * height))
+    sheet.save(path)
+
+
+def _sample_from_prior(model: InferenceModel, count: int) -> list[Image.Image]:
+    """Generate images through the VAE's declared ``sample`` and ``forward`` adapters.
+
+    The packed latent input contains zero means and log-variances.  The wheel's
+    sampler therefore draws from the standard normal prior, while the decoder
+    adapter turns those sampled latents into images.  No private graph node or
+    framework object is needed by this example.
+    """
+
+    if count < 1:
+        raise ValueError("sample count must be positive")
+    packed_prior = [[0.0] * 64 for _ in range(count)]
+    sampled_latents = model.adapter("sample").run(packed_prior)
+    generated_batch = model.adapter("forward").run(sampled_latents)
+    try:
+        rows = generated_batch.detach().cpu().reshape(count, -1).tolist()
+    except AttributeError as exc:
+        raise TypeError("wheel decoder adapter must return a tensor-like batch") from exc
+    return [_prediction_image(row) for row in rows]
+
+
 def _save_comparison_grid(originals: list[Image.Image], reconstructions: list[Image.Image], path: Path) -> None:
     """Save originals beside their reconstructions in a compact gallery."""
 
@@ -131,6 +164,7 @@ def generate(
     model = _load_model(wheel_path, package_name)
     originals = _mnist_images(data_dir, sample_count)
     reconstructions = [_prediction_image(model.predict(image)) for image in originals]
+    generated = _sample_from_prior(model, sample_count)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     reconstruction_path = output_dir / "reconstructions.png"
@@ -146,6 +180,9 @@ def generate(
             "reconstructions": reconstruction_path.name,
         },
     }
+    generated_path = output_dir / "prior-samples.png"
+    _save_image_grid(generated, generated_path)
+    result["outputs"]["prior_samples"] = generated_path.name
     (output_dir / "generation-summary.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

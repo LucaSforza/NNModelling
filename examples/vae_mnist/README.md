@@ -15,8 +15,17 @@ uv run python examples/vae_mnist/generate_images.py \
 
 Lo script legge direttamente il test set MNIST IDX già predisposto in
 `converted/data`, senza importare `torch` o `torchvision`, e invoca soltanto
-l’API pubblica della wheel (`load_model()` e `predict()`). Salva una galleria
-con ogni immagine originale affiancata alla sua ricostruzione in
-`generated/reconstructions.png`, oltre a `generated/generation-summary.json`.
-La qualità può essere bassa con pochi epoch: l’immagine è una verifica visiva
-della ricostruzione, non una promessa di leggibilità.
+l’API pubblica della wheel: `load_model()`, `predict()` e gli adapter dichiarati
+`model.adapter("sample").run(...)` e `model.adapter("forward").run(...)`.
+Produce due immagini:
+
+- `generated/reconstructions.png`: ogni originale affiancato alla propria
+  ricostruzione deterministica ottenuta con `predict()`;
+- `generated/prior-samples.png`: immagini generate campionando il prior VAE
+  tramite l’adapter `sample` e decodificandole tramite `forward`.
+
+Il campionamento è intenzionalmente casuale; il parametro `--seed` resta nella
+traccia JSON come metadato dell’esperimento, ma non forza il generatore interno
+della wheel. La qualità può essere bassa con pochi epoch: l’immagine è una
+verifica visiva della ricostruzione e del percorso generativo, non una promessa
+di leggibilità.
