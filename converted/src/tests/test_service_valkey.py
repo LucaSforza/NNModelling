@@ -227,7 +227,8 @@ def test_manager_recovery_on_persisted_valkey_state(tmp_path, clean_valkey):
 
     still_queued = restarted.status(queued.id, owner_connection_id=OWNER)
     assert still_queued.status == "queued"
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is not None
+    queue_key = f"queue:priority:{queued.priority}"
+    assert clean_valkey.zscore(queue_key, queued.id) is not None
     recovered = restarted.status(running.id, owner_connection_id=OWNER)
     assert recovered.status == "failed"
     assert recovered.finished_at is not None
@@ -253,8 +254,9 @@ def test_recovery_failed_job_removed_from_valkey_queue_and_contract_preserved(tm
     assert record is not None
     record["status"] = "running"
     store.save_job(queued.id, record)
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is not None
-    assert clean_valkey.zscore("queue:priorities", "10") is not None
+    queue_key = f"queue:priority:{queued.priority}"
+    assert clean_valkey.zscore(queue_key, queued.id) is not None
+    assert clean_valkey.zscore("queue:priorities", str(queued.priority)) is not None
 
     restarted = JobManager(ValkeyJobStore(url), tmp_path / "artifacts", [executor])
     restarted._recover()
@@ -263,9 +265,9 @@ def test_recovery_failed_job_removed_from_valkey_queue_and_contract_preserved(tm
     assert recovered.status == "failed"
     assert recovered.finished_at is not None
     # Queue invariants: member gone, priority bucket and index cleaned, not claimable.
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is None
-    assert clean_valkey.zcard("queue:priority:10") == 0
-    assert clean_valkey.zscore("queue:priorities", "10") is None
+    assert clean_valkey.zscore(queue_key, queued.id) is None
+    assert clean_valkey.zcard(queue_key) == 0
+    assert clean_valkey.zscore("queue:priorities", str(queued.priority)) is None
     assert ValkeyJobStore(url).claim_next() is None
     # Visibility contracts: list/get/events/logs remain available.
     assert [job.id for job in restarted.admin_list_status()] == [queued.id]
@@ -324,7 +326,8 @@ def test_valkey_mark_failed_failure_leaves_no_partial_state_and_recovery_reconci
     assert record is not None
     record["status"] = "running"
     store.save_job(queued.id, record)
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is not None
+    queue_key = f"queue:priority:{queued.priority}"
+    assert clean_valkey.zscore(queue_key, queued.id) is not None
 
     # Simulate a transport failure before the Lua script executes, on the
     # exact client the manager uses.
@@ -339,15 +342,15 @@ def test_valkey_mark_failed_failure_leaves_no_partial_state_and_recovery_reconci
 
     # Atomic contract on the real store: neither record nor queue changed.
     assert ValkeyJobStore(url).get_job(queued.id)["status"] == "running"
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is not None
-    assert clean_valkey.zscore("queue:priorities", "10") is not None
+    assert clean_valkey.zscore(queue_key, queued.id) is not None
+    assert clean_valkey.zscore("queue:priorities", str(queued.priority)) is not None
 
     # A working store (restart) reconciles the same persisted state.
     restarted = JobManager(ValkeyJobStore(url), tmp_path / "artifacts2", [executor])
     restarted._recover()
     assert restarted.status(queued.id, owner_connection_id=OWNER).status == "failed"
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is None
-    assert clean_valkey.zscore("queue:priorities", "10") is None
+    assert clean_valkey.zscore(queue_key, queued.id) is None
+    assert clean_valkey.zscore("queue:priorities", str(queued.priority)) is None
     assert ValkeyJobStore(url).claim_next() is None
     assert restarted.events(queued.id, owner_connection_id=OWNER)[-1]["type"] == "failed"
 
@@ -363,7 +366,7 @@ class _SucceedingExecutor:
     """
 
     name = "fake"
-    kind = "local"
+    kind = "container"
 
     def can_run(self, resources):
         del resources
@@ -408,8 +411,9 @@ def test_package_export_failure_on_real_valkey_fails_job_atomically(tmp_path, cl
 
     manager = JobManager(store, tmp_path / "jobs", [_SucceedingExecutor()])
     queued = manager.submit(package_submission(manager, owner), owner_connection_id=owner)
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is not None
-    assert clean_valkey.zscore("queue:priorities", "10") is not None
+    queue_key = f"queue:priority:{queued.priority}"
+    assert clean_valkey.zscore(queue_key, queued.id) is not None
+    assert clean_valkey.zscore("queue:priorities", str(queued.priority)) is not None
 
     assert manager.run_once() is True
 
@@ -423,9 +427,9 @@ def test_package_export_failure_on_real_valkey_fails_job_atomically(tmp_path, cl
     # D4/D5: the failed record and the queue/bucket/index cleanup committed on
     # the real store; nothing is claimable and no manifest was ever written.
     assert store.get_job(queued.id)["status"] == "failed"
-    assert clean_valkey.zscore("queue:priority:10", queued.id) is None
-    assert clean_valkey.zcard("queue:priority:10") == 0
-    assert clean_valkey.zscore("queue:priorities", "10") is None
+    assert clean_valkey.zscore(queue_key, queued.id) is None
+    assert clean_valkey.zcard(queue_key) == 0
+    assert clean_valkey.zscore("queue:priorities", str(queued.priority)) is None
     assert store.claim_next() is None
     assert not (Path(status.artifact_dir) / "model-package.json").exists()
 

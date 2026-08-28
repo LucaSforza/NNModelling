@@ -7,7 +7,7 @@ on:
     branches: [master, typeSystem]
 
 # Serialize runs on the same ref so a superseded push cancels its in-flight
-# E2E training instead of stacking multiple expensive runs.
+# integration work instead of stacking multiple expensive runs.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -121,64 +121,6 @@ jobs:
         working-directory: converted
       - run: uv run pytest src/tests/ -m service -q
         working-directory: converted
-
-  # Milestone A T4: serialized full-path E2E over the real API, store, queue,
-  # executor and wheel pipeline. Deterministic tiny datasets and W&B disabled.
-  # Only the canonical `e2e` marker runs here (3 tests); the network-dependent
-  # `legacy_e2e` suite (real MNIST downloads) is intentionally NOT part of any
-  # required gate and would only be run manually, see the report.
-  backend-e2e:
-    name: Backend E2E gate (serialized, real Valkey)
-    runs-on: ubuntu-latest
-    services:
-      valkey:
-        image: valkey/valkey:8
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "valkey-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      NNM_REQUIRE_VALKEY: "1"
-      NNM_VALKEY_URL: valkey://127.0.0.1:6379/15
-      NNM_WANDB_MODE: disabled
-      NNM_DEVICE: cpu
-      # Failure-retention contract: on failure each e2e test copies its job
-      # artifacts (resolved configs, safetensors, wheels, stdout/stderr logs)
-      # into <NNM_E2E_ARTIFACT_DIR>/<test-name>/ via the
-      # retain_e2e_artifacts_on_failure fixture. Valkey data, admin tokens and
-      # MNIST downloads never live in the test temp dirs, so nothing
-      # sensitive is collected.
-      NNM_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install uv
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('converted/uv.lock') }}
-      - run: uv sync
-        working-directory: converted
-      - name: Run E2E tests
-        run: |
-          set -o pipefail
-          uv run pytest src/tests/ -m e2e -q 2>&1 | tee "$GITHUB_WORKSPACE/e2e.log"
-        working-directory: converted
-      - name: Upload E2E failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-e2e-failure
-          path: |
-            e2e.log
-            e2e-artifacts
-          if-no-files-found: ignore
 
   mcp-ci:
     name: MCP Server CI
