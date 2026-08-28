@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob } from "../training/api";
+import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob, canonicalDatasetParameters } from "../training/api";
 import { trainingLogWindowUrl } from "../training/windows";
 
 afterEach(() => {
@@ -7,6 +7,24 @@ afterEach(() => {
 });
 
 describe("training job actions", () => {
+  it("submits only parameters from the current dataset schema", () => {
+    const dataset = {
+      target: "dataset.autoencoder_mnist.AutoencoderMNIST",
+      name: "AutoencoderMNIST",
+      doc: "",
+      num_classes: null,
+      parameters: [
+        { name: "batch_size", type: "int", default: 32, required: false },
+        { name: "num_workers", type: "int", default: 0, required: false },
+        { name: "train_size", type: "float", default: 0.8, required: false },
+      ],
+    };
+
+    expect(canonicalDatasetParameters(dataset, {
+      batch_size: "128", num_workers: "0", train_size: "0.8", root: "/tmp/old-editor",
+    })).toEqual({ batch_size: "128", num_workers: "0", train_size: "0.8" });
+  });
+
   it("allows cancellation before and during execution", () => {
     expect(canCancelTrainingJob("queued")).toBe(true);
     expect(canCancelTrainingJob("running")).toBe(true);
@@ -20,6 +38,41 @@ describe("training job actions", () => {
 });
 
 describe("authenticated training API", () => {
+  it("uploads a package bundle through the authenticated package endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ bundle_ref: "bundle-1", digest: "a".repeat(64), size: 12 }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+    const bundle = { schema_version: 1, format: "package-bundle/v1", runtime: { name: "stereotype_runtime.pytorch", version: 1 }, graph: { nodes: [], edges: [] }, packages: [], digest: "a".repeat(64) } as const;
+
+    await expect(api.uploadPackageBundle(bundle)).resolves.toMatchObject({ bundle_ref: "bundle-1" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/package-bundles");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
+    expect(JSON.parse(String(init.body))).toMatchObject({ format: "package-bundle/v1", digest: bundle.digest });
+  });
+
+  it("accepts only a package job request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await api.submitTrainingJob({
+      schema_version: 1,
+      network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
+      training: {}, resources: {}, priority: 0,
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toMatchObject({
+      network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
+    });
+    expect(body.training).not.toHaveProperty("overrides");
+  });
+
   it("sends the bearer token in headers and never in the URL", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } }),
@@ -35,7 +88,7 @@ describe("authenticated training API", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
   });
 
-  it("submits the requested nnm-prefixed package name", async () => {
+  it("submits the requested package name", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }),
     );
@@ -44,7 +97,7 @@ describe("authenticated training API", () => {
 
     await api.submitTrainingJob({
       schema_version: 1,
-      network: { format: "nntree", value: {} },
+      network: { format: "package", value: { bundle_ref: "bundle-1", graph: { nodes: [], edges: [] } } },
       training: {},
       resources: {},
       priority: 0,

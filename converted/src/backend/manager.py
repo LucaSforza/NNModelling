@@ -14,10 +14,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from backend.config_service import build_job_hydra_configs
-from backend.executors import Executor, LocalExecutor, SlurmExecutor
+from backend.executors import ContainerExecutor, Executor
 from backend.models import JobStatus, JobSubmission, ResourceRequest
+from backend.package_store import PackageStore
 from backend.store import JobStore, ValkeyJobStore, utc_now
+from model_package.adapters import adapter_spec_for_dataset
 from model_package.exporter import build_model_wheel
 
 
@@ -61,9 +62,8 @@ class JobManager:
         poll_interval: float = 0.25,
         *,
         package_snapshot_dir: str | Path | None = None,
+        package_store: PackageStore | None = None,
     ) -> None:
-        if not executors:
-            raise ValueError("At least one executor is required")
         self.store = store
         self.artifact_root = Path(artifact_root).resolve()
         self.artifact_root.mkdir(parents=True, exist_ok=True)
@@ -76,6 +76,7 @@ class JobManager:
         self.package_snapshot_dir = (
             Path(package_snapshot_dir) if package_snapshot_dir is not None else None
         )
+        self.package_store = package_store or PackageStore(self.artifact_root / "packages")
         self._active: dict[str, tuple[Executor, dict[str, Any]]] = {}
         self._round_robin_cursor = 0
         self._lock = threading.RLock()
@@ -93,27 +94,18 @@ class JobManager:
         artifact_root = Path(
             os.getenv("NNM_BACKEND_ARTIFACT_ROOT", str(default_artifact_root))
         ).expanduser().resolve()
+        package_store = PackageStore(os.getenv("NNM_BACKEND_PACKAGE_ROOT", str(artifact_root / "packages")))
         store = ValkeyJobStore(os.getenv("NNM_VALKEY_URL", "valkey://127.0.0.1:6379/0"))
-        executors: list[Executor] = [LocalExecutor(converted_dir)]
-        if os.getenv("NNM_ENABLE_SLURM", "0").lower() in {"1", "true", "yes"}:
-            slurm_gpu_type = os.getenv("NNM_SLURM_GPU_TYPE") or None
+        executors: list[Executor] = []
+        container_image = os.getenv("NNM_CONTAINER_IMAGE")
+        if container_image:
             executors.append(
-                SlurmExecutor(
-                    converted_dir,
-                    unit_id=os.getenv("NNM_SLURM_UNIT_ID", "slurm-main"),
-                    partition=os.getenv("NNM_SLURM_PARTITION"),
-                    account=os.getenv("NNM_SLURM_ACCOUNT"),
-                    ssh_host=os.getenv("NNM_SLURM_SSH_HOST"),
-                    project_dir=os.getenv("NNM_SLURM_PROJECT_DIR", str(converted_dir)),
-                    capacity=ResourceRequest(
-                        cpu=int(os.getenv("NNM_SLURM_CPU", "1")),
-                        memory_gb=float(os.getenv("NNM_SLURM_MEMORY_GB", "1")),
-                        gpu=int(os.getenv("NNM_SLURM_GPU", "1")),
-                        gpu_type=slurm_gpu_type,
-                    ),
+                ContainerExecutor(
+                    engine=os.getenv("NNM_CONTAINER_ENGINE", "podman"),
+                    image=container_image,
                 )
             )
-        return cls(store, artifact_root, executors)
+        return cls(store, artifact_root, executors, package_store=package_store)
 
     def start(self) -> None:
         """Start the scheduler thread and recover persisted queue metadata."""
@@ -177,17 +169,32 @@ class JobManager:
     def submit(self, submission: JobSubmission, *, owner_connection_id: str) -> JobStatus:
         """Validate, materialize and enqueue a complete job document."""
 
+        if not self.executors:
+            raise ValueError(
+                "No container executor is configured; package jobs cannot be submitted"
+            )
         job_id = str(uuid.uuid4())
         created_at = utc_now()
-        artifact_dir = self.artifact_root / job_id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
         payload = submission.model_dump(mode="json")
+        # Resolve and validate the immutable bundle before creating any job
+        # directory.  In particular, validation must never load or execute
+        # package Python in the FastAPI process.
+        package_value = dict(submission.network.value)
+        bundle_ref = package_value["bundle_ref"]
+        stored = self.package_store.get_bundle(bundle_ref, owner_connection_id=owner_connection_id)
+        package_value = stored["bundle"]
+        if package_value.get("graph") != submission.network.value.get("graph"):
+            raise ValueError("package graph does not match the uploaded bundle")
+        artifact_dir = self.artifact_root / job_id
+        artifact_dir.mkdir(parents=True, exist_ok=False)
         payload["id"] = job_id
         payload["created_at"] = created_at
         payload["artifact_dir"] = str(artifact_dir)
         requested_path = artifact_dir / "requested_config.json"
         requested_path.write_text(json.dumps(submission.model_dump(mode="json"), indent=2), encoding="utf-8")
-        build_job_hydra_configs(payload, artifact_dir)
+        (artifact_dir / "package.json").write_text(
+            json.dumps(package_value, sort_keys=True), encoding="utf-8"
+        )
         record = {
             "id": job_id,
             "status": "queued",
@@ -254,7 +261,7 @@ class JobManager:
                     job = self.store.get_job(job_id)
                     if job is None or job.get("status") != "queued":
                         continue
-                    executor = self._select_executor(job["resources"])
+                    executor = self._select_executor(job["resources"], job)
                     if executor is None:
                         deferred_job_ids.append(job_id)
                         continue
@@ -304,13 +311,20 @@ class JobManager:
                             deferred_job["created_at"],
                         )
 
-    def _select_executor(self, resources: dict[str, Any]) -> Executor | None:
+    def _select_executor(self, resources: dict[str, Any], job: dict[str, Any] | None = None) -> Executor | None:
         """Select a compatible executor with a round-robin cursor."""
 
+        is_package_job = bool(
+            job and job.get("submission", {}).get("network", {}).get("format") == "package"
+        )
         count = len(self.executors)
         for offset in range(count):
             index = (self._round_robin_cursor + offset) % count
             candidate = self.executors[index]
+            if is_package_job and candidate.kind != "container":
+                continue
+            if not is_package_job and candidate.kind == "container":
+                continue
             if candidate.can_run(resources):
                 self._round_robin_cursor = (index + 1) % count
                 return candidate
@@ -605,7 +619,16 @@ class JobManager:
         artifact_dir = Path(job["artifact_dir"])
         package_name = job["submission"].get("package_name") or f"nnm_job_{job_id.replace('-', '')}"
         try:
-            build_model_wheel(artifact_dir, package_name=package_name, version="0.1.0")
+            package = json.loads((artifact_dir / "package.json").read_text(encoding="utf-8"))
+            dataset_target = job["submission"]["training"]["dataset"]["target"]
+            input_adapter = adapter_spec_for_dataset(dataset_target)
+            build_model_wheel(
+                artifact_dir,
+                package_name=package_name,
+                version="0.1.0",
+                package=package,
+                input_adapter=input_adapter,
+            )
             manifest_path = artifact_dir / "model-package.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception as exc:
@@ -643,6 +666,7 @@ def _create_package_snapshot(
     *,
     snapshot_dir: Path | None,
     chunk_size: int = PACKAGE_SNAPSHOT_CHUNK_SIZE,
+    suffix: str = ".whl",
 ) -> tuple[Path, str]:
     """Copy a wheel into a private immutable snapshot while hashing it in one pass.
 
@@ -664,7 +688,7 @@ def _create_package_snapshot(
         snapshot_dir.mkdir(parents=True, exist_ok=True)
     fd, raw_path = tempfile.mkstemp(
         prefix="nnm_pkg_",
-        suffix=".whl",
+        suffix=suffix,
         dir=str(snapshot_dir) if snapshot_dir is not None else None,
     )
     snapshot = Path(raw_path)

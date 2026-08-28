@@ -55,5 +55,4 @@ not permit such edges: every edge belongs to exactly one containment scope.
 ## Affected contracts
 
 - [System architecture](../architecture/overview.md)
-- [NNTree contract](../contracts/nntree.md)
-- [Automatic compound layout plan](../../plans/active/automatic-layout/plan.md)
+- [Completed automatic compound layout plan](../../archive/completed-plans/automatic-layout/plan.md)

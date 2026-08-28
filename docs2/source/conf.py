@@ -7,8 +7,6 @@ autodoc_mock_imports = [
     'torch',
     'torchvision',
     'lightning',
-    'hydra',
-    'omegaconf',
     'torchmetrics',
     'datasets',
     'transformers',

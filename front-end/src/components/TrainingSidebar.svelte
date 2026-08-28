@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { Diagram } from "../Diagram.svelte";
-  import { NNTree } from "../conversion/nnTree";
   import {
     BackendApiError,
     TrainingApiClient,
+    canonicalDatasetParameters,
     canCancelTrainingJob,
     type DatasetInfo,
     type DatasetParameter,
@@ -23,6 +23,8 @@
   } from "../training/connection";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
+  import { buildPackageBundle } from "../training/package-bundle";
+  import { bundledCorePackageExports } from "../type-system/bundled/catalog";
 
   interface Props {
     diagram: Diagram;
@@ -54,17 +56,13 @@
   let datasetParams = $state<Record<string, string>>({});
   let maxEpochs = $state("20");
   let learningRate = $state("0.001");
-  let batchSize = $state("32");
-  let numWorkers = $state("4");
-  let trainSize = $state("0.8");
   let optimizerTarget = $state("torch.optim.Adam");
-  let accelerator = $state("auto");
+  let accelerator = $state<"auto" | "cpu" | "cuda">("auto");
   let patience = $state("3");
   let minDelta = $state("0");
   let seed = $state("42");
   let wandbProject = $state("NeuralNetworks");
-  let wandbMode = $state("online");
-  let overridesText = $state("");
+  let wandbMode = $state<"disabled" | "offline" | "online">("disabled");
   let cpu = $state("4");
   let memoryGb = $state("8");
   let gpu = $state("0");
@@ -270,56 +268,50 @@
     datasetParams = { ...datasetParams, [parameter.name]: value };
   }
 
-  function coerce(value: string, type: string): unknown {
+  function coerce(value: string, type: "int"): number;
+  function coerce(value: string, type: "float"): number;
+  function coerce(value: string, type: "bool"): boolean;
+  function coerce(value: string, type: string): number | boolean | string {
     if (type === "int") return Number.parseInt(value, 10);
     if (type === "float") return Number.parseFloat(value);
     if (type === "bool") return value === "true";
     return value;
   }
 
-  function buildRequest(): TrainingJobRequest {
-    if (!selectedDatasetInfo) throw new Error("Seleziona un dataset");
-    const normalizedPackageSuffix = packageSuffix.trim();
-    if (normalizedPackageSuffix && !/^[A-Za-z][A-Za-z0-9_]*$/.test(normalizedPackageSuffix)) {
-      throw new Error("Il nome del pacchetto può contenere solo lettere, numeri e _ e deve iniziare con una lettera");
-    }
-    const datasetConfig: Record<string, unknown> = { _target_: selectedDataset };
-    for (const parameter of selectedDatasetInfo.parameters) {
-      const value = datasetParams[parameter.name];
-      if (value !== undefined && value !== "") datasetConfig[parameter.name] = coerce(value, parameter.type);
-    }
-    const nntree = JSON.parse(new NNTree(diagram).toJson()) as Record<string, unknown>;
+  async function buildRequest(): Promise<TrainingJobRequest> {
+    if (!selectedDataset) throw new Error("Seleziona un dataset prima di accodare il training");
+    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports(), diagram.typeResult);
+    const uploaded = await requireApi().uploadPackageBundle(bundle);
     return {
       schema_version: 1,
-      network: { format: "nntree", value: nntree },
+      network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
       training: {
-        seed: Number.parseInt(seed, 10),
-        ...(selectedDatasetInfo.num_classes === null ? {} : { num_classes: selectedDatasetInfo.num_classes }),
         dataset: {
-          ...datasetConfig,
-          batch_size: Number.parseInt(batchSize, 10),
-          num_workers: Number.parseInt(numWorkers, 10),
-          train_size: Number.parseFloat(trainSize),
+          target: selectedDataset,
+          parameters: selectedDatasetInfo
+            ? canonicalDatasetParameters(selectedDatasetInfo, datasetParams)
+            : {},
         },
-        optimizer: { _target_: optimizerTarget, lr: Number.parseFloat(learningRate) },
-        trainer: { max_epochs: Number.parseInt(maxEpochs, 10), accelerator },
+        seed: coerce(seed, "int"),
+        optimizer: { target: optimizerTarget, learning_rate: coerce(learningRate, "float") },
+        trainer: {
+          max_epochs: coerce(maxEpochs, "int"),
+          accelerator,
+          patience: coerce(patience, "int"),
+          min_delta: coerce(minDelta, "float"),
+        },
         wandb: { project: wandbProject, mode: wandbMode },
-        early_stopping: {
-          patience: Number.parseInt(patience, 10),
-          min_delta: Number.parseFloat(minDelta),
-        },
-        overrides: overridesText.split("\n").map((line) => line.trim()).filter(Boolean),
       },
       resources: {
-        cpu: Number.parseInt(cpu, 10),
-        memory_gb: Number.parseFloat(memoryGb),
-        gpu: Number.parseInt(gpu, 10),
-        ...(gpuMemoryGb ? { gpu_memory_gb: Number.parseFloat(gpuMemoryGb) } : {}),
+        cpu: coerce(cpu, "int"),
+        memory_gb: coerce(memoryGb, "int"),
+        gpu: coerce(gpu, "int"),
+        ...(gpuMemoryGb ? { gpu_memory_gb: coerce(gpuMemoryGb, "int") } : {}),
         ...(gpuType ? { gpu_type: gpuType } : {}),
         ...(node ? { node } : {}),
       },
-      priority: Number.parseInt(priority, 10),
-      ...(normalizedPackageSuffix ? { package_name: `nnm_${normalizedPackageSuffix}` } : {}),
+      priority: coerce(priority, "int") as number,
+      ...(packageSuffix ? { package_name: `nnm_${packageSuffix}` } : {}),
     };
   }
 
@@ -332,7 +324,7 @@
       ? openWaitingWindow("In attesa che W&B inizializzi la run…")
       : null;
     try {
-      const job = await requireApi().submitTrainingJob(buildRequest());
+      const job = await requireApi().submitTrainingJob(await buildRequest());
       successMessage = `Job ${job.id} accodato.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);
@@ -549,16 +541,11 @@
           </label>
         {/each}
       {/if}
-      <div class="grid">
-        <label>Batch size<input type="number" bind:value={batchSize} /></label>
-        <label>Worker<input type="number" bind:value={numWorkers} /></label>
-        <label>Train split<input type="number" step="0.01" bind:value={trainSize} /></label>
-        <label>Seed<input type="number" bind:value={seed} /></label>
-      </div>
+      <label>Seed<input type="number" bind:value={seed} /></label>
     </section>
 
     <section>
-      <h3>Hydra</h3>
+      <h3>Ottimizzazione</h3>
       <label>Optimizer target<input bind:value={optimizerTarget} /></label>
       <div class="grid">
         <label>Learning rate<input type="number" step="0.0001" bind:value={learningRate} /></label>
@@ -567,9 +554,6 @@
         <label>Patience<input type="number" bind:value={patience} /></label>
         <label>Min delta<input type="number" step="0.001" bind:value={minDelta} /></label>
       </div>
-      <label>Override Hydra (una per riga)
-        <textarea bind:value={overridesText} placeholder="trainer.max_epochs=10"></textarea>
-      </label>
     </section>
 
     <section>
@@ -642,8 +626,7 @@
   h2, h3 { margin: 0 0 10px; } h3 { font-size: 1rem; }
   section { border-bottom: 1px solid #e5e7eb; padding: 12px 0; }
   label { display: flex; flex-direction: column; gap: 4px; margin: 7px 0; font-size: .82rem; }
-  input, select, textarea { box-sizing: border-box; width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
-  textarea { min-height: 62px; font-family: monospace; }
+  input, select { box-sizing: border-box; width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .grid label { margin: 0; }
   button { padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; cursor: pointer; }
   button:hover { background: #e2e8f0; } button:disabled { cursor: wait; opacity: .6; }

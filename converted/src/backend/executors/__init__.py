@@ -1,7 +1,6 @@
 """Training execution backends."""
 
 from backend.executors.base import Executor
-from backend.executors.local import LocalExecutor
-from backend.executors.slurm import SlurmExecutor
+from backend.executors.container import ContainerExecutor
 
-__all__ = ["Executor", "LocalExecutor", "SlurmExecutor"]
+__all__ = ["ContainerExecutor", "Executor"]

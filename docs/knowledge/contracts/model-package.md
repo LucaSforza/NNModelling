@@ -1,56 +1,132 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-28
 ---
 
 # Portable model-package contract
 
-A successful training job may produce a deterministic pure-Python wheel for
-inference without the NNModelling checkout, Lightning, W&B or the training
-dataset.
+A successful package-native training job produces a deterministic pure-Python
+wheel for inference without the NNModelling checkout, Hydra/OmegaConf,
+Lightning, W&B, or the training dataset.
 
-## Inputs and outputs
+## Artifact and wheel contents
 
-`build_model_wheel()` requires a resolved configuration and a valid non-empty
-`weights.safetensors`. The package name must match
-`nnm_[A-Za-z][A-Za-z0-9_]*`.
-
-The job artifact contains:
+`build_model_wheel()` requires the validated package bundle used by the worker
+and a non-empty `weights.safetensors`. Resolved NNTree/Hydra configurations are
+not accepted. The artifact contains:
 
 ```text
 weights.safetensors
-resolved_config.yaml or resolved_config.json
+package.json
+training-summary.json
 model-package.json
-dist/nnm_<name>-<version>-py3-none-any.whl
+dist/nnm_<name>-<version>-<wheel>.whl
 ```
 
-The manifest schema records package name, version, relative wheel path, SHA-256
-digest and declarative input-adapter specification. The API streams the server-
-selected wheel after checking job ownership; clients do not provide filesystem
-paths.
+The wheel embeds the package graph, package dependency closure and restricted
+package compiler/runtime needed to build it. It also contains the safe tensor
+state and declarative input-adapter specification. It does not embed objective
+execution: the architecture declares the prediction program, and the runtime
+loads the shared trained state into that prediction view.
 
-## Wheel contents
+The manifest records package name, version, relative wheel path, SHA-256
+digest, and adapter specification. The backend streams the server-selected
+wheel after checking job ownership; clients cannot provide filesystem paths.
 
-- rewritten architecture with package-local custom operation targets;
-- safetensors weights;
-- inference runtime and trusted input-adapter registry;
-- standard wheel metadata and RECORD hashes.
-
-Public API:
+## Public API
 
 ```python
-from nnm_example import load_model
+from nnm_example import Model
 
-model = load_model(device="cpu")
+model = Model(device="cpu")
 output = model.predict_tensor(batch)
 output = model.predict(value)
 ```
 
-`predict_tensor` is the universal tensor boundary. `predict` uses the packaged
-adapter specification. Adapters are declarative; the browser cannot inject
-Python code into a package.
+`Model` is the primary installed-wheel facade. With no weights argument it
+loads the verified safetensors embedded in the wheel. The compatibility
+factory `load_model(device="cpu")` remains public and delegates to `Model` so
+existing consumers do not need to migrate atomically.
 
-The exporter is `converted/src/model_package/exporter.py`; runtime and adapters
-live beside it. Full-path verification is in
+A consumer may override the embedded state with a local checkpoint belonging
+to the same exported architecture:
+
+```python
+from nnm_example import Model
+
+model = Model(weights="checkpoints/candidate.safetensors", device="cpu")
+```
+
+The override is a consumer-side capability, not a second backend download
+artifact. It accepts safetensors only and must verify the packaged architecture
+fingerprint plus state-dict names, shapes and dtypes before exposing the model.
+Missing metadata, a mismatched fingerprint, missing or extra tensors and
+incompatible shapes or dtypes are load errors; partial loading and silent
+fallback to the embedded state are forbidden.
+
+`predict_tensor` accepts an already-preprocessed batch and invokes only the
+explicit prediction program. It never requires, fabricates, or infers a
+dataset target; objective nodes such as Cross Entropy, MSE, and KL are not
+executed. `predict` uses the packaged adapter specification. Adapters are
+declarative, so the browser cannot inject Python code into a package.
+
+Safetensors are restored with strict state-dict loading against the one shared
+compiled module store. A missing, extra, or incompatible tensor therefore
+fails package loading instead of silently producing a partially initialized
+model.
+
+## Package naming
+
+The training UI accepts the user-selected suffix and exports the importable
+package `nnm_<suffix>`. Examples and generated instructions use that exact
+name; they do not infer a module name from a wheel filename or ask the consumer
+to provide it separately. The reserved `nnm_` prefix identifies generated
+NNModelling distributions and avoids collisions with unrelated project
+modules.
+
+## Consumer-example contract
+
+Classifier, autoencoder and other downloadable-model examples are standalone
+`uv` consumer projects. Each example contains its own `pyproject.toml`, source
+and focused tests, and documents this flow from outside the NNModelling
+checkout:
+
+```bash
+uv add /path/to/nnm_example-0.1.0-py3-none-any.whl
+uv run python main.py
+```
+
+Example source imports the installed distribution directly:
+
+```python
+from nnm_example import Model
+
+model = Model()
+```
+
+Examples must not add a wheel to `sys.path`, use `importlib` to discover its
+module, require a redundant `--package-name`, execute through the `converted`
+project, import private compiler/runtime modules, or depend on datasets and
+resources from the repository checkout. Small committed fixtures may live
+inside the example; larger inputs must be supplied through an explicit user
+path or a documented independent download.
+
+The ResNet example performs image prediction only through `Model.predict` (or
+`predict_tensor` for an already prepared tensor). The VAE example uses
+`Model.predict` for reconstruction and only declared public wheel adapters,
+such as `model.adapter("sample").run(...)` and
+`model.adapter("forward").run(...)`, for generative paths. Example helpers may
+format results, but they must not inspect the compiled graph, reach internal
+modules or duplicate wheel-owned preprocessing.
+
+Example verification installs the produced wheel into a clean temporary `uv`
+project, imports `Model` by the declared `nnm_<suffix>` name, exercises bundled
+weights, rejects an incompatible external checkpoint, and runs the example
+without the NNModelling checkout on `PYTHONPATH`. VAE coverage additionally
+exercises every adapter used by its public example.
+
+The exporter is `converted/src/model_package/exporter.py`; runtime and
+adapters live beside it. Full-path verification is in
+`converted/src/tests/test_model_package.py` and
 `converted/src/tests/test_backend_e2e.py`.

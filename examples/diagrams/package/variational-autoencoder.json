@@ -1,0 +1,322 @@
+{
+  "nodes": [
+    {
+      "id": "image",
+      "type": "custom",
+      "position": {
+        "x": 120,
+        "y": 60
+      },
+      "width": 30,
+      "height": 30,
+      "data": {
+        "package": {
+          "id": "core.input",
+          "version": "0.1.0",
+          "name": "Input"
+        },
+        "stereotype": "Input",
+        "name": "image",
+        "color": "#3f8f68",
+        "params": {
+          "shape": [
+            "B",
+            784
+          ],
+          "dtype": "float32"
+        },
+        "isInput": true,
+        "isLoss": false
+      }
+    },
+    {
+      "id": "encoder_hidden",
+      "type": "custom",
+      "position": {
+        "x": 380,
+        "y": 200
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "stereotype": "Linear",
+        "name": "encoder_hidden",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 784,
+          "out_features": 256
+        },
+        "isInput": false,
+        "isLoss": false
+      }
+    },
+    {
+      "id": "encoder_latent",
+      "type": "custom",
+      "position": {
+        "x": 640,
+        "y": 340
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "stereotype": "Linear",
+        "name": "encoder_latent",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 256,
+          "out_features": 64
+        },
+        "isInput": false,
+        "isLoss": false
+      }
+    },
+    {
+      "id": "mu",
+      "type": "custom",
+      "position": {
+        "x": 120,
+        "y": 480
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "stereotype": "Linear",
+        "name": "mu",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 64,
+          "out_features": 32
+        },
+        "isInput": false,
+        "isLoss": false
+      }
+    },
+    {
+      "id": "log_variance",
+      "type": "custom",
+      "position": {
+        "x": 380,
+        "y": 620
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "stereotype": "Linear",
+        "name": "log_variance",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 64,
+          "out_features": 32
+        },
+        "isInput": false,
+        "isLoss": false
+      }
+    },
+    {
+      "id": "latent_parameters",
+      "type": "join",
+      "position": {
+        "x": 640,
+        "y": 760
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.concat",
+          "version": "0.1.0",
+          "name": "Concat"
+        },
+        "stereotype": "Concat",
+        "name": "latent_parameters",
+        "color": "#4779c4",
+        "params": {
+          "dim": -1
+        },
+        "isInput": false,
+        "isLoss": false,
+        "inputsCount": 2
+      }
+    },
+    {
+      "id": "decoder_hidden",
+      "type": "custom",
+      "position": {
+        "x": 120,
+        "y": 900
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "stereotype": "Linear",
+        "name": "decoder_hidden",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 64,
+          "out_features": 256
+        },
+        "isInput": false,
+        "isLoss": false
+      }
+    },
+    {
+      "id": "reconstruction",
+      "type": "custom",
+      "position": {
+        "x": 380,
+        "y": 1040
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "stereotype": "Linear",
+        "name": "reconstruction",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 256,
+          "out_features": 784
+        },
+        "isInput": false,
+        "isLoss": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "image-encoder_hidden-0",
+      "source": "image",
+      "target": "encoder_hidden",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder_hidden-encoder_latent-0",
+      "source": "encoder_hidden",
+      "target": "encoder_latent",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder_latent-mu-0",
+      "source": "encoder_latent",
+      "target": "mu",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder_latent-log_variance-0",
+      "source": "encoder_latent",
+      "target": "log_variance",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "mu-latent_parameters-0",
+      "source": "mu",
+      "target": "latent_parameters",
+      "sourceHandle": "out",
+      "targetHandle": "in-0",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "log_variance-latent_parameters-1",
+      "source": "log_variance",
+      "target": "latent_parameters",
+      "sourceHandle": "out",
+      "targetHandle": "in-1",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "latent_parameters-decoder_hidden-0",
+      "source": "latent_parameters",
+      "target": "decoder_hidden",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "decoder_hidden-reconstruction-0",
+      "source": "decoder_hidden",
+      "target": "reconstruction",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    }
+  ],
+  "layoutDirection": "vertical"
+}

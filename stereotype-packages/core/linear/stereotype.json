@@ -1,0 +1,31 @@
+{
+  "name": "Linear",
+  "description": "Applies an affine transformation to the last dimension.",
+  "kind": "layer",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "in_features": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "top"
+    },
+    "out_features": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "bottom"
+    },
+    "bias": {
+      "type": "boolean",
+      "default": true
+    },
+    "dtype": {
+      "type": "dtype",
+      "choices": ["float16", "bfloat16", "float32", "float64"],
+      "default": "float32"
+    }
+  }
+}

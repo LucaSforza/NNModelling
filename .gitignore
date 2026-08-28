@@ -4,9 +4,11 @@
 .qwen/
 skills-lock.json
 .glimpse/
+.cache/stereotype-lab/
 
 # Dependencies
 node_modules/
+__pycache__/
 
 # Build output
 dist/

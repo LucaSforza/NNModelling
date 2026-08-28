@@ -1,3 +1,5 @@
+import type { PackageBundleV1 } from "./package-bundle";
+
 export interface DatasetParameter {
   name: string;
   type: string;
@@ -11,6 +13,22 @@ export interface DatasetInfo {
   doc: string;
   parameters: DatasetParameter[];
   num_classes: number | null;
+}
+
+/** Keep the submitted constructor arguments aligned with the registered schema.
+ *
+ * This also protects an already-open editor from stale fields left by an older
+ * dataset contract (for example the removed browser-controlled ``root``).
+ */
+export function canonicalDatasetParameters(
+  dataset: DatasetInfo,
+  values: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return Object.fromEntries(
+    dataset.parameters
+      .filter((parameter) => Object.hasOwn(values, parameter.name))
+      .map((parameter) => [parameter.name, values[parameter.name]!]),
+  );
 }
 
 export interface TrainingJobStatus {
@@ -57,11 +75,30 @@ export interface TrainingLogChunk {
 
 export interface TrainingJobRequest {
   schema_version: number;
-  network: { format: "nntree"; value: Record<string, unknown> };
-  training: Record<string, unknown>;
-  resources: Record<string, unknown>;
+  network: { format: "package"; value: { bundle_ref: string; graph: PackageBundleV1["graph"] } };
+  training: TrainingRequest;
+  resources: ResourceRequest;
   priority: number;
   package_name?: string;
+}
+
+export interface DatasetRequest { target: string; parameters: Record<string, unknown>; }
+export interface TrainingRequest {
+  dataset: DatasetRequest;
+  seed: number;
+  optimizer: { target: string; learning_rate: number };
+  trainer: { max_epochs: number; accelerator: "auto" | "cpu" | "cuda"; patience: number; min_delta: number };
+  wandb: { project: string; mode: "disabled" | "offline" | "online" };
+}
+export interface ResourceRequest {
+  cpu: number; memory_gb: number; gpu: number;
+  gpu_memory_gb?: number; gpu_type?: string; node?: string;
+}
+
+export interface PackageBundleUploadResponse {
+  bundle_ref: string;
+  digest: string;
+  size: number;
 }
 
 export interface PairingGrant {
@@ -156,6 +193,24 @@ export class TrainingApiClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(job),
     });
+  }
+
+  /**
+   * Upload an immutable package bundle before submitting its job reference.
+   * Contract v1 currently assumes JSON transport; the backend may later wrap
+   * the same canonical payload in a streamed archive without changing callers.
+   */
+  async uploadPackageBundle(bundle: PackageBundleV1): Promise<PackageBundleUploadResponse> {
+    const response = await this.request<PackageBundleUploadResponse>("/package-bundles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(bundle),
+    });
+    const digest = requireSha256Hex(response.digest, 502, "bundle_digest_invalid", "Il backend ha restituito un digest bundle non valido");
+    if (digest !== bundle.digest) {
+      throw new BackendApiError(502, "bundle_digest_mismatch", "Il digest del bundle restituito dal backend non corrisponde al bundle inviato");
+    }
+    return { ...response, digest };
   }
 
   cancelTrainingJob(jobId: string): Promise<TrainingJobStatus> {

@@ -1,0 +1,28 @@
+{
+  "protocolVersion": 2,
+  "operation": "infer-model",
+  "modelId": "resnet",
+  "packages": [
+    "core.input", "core.conv2d", "core.batch-norm2d", "core.relu",
+    "core.max-pool2d", "core.add", "core.adaptive-avg-pool2d",
+    "core.flatten", "core.linear"
+  ],
+  "nodes": [
+    {"id":"image","packageId":"core.input","parameters":{"shape":["B",3,224,224],"dtype":"float32"},"inputs":[]},
+    {"id":"stem_conv","packageId":"core.conv2d","parameters":{"in_channels":3,"out_channels":64,"kernel_size":7,"stride":2,"padding":3},"inputs":["image"]},
+    {"id":"stem_norm","packageId":"core.batch-norm2d","parameters":{"num_features":64},"inputs":["stem_conv"]},
+    {"id":"stem_relu","packageId":"core.relu","parameters":{},"inputs":["stem_norm"]},
+    {"id":"stem_pool","packageId":"core.max-pool2d","parameters":{"kernel_size":3,"stride":2,"padding":1},"inputs":["stem_relu"]},
+    {"id":"block_conv1","packageId":"core.conv2d","parameters":{"in_channels":64,"out_channels":64,"kernel_size":3,"padding":1},"inputs":["stem_pool"]},
+    {"id":"block_norm1","packageId":"core.batch-norm2d","parameters":{"num_features":64},"inputs":["block_conv1"]},
+    {"id":"block_relu","packageId":"core.relu","parameters":{},"inputs":["block_norm1"]},
+    {"id":"block_conv2","packageId":"core.conv2d","parameters":{"in_channels":64,"out_channels":64,"kernel_size":3,"padding":1},"inputs":["block_relu"]},
+    {"id":"block_norm2","packageId":"core.batch-norm2d","parameters":{"num_features":64},"inputs":["block_conv2"]},
+    {"id":"residual","packageId":"core.add","parameters":{},"inputs":["stem_pool","block_norm2"]},
+    {"id":"output_relu","packageId":"core.relu","parameters":{},"inputs":["residual"]},
+    {"id":"global_pool","packageId":"core.adaptive-avg-pool2d","parameters":{"output_size":1},"inputs":["output_relu"]},
+    {"id":"flatten","packageId":"core.flatten","parameters":{"start_dim":1},"inputs":["global_pool"]},
+    {"id":"classifier","packageId":"core.linear","parameters":{"in_features":64,"out_features":1000},"inputs":["flatten"]}
+  ],
+  "output": "classifier"
+}

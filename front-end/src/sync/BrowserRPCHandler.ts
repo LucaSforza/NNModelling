@@ -15,19 +15,15 @@
 // Browser-side RPC handler. Receives JSON-RPC requests from the MCP server
 // via WebSocket, dispatches them to the browser's Diagram instance, and
 // returns results. The browser is the single source of truth for diagram state.
-//
 // Protocol:
 //   Server → Client: { id: string, method: string, params?: Record<string, unknown> }
 //   Client → Server: { id: string, result?: unknown }
 //                  | { id: string, error: { message: string } }
 
 import type { Diagram } from "../Diagram.svelte";
-import { NNTree } from "../conversion/nnTree";
-import {
-  getNodeTypeInfo,
-  serializeTypeResult,
-} from "../conversion/typeDiagnostics";
 import type { Node, Edge } from "@xyflow/svelte";
+import type { GraphInferenceResult } from "../type-system/graph/types";
+import { packageIdentity } from "../type-system/graph/types";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -47,6 +43,16 @@ interface RPCResponse {
 // local makes response dispatch independent of a global WebSocket constructor,
 // which is absent in Node 20 test environments.
 const WEBSOCKET_OPEN = 1;
+
+function serializeTypeResult(result: GraphInferenceResult | null): unknown {
+  if (!result) return null;
+  return {
+    complete: result.complete,
+    terminals: [...result.terminals],
+    order: [...result.order],
+    nodes: Object.fromEntries(result.nodes),
+  };
+}
 
 // ── Viewport Controller Interface ────────────────────────────────────────
 
@@ -238,10 +244,7 @@ export class BrowserRPCHandler {
           result = this.handleSelectAll();
           break;
 
-        // ── Compilation / Serialization ───────────────────────────
-        case "compile_nntree":
-          result = this.handleCompileNntree();
-          break;
+        // ── Serialization ────────────────────────────────────────
         case "export_diagram":
           result = this.handleExportDiagram();
           break;
@@ -328,7 +331,10 @@ export class BrowserRPCHandler {
     const node = this.diagram.getNodeById(nodeId);
     if (!node) throw new Error(`Node not found: ${nodeId}`);
     const typeResult = this.diagram.refreshTypes();
-    return { ...node, typeInfo: getNodeTypeInfo(typeResult, nodeId) };
+    return { ...node, typeInfo: serializeTypeResult({
+      nodes: new Map([[nodeId, typeResult.nodes.get(nodeId) ?? { status: "unresolved", reason: "node has no type result" }]]),
+      order: [nodeId], terminals: typeResult.terminals, complete: typeResult.complete,
+    }) };
   }
 
   private handleGetTypeInfo(params: Record<string, unknown>): unknown {
@@ -343,7 +349,7 @@ export class BrowserRPCHandler {
       : this.diagram.typeResult;
 
     return nodeId
-      ? getNodeTypeInfo(typeResult, nodeId)
+      ? serializeTypeResult({ nodes: new Map([[nodeId, typeResult.nodes.get(nodeId) ?? { status: "unresolved", reason: "node has no type result" }]]), order: [nodeId], terminals: typeResult.terminals, complete: typeResult.complete })
       : serializeTypeResult(typeResult);
   }
 
@@ -388,10 +394,11 @@ export class BrowserRPCHandler {
       } else {
         moduleCount++;
       }
-      // Additive counting: Input/Loss are counted in addition to type counts
-      const stereo = this.diagram.getStereotype((node.data as Record<string, unknown>).stereotype as string);
-      if (stereo?.isInput) inputCount++;
-      if (stereo?.isLoss) lossCount++;
+      const identity = packageIdentity(node);
+      const metadata = identity && this.diagram.packageCatalog.find((candidate) =>
+        candidate.id === identity.id && candidate.version === identity.version);
+      if (metadata?.definition.kind === "input") inputCount++;
+      if (metadata?.definition.kind === "loss") lossCount++;
     }
 
     return {
@@ -407,21 +414,16 @@ export class BrowserRPCHandler {
 
   private handleListStereotypes(params: Record<string, unknown>): Record<string, unknown> {
     const category = params.category as string | undefined;
-    let list = this.diagram.stereotypes;
-    if (category) {
-      list = list.filter((s) => s.category === category);
-    }
+    let list = this.diagram.packageCatalog;
+    if (category) list = list.filter((metadata) => metadata.definition.kind === category);
     return {
-      stereotypes: list.map((s) => ({
-        name: s.name,
-        category: s.category,
-        pythonClassName: s.pythonClassName,
-        isJoin: s.isJoin,
-        isInput: s.isInput,
-        isLoss: s.isLoss,
-        isSubFlow: s.isSubFlow,
-        parameters: s.parameters,
-        view: s.view,
+      packages: list.map((metadata) => ({
+        id: metadata.id,
+        version: metadata.version,
+        name: metadata.definition.name,
+        kind: metadata.definition.kind,
+        parameters: metadata.definition.parameters,
+        view: metadata.definition.view,
       })),
     };
   }
@@ -429,58 +431,59 @@ export class BrowserRPCHandler {
   // ── Mutation Handlers ───────────────────────────────────────────────
 
   private handleCreateNode(params: Record<string, unknown>): Record<string, unknown> {
-    const stereotypeName = params.stereotype as string;
-    if (!stereotypeName) throw new Error("Missing required parameter: stereotype");
-    const stereo = this.diagram.getStereotype(stereotypeName);
-    if (!stereo) throw new Error(`Stereotype not found: ${stereotypeName}`);
-
     const position = params.position as { x: number; y: number } | undefined;
     const x = position?.x ?? 0;
     const y = position?.y ?? 0;
     const config = (params.config || {}) as Record<string, unknown>;
 
-    const beforeCount = this.diagram.nodes.length;
-
-    const parentId = config.parentId as string | undefined;
-    if (stereo.isSubFlow) {
-      this.diagram.addSubGraph(x, y, config.label as string | undefined, {
-        stereotype: stereo,
-        name: config.name as string | undefined,
-        color: config.color as string | undefined,
-        width: config.width as number | undefined,
-        height: config.height as number | undefined,
-        params: (config.params as Record<string, string | { value: string; position?: string }>) ?? {},
-        parentId,
-      });
-    } else if (stereo.isJoin) {
-      this.diagram.addJoinNode(stereo, x, y, {
-        name: config.name as string | undefined,
-        inputsCount: (config.inputsCount as number) ?? 2,
-        color: config.color as string | undefined,
-        params: (config.params as Record<string, string>) ?? {},
-        parentId,
-      });
-    } else {
-      this.diagram.addModule(stereo, x, y, {
-        name: config.name as string | undefined,
-        color: config.color as string | undefined,
-        width: config.width as number | undefined,
-        height: config.height as number | undefined,
-        params: (config.params as Record<string, string>) ?? {},
-        parentId,
-      });
+    const packageSpec = params.package as {
+      id?: unknown;
+      version?: unknown;
+      name?: unknown;
+      kind?: unknown;
+    } | undefined;
+    if (packageSpec) {
+      if (typeof packageSpec.id !== "string" || typeof packageSpec.version !== "string" ||
+          typeof packageSpec.name !== "string" || typeof packageSpec.kind !== "string") {
+        throw new Error("package requires exact id, version, name and kind");
+      }
+      const metadata = this.diagram.packageCatalog.find((candidate) =>
+        candidate.id === packageSpec.id && candidate.version === packageSpec.version,
+      );
+      if (!metadata) throw new Error(`Package not active: ${packageSpec.id}@${packageSpec.version}`);
+      if (metadata.definition.kind !== packageSpec.kind) {
+        throw new Error(`Package kind mismatch for ${packageSpec.id}: expected ${metadata.definition.kind}`);
+      }
+      if (metadata.definition.name !== packageSpec.name) {
+        throw new Error(`Package name mismatch for ${packageSpec.id}: expected '${metadata.definition.name}'`);
+      }
+      const beforeCount = this.diagram.nodes.length;
+      this.diagram.addPackageNode(
+        { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name },
+        metadata.definition.kind,
+        x,
+        y,
+        {
+          name: config.name as string | undefined,
+          color: (config.color as string | undefined) ?? metadata.definition.view.color,
+          width: (config.width as number | undefined) ?? metadata.definition.view.width,
+          height: (config.height as number | undefined) ?? metadata.definition.view.height,
+          params: (config.params as Record<string, unknown>) ?? {},
+          inputsCount: config.inputsCount as number | undefined,
+          parentId: config.parentId as string | undefined,
+        },
+      );
+      const added = this.diagram.nodes[beforeCount];
+      if (!added) throw new Error("Failed to create package node");
+      return {
+        nodeId: added.id,
+        name: added.data.name ?? packageSpec.name,
+        type: added.type ?? "custom",
+        package: added.data.package,
+      };
     }
 
-    // Capture the newly added node (last in the array)
-    const added = this.diagram.nodes[beforeCount];
-    if (!added) throw new Error("Failed to create node");
-
-    return {
-      nodeId: added.id,
-      name: (added.data as Record<string, unknown>).name ?? stereotypeName,
-      type: added.type ?? "custom",
-      stereotype: stereotypeName,
-    };
+    throw new Error("create_node requires package {id, version, name, kind}");
   }
 
   private handleDeleteNodes(params: Record<string, unknown>): Record<string, unknown> {
@@ -573,7 +576,17 @@ export class BrowserRPCHandler {
     const x = position?.x ?? 0;
     const y = position?.y ?? 0;
 
-    const subflow = this.diagram.addSubGraph(x, y, params.label as string | undefined);
+    const packageSpec = params.package as { id?: unknown; version?: unknown; name?: unknown } | undefined;
+    if (!packageSpec || typeof packageSpec.id !== "string" || typeof packageSpec.version !== "string" || typeof packageSpec.name !== "string") {
+      throw new Error("create_subflow requires package identity");
+    }
+    const metadata = this.diagram.packageCatalog.find((candidate) => candidate.id === packageSpec.id && candidate.version === packageSpec.version);
+    if (!metadata || metadata.definition.kind !== "subflow") throw new Error("active subflow package not found");
+    const subflow = this.diagram.addPackageNode(
+      { id: metadata.id, version: metadata.version, name: metadata.definition.name },
+      "subflow", x, y,
+      { name: params.label as string | undefined, params: (params.params as Record<string, unknown>) ?? {} },
+    );
 
     return {
       nodeId: subflow.id,
@@ -583,83 +596,55 @@ export class BrowserRPCHandler {
 
   // ── Parameter Handlers ──────────────────────────────────────────────
 
-  // NOTE: Param values use { value: string } wrapper (canonical frontend format),
-  // not plain strings as described in the design doc protocol spec.
   private handleSetParameter(params: Record<string, unknown>): Record<string, unknown> {
     const nodeId = params.nodeId as string;
     const key = params.key as string;
-    const value = params.value as string;
+    const value = params.value;
     if (!nodeId || !key) throw new Error("Missing required parameters: nodeId, key");
 
     const node = this.diagram.getNodeById(nodeId);
     if (!node) throw new Error(`Node not found: ${nodeId}`);
 
-    const currentParams = node.data.params as Record<string, { value: string }> | undefined;
-    const previousValue = currentParams?.[key]?.value;
-    const stereotypeName = node.data.stereotype as string | undefined;
-    const parameterDefinition = stereotypeName
-      ? this.diagram.getStereotype(stereotypeName)?.parameters[key]
-      : undefined;
-
-    this.diagram.updateModule(nodeId, {
-      params: {
-        ...(currentParams || {}),
-        [key]: {
-          ...(parameterDefinition?.position ? { position: parameterDefinition.position } : {}),
-          ...(currentParams?.[key] || {}),
-          value,
-        },
-      },
-    });
+    const metadata = this.metadataForNode(node);
+    if (!metadata.definition.parameters[key]) throw new Error(`Unknown package parameter: ${key}`);
+    const currentParams = (node.data.params as Record<string, unknown> | undefined) ?? {};
+    const previousValue = currentParams[key];
+    this.updateNodeParams(node, { ...currentParams, [key]: value });
 
     return { nodeId, key, previousValue: previousValue ?? "", currentValue: value };
   }
 
-  // NOTE: Param values use { value: string } wrapper (canonical frontend format),
-  // not plain strings as described in the design doc protocol spec.
   private handleUpdateParameters(params: Record<string, unknown>): Record<string, unknown> {
     const nodeId = params.nodeId as string;
-    const newParamValues = params.params as Record<string, string> | undefined;
+    const newParamValues = params.params as Record<string, unknown> | undefined;
     if (!nodeId) throw new Error("Missing required parameter: nodeId");
     if (!newParamValues || typeof newParamValues !== "object") throw new Error("params must be an object");
 
     const node = this.diagram.getNodeById(nodeId);
     if (!node) throw new Error(`Node not found: ${nodeId}`);
 
-    const currentParams = (node.data.params as Record<string, { value: string }>) || {};
-    const stereotypeName = node.data.stereotype as string | undefined;
-    const stereotype = stereotypeName
-      ? this.diagram.getStereotype(stereotypeName)
-      : undefined;
-    const updated: Array<{ key: string; previousValue: string; currentValue: string }> = [];
+    const metadata = this.metadataForNode(node);
+    const currentParams = (node.data.params as Record<string, unknown>) || {};
+    const updated: Array<{ key: string; previousValue: unknown; currentValue: unknown }> = [];
     const unchanged: string[] = [];
 
     const newParams = { ...currentParams };
     for (const [key, value] of Object.entries(newParamValues)) {
-      const prev = newParams[key]?.value;
+      if (!metadata.definition.parameters[key]) throw new Error(`Unknown package parameter: ${key}`);
+      const prev = newParams[key];
       if (prev !== value) {
         updated.push({ key, previousValue: prev ?? "", currentValue: value });
       } else {
         unchanged.push(key);
       }
-      // Parameter objects also carry presentation metadata such as
-      // `position: "top" | "bottom"`. Recover it from the stereotype when an
-      // older RPC update has already stripped it from the live node.
-      const parameterDefinition = stereotype?.parameters[key];
-      newParams[key] = {
-        ...(parameterDefinition?.position ? { position: parameterDefinition.position } : {}),
-        ...(newParams[key] || {}),
-        value,
-      };
+      newParams[key] = value;
     }
 
-    this.diagram.updateModule(nodeId, { params: newParams });
+    this.updateNodeParams(node, newParams);
 
     return { nodeId, updated, unchanged };
   }
 
-  // NOTE: Param values use { value: string } wrapper (canonical frontend format),
-  // not plain strings as described in the design doc protocol spec.
   private handleResetParameters(params: Record<string, unknown>): Record<string, unknown> {
     const nodeId = params.nodeId as string;
     if (!nodeId) throw new Error("Missing required parameter: nodeId");
@@ -667,39 +652,23 @@ export class BrowserRPCHandler {
     const node = this.diagram.getNodeById(nodeId);
     if (!node) throw new Error(`Node not found: ${nodeId}`);
 
-    const nd = node.data as Record<string, unknown>;
-    const stereo = this.diagram.getStereotype(nd.stereotype as string);
-    const currentParams = (nd.params as Record<string, { value: string }>) || {};
-    const reset: Array<{ key: string; previousValue: string; defaultValue: string }> = [];
-
-    if (!stereo) {
-      // No stereotype: clear all current params
-      for (const key of Object.keys(currentParams)) {
-        const prev = currentParams[key]?.value ?? "";
-        reset.push({ key, previousValue: prev, defaultValue: "" });
-      }
-      this.diagram.updateModule(nodeId, { params: {} });
-    } else {
-      const newParams = { ...currentParams };
-      const keysToReset = (params.keys as string[]) ?? Object.keys(stereo.parameters);
-      for (const key of keysToReset) {
-        const defaultDef = stereo.parameters[key];
-        if (!defaultDef) continue;
-
-        const prev = newParams[key]?.value ?? "";
-        if (prev !== defaultDef.default) {
-          reset.push({ key, previousValue: prev, defaultValue: defaultDef.default });
-        }
-        newParams[key] = { value: defaultDef.default };
-      }
-      this.diagram.updateModule(nodeId, { params: newParams });
+    const metadata = this.metadataForNode(node);
+    const currentParams = (node.data.params as Record<string, unknown>) || {};
+    const reset: Array<{ key: string; previousValue: unknown; defaultValue: unknown }> = [];
+    const newParams = { ...currentParams };
+    const keysToReset = (params.keys as string[]) ?? Object.keys(metadata.definition.parameters);
+    for (const key of keysToReset) {
+      const definition = metadata.definition.parameters[key];
+      if (!definition) continue;
+      const defaultValue = definition.default;
+      if (newParams[key] !== defaultValue) reset.push({ key, previousValue: newParams[key], defaultValue });
+      if (defaultValue === undefined) delete newParams[key]; else newParams[key] = structuredClone(defaultValue);
     }
+    this.updateNodeParams(node, newParams);
 
     return { nodeId, reset };
   }
 
-  // NOTE: Param values use { value: string } wrapper (canonical frontend format),
-  // not plain strings as described in the design doc protocol spec.
   private handleQueryParameters(params: Record<string, unknown>): Record<string, unknown> {
     const rawIds = params.nodeId as string | string[] | undefined;
     if (!rawIds) throw new Error("Missing required parameter: nodeId");
@@ -712,24 +681,20 @@ export class BrowserRPCHandler {
       if (!node) throw new Error(`Node not found: ${id}`);
 
       const nd = node.data as Record<string, unknown>;
-      const stereo = this.diagram.getStereotype(nd.stereotype as string);
-      if (!stereo) throw new Error(`Stereotype not found for node ${id}`);
-
-      // NOTE: currentParams uses { value: string } wrapper (canonical frontend format)
-      const currentParams = (nd.params as Record<string, { value: string }>) || {};
-      const definitions = stereo.parameters;
+      const definitions = this.metadataForNode(node).definition.parameters;
+      const currentParams = (nd.params as Record<string, unknown>) || {};
 
       const paramList: Array<{
         key: string;
         type: string;
-        defaultValue: string;
-        currentValue: string;
+        defaultValue: unknown;
+        currentValue: unknown;
         isModified: boolean;
         position?: string;
       }> = [];
 
       for (const [key, def] of Object.entries(definitions)) {
-        const currentVal = currentParams[key]?.value ?? def.default;
+        const currentVal = currentParams[key] ?? def.default;
         paramList.push({
           key,
           type: def.type,
@@ -740,29 +705,30 @@ export class BrowserRPCHandler {
         });
       }
 
-      // Add custom params present in currentParams but not in stereotype definition
-      for (const [key, val] of Object.entries(currentParams)) {
-        if (!definitions[key]) {
-          paramList.push({
-            key,
-            type: "string",
-            defaultValue: "",
-            currentValue: val?.value ?? "",
-            isModified: true,
-            position: undefined,
-          });
-        }
-      }
-
       nodes.push({
         nodeId: id,
         name: (nd.name as string) ?? id,
-        stereotype: (nd.stereotype as string) ?? "unknown",
+        package: nd.package,
         params: paramList,
       });
     }
 
     return { nodes };
+  }
+
+  private metadataForNode(node: Node): import("../type-system/host").ActivePackageMetadata {
+    const identity = packageIdentity(node);
+    if (!identity) throw new Error("node has no package identity");
+    const metadata = this.diagram.packageCatalog.find((candidate) => candidate.id === identity.id && candidate.version === identity.version);
+    if (!metadata) throw new Error(`Package not active: ${identity.id}@${identity.version}`);
+    return metadata;
+  }
+
+  private updateNodeParams(node: Node, params: Record<string, unknown>): void {
+    const identity = packageIdentity(node);
+    if (!identity) throw new Error("node has no package identity");
+    const metadata = this.metadataForNode(node);
+    this.diagram.updatePackageNode(node.id, identity, metadata.definition.kind, { params });
   }
 
   // ── Selection Handlers ──────────────────────────────────────────────
@@ -828,39 +794,7 @@ export class BrowserRPCHandler {
     return { nodeCount: allIds.length };
   }
 
-  // ── Compilation / Serialization Handlers ────────────────────────────
-
-  private handleCompileNntree(): Record<string, unknown> {
-    const typeResult = this.diagram.refreshTypes();
-    const blockingErrors = typeResult.errors.filter(
-      (error) => error.severity === "error",
-    );
-    if (blockingErrors.length > 0) {
-      const summary = blockingErrors
-        .slice(0, 5)
-        .map((error) => `${error.nodeId || "graph"}: ${error.message}`)
-        .join("; ");
-      throw new Error(
-        `NNTree compilation blocked by ${blockingErrors.length} type error(s): ${summary}`,
-      );
-    }
-
-    const nnTree = new NNTree(this.diagram as any);
-    const json = nnTree.toJson();
-
-    let subflowCount = 0;
-    for (const [, node] of nnTree.nodes) {
-      if (node.isSubflow()) subflowCount++;
-    }
-
-    return {
-      json,
-      root: nnTree.root,
-      nodeCount: nnTree.nodes.size,
-      subflowCount,
-      lossNodeType: nnTree.lossNode?.stereotype ?? null,
-    };
-  }
+  // ── Serialization Handlers ─────────────────────────────────────────
 
   private handleExportDiagram(): Record<string, unknown> {
     return { json: this.diagram.exportToJson(), nodeCount: this.diagram.nodes.length, edgeCount: this.diagram.edges.length };
@@ -898,12 +832,12 @@ export class BrowserRPCHandler {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Check for exactly 1 Input node
     const topLevelNodes = this.diagram.nodes.filter((n) => n.parentId == null);
-    const inputNodes = topLevelNodes.filter((n) => {
-      const stereo = this.diagram.getStereotype((n.data as Record<string, unknown>).stereotype as string);
-      return stereo?.isInput;
-    });
+    const kindOf = (node: Node) => {
+      const identity = packageIdentity(node);
+      return identity && this.diagram.packageCatalog.find((metadata) => metadata.id === identity.id && metadata.version === identity.version)?.definition.kind;
+    };
+    const inputNodes = topLevelNodes.filter((node) => kindOf(node) === "input");
 
     if (inputNodes.length === 0) {
       errors.push("No Input node found. Exactly 1 Input node is required.");
@@ -911,22 +845,46 @@ export class BrowserRPCHandler {
       errors.push(`Found ${inputNodes.length} Input nodes. Exactly 1 Input node is required.`);
     }
 
-    // Check for at least 1 loss node
-    const lossNodes = topLevelNodes.filter((n) => {
-      const stereo = this.diagram.getStereotype((n.data as Record<string, unknown>).stereotype as string);
-      return stereo?.isLoss;
-    });
+    const topLevelIds = new Set(topLevelNodes.map((node) => node.id));
+    const outgoing = new Map<string, string[]>();
+    for (const edge of this.diagram.edges) {
+      if (!topLevelIds.has(edge.source) || !topLevelIds.has(edge.target)) continue;
+      const targets = outgoing.get(edge.source) ?? [];
+      targets.push(edge.target);
+      outgoing.set(edge.source, targets);
+    }
+    const terminals = topLevelNodes.filter((node) => !(outgoing.get(node.id)?.length));
+    const lossNodes = topLevelNodes.filter((node) => kindOf(node) === "loss");
 
     if (lossNodes.length === 0) {
-      errors.push(
-        "No loss/output node found. Add a loss function (e.g. CrossEntropyLoss) to define the model output.",
-      );
+      if (terminals.length !== 1) errors.push(`Complete package graph requires exactly one terminal; found ${terminals.length}.`);
+    } else {
+      // Training graphs have two role-specific terminals: prediction and objective.
+      const objectiveNodes = new Set(lossNodes.map((node) => node.id));
+      const pending = [...objectiveNodes];
+      while (pending.length > 0) {
+        const nodeId = pending.pop()!;
+        for (const target of outgoing.get(nodeId) ?? []) {
+          if (objectiveNodes.has(target)) continue;
+          objectiveNodes.add(target);
+          pending.push(target);
+        }
+      }
+      const predictionTerminals = terminals.filter((node) => kindOf(node) === "output" && !objectiveNodes.has(node.id));
+      const objectiveTerminals = terminals.filter((node) => objectiveNodes.has(node.id));
+      if (predictionTerminals.length !== 1) {
+        errors.push(`Training package graph requires exactly one prediction output terminal; found ${predictionTerminals.length}.`);
+      }
+      if (objectiveTerminals.length !== 1) {
+        errors.push(`Training package graph requires exactly one objective terminal; found ${objectiveTerminals.length}.`);
+      }
     }
 
     // Detect orphan nodes (no incoming or outgoing connections, except Input/Loss)
     for (const node of topLevelNodes) {
-      const stereo = this.diagram.getStereotype((node.data as Record<string, unknown>).stereotype as string);
-      if (stereo?.isInput || stereo?.isLoss) continue;
+      const kind = kindOf(node);
+      if (!kind) { errors.push(`Node "${node.data.name ?? node.id}" has no active package identity.`); continue; }
+      if (kind === "input" || kind === "loss") continue;
 
       const hasIncoming = this.diagram.edges.some((e) => e.target === node.id &&
         this.diagram.getNodeById(e.source)?.parentId == null);
@@ -941,7 +899,7 @@ export class BrowserRPCHandler {
         warnings.push(
           `Node "${node.data.name}" (${node.id}) has no incoming connections.`,
         );
-      } else if (!hasOutgoing && node.type !== "join") {
+      } else if (!hasOutgoing && node.type !== "join" && kind !== "output") {
         // Join nodes may not have outgoing edges if they are the last (output) node
         warnings.push(
           `Node "${node.data.name}" (${node.id}) has no outgoing connections.`,

@@ -12,7 +12,6 @@
  */
 
 export { DiagramCore } from './DiagramCore';
-export { StereotypeCore } from './StereotypeCore';
 export type {
   Position,
   NodeConfig,

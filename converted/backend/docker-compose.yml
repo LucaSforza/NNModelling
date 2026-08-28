@@ -21,11 +21,42 @@ services:
       NNM_ADMIN_TOKEN_FILE: /run/secrets/nnm-admin-token
       NNM_ALLOWED_ORIGINS: ${NNM_ALLOWED_ORIGINS:-http://127.0.0.1:5174}
       NNM_SESSION_TTL: ${NNM_SESSION_TTL:-24h}
+      NNM_CONTAINER_ENGINE: ${NNM_CONTAINER_ENGINE:-podman}
+      NNM_CONTAINER_IMAGE: ${NNM_CONTAINER_IMAGE:?set NNM_CONTAINER_IMAGE to a digest-pinned worker image}
+      NNM_CONTAINER_DATA_ROOT: /app/data
+      NNM_CONTAINER_CONTROLLER_SOCKET: /run/nnm/controller.sock
+      NNM_CONTAINER_CONTROLLER_TOKEN_FILE: /run/secrets/nnm-controller-token
     ports:
       - "8000:8000"
     volumes:
       - backend-jobs:/app/jobs
       - ../valkey-data/admin.token:/run/secrets/nnm-admin-token:ro
+      - controller-socket:/run/nnm:ro
+      - ${NNM_CONTAINER_CONTROLLER_TOKEN_FILE:-../valkey-data/controller.token}:/run/secrets/nnm-controller-token:ro
+    depends_on:
+      valkey:
+        condition: service_healthy
+
+  # The only service with access to the host container-engine socket. FastAPI
+  # can reach this service only through the owner-only authenticated Unix
+  # socket above; it has no engine CLI capability or socket mount.
+  controller:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      NNM_CONTAINER_ENGINE: ${NNM_CONTAINER_ENGINE:-podman}
+      NNM_CONTAINER_DATA_ROOT: ${NNM_CONTAINER_DATA_ROOT:-/app/data}
+      CONTAINER_HOST: ${NNM_CONTAINER_HOST:-unix:///run/podman/podman.sock}
+      DOCKER_HOST: ${NNM_CONTAINER_HOST:-unix:///run/podman/podman.sock}
+    command: ["uv", "run", "python", "-m", "backend.container_controller", "serve", "/run/nnm/controller.sock", "@/run/secrets/nnm-controller-token", "/app/jobs", "/app/jobs", "${NNM_CONTAINER_ENGINE:-podman}"]
+    volumes:
+      - backend-jobs:/app/jobs
+      - ${NNM_CONTAINER_DATA_ROOT:-../data}:/app/data:ro
+      - controller-socket:/run/nnm
+      - ${NNM_CONTAINER_CONTROLLER_TOKEN_FILE:-../valkey-data/controller.token}:/run/secrets/nnm-controller-token:ro
+      # This is deliberately mounted only in the controller service.
+      - ${NNM_CONTAINER_ENGINE_SOCKET:-/run/user/1000/podman/podman.sock}:${NNM_CONTAINER_ENGINE_SOCKET_TARGET:-/run/podman/podman.sock}
     depends_on:
       valkey:
         condition: service_healthy
@@ -33,3 +64,4 @@ services:
 volumes:
   valkey-data:
   backend-jobs:
+  controller-socket:

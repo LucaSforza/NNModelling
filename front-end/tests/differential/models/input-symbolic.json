@@ -1,0 +1,10 @@
+{
+  "protocolVersion": 1,
+  "operation": "infer",
+  "packageId": "core.input",
+  "context": { "kind": "input", "inputs": [] },
+  "parameters": {
+    "shape": ["B", 3, 32, 32],
+    "dtype": "float16"
+  }
+}

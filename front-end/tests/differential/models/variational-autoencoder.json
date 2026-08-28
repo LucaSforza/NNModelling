@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 2,
+  "operation": "infer-model",
+  "modelId": "variational-autoencoder",
+  "packages": ["core.input", "core.linear", "core.fork", "core.concat"],
+  "nodes": [
+    {"id": "image", "packageId": "core.input", "parameters": {"shape": ["B", 784], "dtype": "float32"}, "inputs": []},
+    {"id": "encoder_hidden", "packageId": "core.linear", "parameters": {"in_features": 784, "out_features": 256}, "inputs": ["image"]},
+    {"id": "encoder_latent", "packageId": "core.linear", "parameters": {"in_features": 256, "out_features": 64}, "inputs": ["encoder_hidden"]},
+    {"id": "mu", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 32}, "inputs": ["encoder_latent"]},
+    {"id": "log_variance", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 32}, "inputs": ["encoder_latent"]},
+    {"id": "latent_parameters", "packageId": "core.concat", "parameters": {"dim": -1}, "inputs": ["mu", "log_variance"]},
+    {"id": "decoder_hidden", "packageId": "core.linear", "parameters": {"in_features": 64, "out_features": 256}, "inputs": ["latent_parameters"]},
+    {"id": "reconstruction", "packageId": "core.linear", "parameters": {"in_features": 256, "out_features": 784}, "inputs": ["decoder_hidden"]}
+  ],
+  "output": "reconstruction"
+}

@@ -14,9 +14,8 @@
 /**
  * Diagram Inspection Tools — thin browser-RPC proxies.
  *
- * Most tools delegate to the browser via ctx.browser.call().
- * `list_stereotypes` can fall back to the server-side cache if the
- * browser is not connected.
+ * All tools delegate to the browser via ctx.browser.call(). The browser-owned
+ * package catalog is the only authority for available stereotypes.
  */
 
 import { z } from "zod";
@@ -79,31 +78,6 @@ export const list_stereotypes = {
   schema: z.object({ category: z.string().optional() }),
 
   async handler(ctx: ServerContext, input: z.infer<typeof this.schema>) {
-    // Try browser first; fall back to server-side cache
-    if (ctx.browser.isConnected()) {
-      try {
-        return await ctx.browser.call("list_stereotypes", input);
-      } catch {
-        // Fall through to server-side cache
-      }
-    }
-
-    const filtered = input.category
-      ? ctx.stereotypes.filter((s) => s.category === input.category)
-      : ctx.stereotypes;
-
-    return {
-      stereotypes: filtered.map((s) => ({
-        name: s.name,
-        category: s.category,
-        pythonClassName: s.pythonClassName,
-        isJoin: s.isJoin,
-        isInput: s.isInput,
-        isLoss: s.isLoss,
-        isSubFlow: s.isSubFlow,
-        parameters: s.parameters,
-        view: s.view,
-      })),
-    };
+    return ctx.browser.call("list_stereotypes", input);
   },
 };

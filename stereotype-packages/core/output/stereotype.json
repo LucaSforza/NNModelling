@@ -1,0 +1,7 @@
+{
+  "name": "Output",
+  "description": "Marks the explicit prediction returned by a package model.",
+  "kind": "output",
+  "view": { "color": "#4d9b72", "width": 140, "height": 80 },
+  "parameters": {}
+}

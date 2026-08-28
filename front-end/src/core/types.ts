@@ -39,7 +39,14 @@ export interface NodeConfig {
   color?: string;
   width?: number;
   height?: number;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
+}
+
+/** Stable identity persisted by nodes created through the new package host. */
+export interface PackageIdentity {
+  id: string;
+  version: string;
+  name: string;
 }
 
 export interface JoinNodeConfig extends NodeConfig {

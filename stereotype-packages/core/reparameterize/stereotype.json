@@ -1,0 +1,28 @@
+{
+  "name": "Reparameterize",
+  "description": "Samples z = mu + exp(0.5 * log variance) * epsilon from packed Gaussian parameters.",
+  "kind": "layer",
+  "wheelAdapters": [
+    {
+      "name": "sample",
+      "entrypoint": "module.sample",
+      "input": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },
+      "output": { "type": "tensor", "shape": ["B", "M"], "dtype": "float32" },
+      "targetPolicy": "forbidden",
+      "randomness": { "mode": "random" }
+    }
+  ],
+  "view": {
+    "color": "#8b6bb8",
+    "width": 200,
+    "height": 100
+  },
+  "parameters": {
+    "epsilon_scale": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "position": "bottom"
+    }
+  }
+}

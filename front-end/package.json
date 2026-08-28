@@ -9,16 +9,10 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:integration:smoke": "NNM_TIER=smoke vitest run --config vitest.integration.config.ts",
-    "test:integration:convert": "NNM_TIER=convert NNM_REQUIRE_PYTHON=true vitest run --config vitest.integration.config.ts",
-    "test:integration:forward": "NNM_TIER=forward NNM_REQUIRE_PYTHON=true vitest run --config vitest.integration.config.ts",
-    "test:integration:train": "NNM_TIER=train NNM_REQUIRE_PYTHON=true vitest run --config vitest.integration.config.ts",
-    "test:integration:infer": "NNM_TIER=infer NNM_REQUIRE_PYTHON=true vitest run --config vitest.integration.config.ts",
-    "test:integration:all": "NNM_TIER=all vitest run --config vitest.integration.config.ts",
-    "test:integration:model": "vitest run --config vitest.integration.config.ts src/__tests__/integration/model-validation.test.ts",
-    "test:example": "vitest run --config vitest.integration.config.ts"
+    "test:type-system": "vitest run src/__tests__/newTypeSystemLua.test.ts src/__tests__/newTypeSystemInput.test.ts",
+    "test:type-system:models": "vitest run src/__tests__/modelConformance.test.ts",
+    "guard:package-only": "node scripts/guard-package-only.mjs",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
@@ -34,8 +28,10 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
+    "@deepseek-ai/cordis": "^4.0.1",
     "@xyflow/svelte": "^1.5.2",
-    "html-to-image": "^1.11.13"
+    "html-to-image": "^1.11.13",
+    "wasmoon": "1.16.0"
   },
   "packageManager": "pnpm@10.11.0",
   "pnpm": {

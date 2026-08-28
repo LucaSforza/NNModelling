@@ -1,0 +1,28 @@
+{
+  "name": "Cast",
+  "description": "Converts a tensor to a selected dtype without changing its shape.",
+  "kind": "layer",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "dtype": {
+      "type": "dtype",
+      "choices": [
+        "float16",
+        "bfloat16",
+        "float32",
+        "float64",
+        "int8",
+        "uint8",
+        "int16",
+        "int32",
+        "int64",
+        "bool"
+      ],
+      "default": "float32"
+    }
+  }
+}

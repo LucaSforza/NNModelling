@@ -8,7 +8,9 @@
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+from pathlib import Path
 from typing import Any
+import os
 import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
@@ -46,18 +48,21 @@ class MNISTDataset(Dataset):
             "std": [0.3081],
         }
 
-    def __init__(self, batch_size=32, num_workers=4, train_size=0.8) -> None:
+    def __init__(self, batch_size=32, num_workers=0, train_size=0.8) -> None:
         super().__init__()
 
         self.transform = transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         )
         # Load the MNIST dataset
+        # Dataset storage is selected by the operator/container mount, never
+        # by a browser-supplied path.
+        dataset_root = Path(os.environ.get("NNM_DATASET_ROOT", "data"))
         self.dataset = datasets.MNIST(
-            root="data", train=True, download=True, transform=self.transform
+            root=str(dataset_root), train=True, download=False, transform=self.transform
         )
         self.test_dataset = datasets.MNIST(
-            root="data", train=False, download=True, transform=self.transform
+            root=str(dataset_root), train=False, download=False, transform=self.transform
         )
 
         self.train_size: float = train_size

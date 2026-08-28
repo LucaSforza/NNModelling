@@ -11,8 +11,7 @@ changes their contracts; do not append implementation history.
 
 ## Contracts
 
-- [NNTree](contracts/nntree.md)
-- [Tensor types](contracts/tensor-types.md)
+- [Frontend package type system](contracts/package-type-system.md)
 - [Pairing and ownership](contracts/pairing.md)
 - [Portable model packages](contracts/model-package.md)
 
@@ -23,3 +22,11 @@ changes their contracts; do not append implementation history.
 
 Durable architectural decisions should be added under `decisions/` and linked
 from the affected contract. Historical reasoning belongs under `docs/archive/`.
+
+Current decisions:
+
+- [Package type-system cutover](decisions/stereotype-type-system-migration.md)
+- [Editable edge routing](decisions/editable-edge-routing.md)
+- [Package backend standard and least-privilege execution](decisions/package-backend-standard.md)
+- [Prediction and objective program separation](decisions/prediction-objective-programs.md)
+- [Declarative wheel adapters](decisions/wheel-adapters.md)

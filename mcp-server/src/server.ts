@@ -12,15 +12,14 @@
  */
 
 /**
- * MCP Server Bootstrap — creates BrowserRPCClient, loads stereotypes,
+ * MCP Server Bootstrap — creates BrowserRPCClient,
  * registers all tools, and returns the MCP Server instance and context.
  *
  * This is the wiring hub of the NNModelling MCP server. It:
- *   1. Loads the stereotype metadata required by the MCP fallback cache
- *   2. Creates a BrowserRPCClient for browser communication
- *   3. Creates the MCP Server instance
- *   4. Registers all tools from tools/*.ts (iterates exports, finds {schema,handler} pairs)
- *   5. Implements ListToolsRequestSchema and CallToolRequestSchema
+ *   1. Creates a BrowserRPCClient for browser communication
+ *   2. Creates the MCP Server instance
+ *   3. Registers all tools from tools/*.ts (iterates exports, finds {schema,handler} pairs)
+ *   4. Implements ListToolsRequestSchema and CallToolRequestSchema
  *
  * The browser is the single source of truth for diagram state.
  * The server is a thin proxy — it sends RPC calls to the browser
@@ -32,9 +31,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
-import * as pipelineMod from "./pipeline.js";
 import { BrowserRPCClient } from "./browser-client.js";
 import { RemoteTrainingClient } from "./remote-training.js";
 
@@ -59,30 +55,10 @@ import * as remoteTrainingTools from "./tools/remote-training.js";
  * Shared context object passed as the first argument to every MCP tool handler.
  * Provides access to:
  *   - browser:      BrowserRPCClient for sending RPC calls to the browser
- *   - pipeline:     Python subprocess interface (executeConversion, etc.)
- *   - stereotypes:  Static stereotype definitions loaded at startup
  */
 export interface ServerContext {
   browser: BrowserRPCClient;
-  pipeline: typeof pipelineMod;
-  stereotypes: CachedStereotype[];
   remoteTraining?: RemoteTrainingClient;
-}
-
-interface CachedStereotype {
-  name: string;
-  category: string;
-  pythonClassName: string;
-  isJoin: boolean;
-  isInput: boolean;
-  isLoss: boolean;
-  isSubFlow: boolean;
-  parameters: Record<string, {
-    type: string;
-    default: string;
-    position?: "top" | "bottom";
-  }>;
-  view: { color: string; width: number; height: number };
 }
 
 export interface CreateServerOptions {
@@ -134,86 +110,18 @@ function discoverTools(module: Record<string, unknown>): Map<string, MCPToolEntr
   return tools;
 }
 
-// ── ESM-compatible stereotype loader ────────────────────────────────────
-// StereotypeCore.loadFromDirectoryNode() uses require("fs") which fails in
-// ESM. This local function uses statically-imported readdirSync/readFileSync
-// to achieve the same result without CJS interop.
-
-function loadStereotypesFromDirectory(stereotypesDir: string): CachedStereotype[] {
-  const loaded: CachedStereotype[] = [];
-
-  function walkDir(dir: string): void {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walkDir(fullPath);
-      } else if (entry.name.endsWith(".json")) {
-        try {
-          const content = readFileSync(fullPath, "utf-8");
-          const jsonData = JSON.parse(content) as Record<string, any>;
-          const name = entry.name.slice(0, -".json".length);
-          const category = jsonData.category || "Uncategorized";
-          const rawView = jsonData.view || {};
-          const parameters = Object.fromEntries(
-            Object.entries(jsonData.params || {}).map(([key, raw]) => {
-              const parameter = raw as Record<string, unknown>;
-              const position = parameter.position === "top" || parameter.position === "bottom"
-                ? parameter.position as "top" | "bottom"
-                : undefined;
-              return [key, {
-                type: String(parameter.type || "string"),
-                default: String(parameter.default || ""),
-                ...(position ? { position } : {}),
-              }];
-            }),
-          );
-
-          loaded.push({
-            name,
-            category,
-            pythonClassName: jsonData.pythonClassName || "",
-            isJoin: category === "Join" || fullPath.includes("/Joins/"),
-            isInput: category === "Input",
-            isLoss: category === "Loss",
-            isSubFlow: category === "Subflow" || fullPath.includes("/SubFlows/"),
-            parameters,
-            view: {
-              color: rawView.color || "#4779c4",
-              width: rawView.width || 140,
-              height: rawView.height || 60,
-            },
-          });
-        } catch (e) {
-          console.error(`Error loading stereotype from ${fullPath}:`, e);
-        }
-      }
-    }
-  }
-
-  walkDir(stereotypesDir);
-  return loaded.sort((a, b) => a.name.localeCompare(b.name));
-}
-
 // ── createServer ────────────────────────────────────────────────────────
 
 /**
  * Create and initialize the NNModelling MCP server.
  *
- * @param stereotypesDir - Absolute path to the Stereotypes/ directory
- *   (containing Modules/, Joins/, SubFlows/ subdirectories).
  * @returns An object with the MCP `Server` instance, shared `ServerContext`, and `BrowserRPCClient`.
  */
 export async function createServer(
-  stereotypesDir: string,
   options: CreateServerOptions = {},
 ): Promise<{ server: Server; ctx: ServerContext; browser: BrowserRPCClient }> {
-  // ── Step 1: Load stereotypes (static data) ──────────────────────────
-  console.error(`[nnmodelling-mcp] Loading stereotypes from ${stereotypesDir}`);
-  const stereotypes = loadStereotypesFromDirectory(stereotypesDir);
-  console.error(`[nnmodelling-mcp] Loaded ${stereotypes.length} stereotypes`);
-
-  // ── Step 2: Create BrowserRPCClient and start listening ────────────
+  // The browser-owned package catalog is authoritative; the thin proxy keeps
+  // no fallback copy that could drift from the live editor.
   const browser = new BrowserRPCClient({ port: options.wsPort });
   await browser.start();
   console.error("[nnmodelling-mcp] Browser WebSocket server ready");
@@ -221,8 +129,6 @@ export async function createServer(
   // ── Step 3: Build ServerContext ──────────────────────────────────────
   const ctx: ServerContext = {
     browser,
-    pipeline: pipelineMod,
-    stereotypes,
     remoteTraining: new RemoteTrainingClient(options.backendUrl),
   };
 

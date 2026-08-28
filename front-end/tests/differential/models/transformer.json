@@ -1,0 +1,16 @@
+{
+  "protocolVersion": 2,
+  "operation": "infer-model",
+  "modelId": "transformer",
+  "packages": ["core.input", "core.linear", "core.fork", "core.add"],
+  "nodes": [
+    {"id": "tokens", "packageId": "core.input", "parameters": {"shape": ["B", "T", 512], "dtype": "float32"}, "inputs": []},
+    {"id": "qkv", "packageId": "core.linear", "parameters": {"in_features": 512, "out_features": 1536}, "inputs": ["tokens"]},
+    {"id": "projection", "packageId": "core.linear", "parameters": {"in_features": 1536, "out_features": 512}, "inputs": ["qkv"]},
+    {"id": "attention_residual", "packageId": "core.add", "parameters": {}, "inputs": ["tokens", "projection"]},
+    {"id": "ffn_up", "packageId": "core.linear", "parameters": {"in_features": 512, "out_features": 2048}, "inputs": ["attention_residual"]},
+    {"id": "ffn_down", "packageId": "core.linear", "parameters": {"in_features": 2048, "out_features": 512}, "inputs": ["ffn_up"]},
+    {"id": "block_output", "packageId": "core.add", "parameters": {}, "inputs": ["attention_residual", "ffn_down"]}
+  ],
+  "output": "block_output"
+}

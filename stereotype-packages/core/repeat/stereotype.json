@@ -1,0 +1,34 @@
+{
+  "name": "Repeat",
+  "description": "Applies independent copies of a subflow in sequence.",
+  "kind": "subflow",
+  "wheelAdapters": [
+    {
+      "name": "encode",
+      "entrypoint": "module.forward",
+      "input": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },
+      "output": { "type": "tensor", "shape": ["B", "M"], "dtype": "float32" },
+      "targetPolicy": "forbidden",
+      "randomness": { "mode": "none" }
+    },
+    {
+      "name": "forward",
+      "entrypoint": "module.forward",
+      "input": { "type": "tensor", "shape": ["B", "N"], "dtype": "float32" },
+      "output": { "type": "tensor", "shape": ["B", "M"], "dtype": "float32" },
+      "targetPolicy": "forbidden",
+      "randomness": { "mode": "none" }
+    }
+  ],
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "times": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

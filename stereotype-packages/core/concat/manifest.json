@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "core.concat",
+  "version": "0.1.0",
+  "dependencies": {},
+  "entrypoints": {
+    "definition": "stereotype.json",
+    "inference": {
+      "language": "lua",
+      "file": "inference.lua"
+    },
+    "pytorch": {
+      "language": "python",
+      "file": "pytorch.py"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "KL Divergence",
+  "description": "Computes the Gaussian KL divergence from packed mean and log variance parameters.",
+  "kind": "loss",
+  "objective": { "externalInputs": [] },
+  "view": {
+    "color": "#8b6bb8",
+    "width": 200,
+    "height": 100
+  },
+  "parameters": {}
+}

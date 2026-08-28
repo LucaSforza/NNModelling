@@ -116,20 +116,34 @@ def adapter_from_spec(spec: Mapping[str, Any]) -> InputAdapter:
     raise ValueError(f"unsupported input adapter kind: {kind!r}")
 
 
-def adapter_spec_from_dataset_config(dataset_config: Mapping[str, Any]) -> dict[str, Any]:
-    """Ask a dataset class for an exportable adapter without constructing it."""
+def adapter_spec_for_dataset(dataset_target: str) -> dict[str, Any]:
+    """Return the adapter declared by a registered, trusted dataset.
 
-    target = dataset_config.get("_target_")
-    if not isinstance(target, str) or "." not in target:
-        return {"kind": "tensor", "version": 1}
-    module_name, _, class_name = target.rpartition(".")
-    dataset_class = getattr(importlib.import_module(module_name), class_name)
+    The target is a catalog identifier, not a Python configuration directive.
+    Registration is checked before importing the class so an export request
+    cannot turn the wheel builder into an arbitrary import mechanism.
+    """
+
+    if not isinstance(dataset_target, str) or not dataset_target:
+        raise ValueError("dataset target must be a non-empty string")
+
+    from backend.dataset_registry import discover_datasets
+
+    registered_targets = {item.target for item in discover_datasets()}
+    if dataset_target not in registered_targets:
+        raise ValueError(f"dataset target is not registered: {dataset_target}")
+    module_name, separator, class_name = dataset_target.rpartition(".")
+    if not separator:
+        raise ValueError(f"invalid registered dataset target: {dataset_target}")
+    dataset_class = getattr(importlib.import_module(module_name), class_name, None)
+    if dataset_class is None:
+        raise ValueError(f"registered dataset target cannot be loaded: {dataset_target}")
     factory = getattr(dataset_class, "inference_adapter_spec", None)
     if factory is None:
         return {"kind": "tensor", "version": 1}
-    spec = factory(dict(dataset_config))
+    spec = factory({})
     if not isinstance(spec, dict):
-        raise TypeError(f"{target}.inference_adapter_spec must return a dictionary")
+        raise TypeError(f"{dataset_target}.inference_adapter_spec must return a dictionary")
     return spec
 
 

@@ -1,0 +1,32 @@
+{
+  "name": "Embedding",
+  "description": "Looks up learned vector representations for integer indices.",
+  "kind": "layer",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "num_embeddings": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "top"
+    },
+    "embedding_dim": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "bottom"
+    },
+    "input_dtype": {
+      "type": "dtype",
+      "choices": ["int32", "int64"],
+      "default": "int64"
+    },
+    "dtype": {
+      "type": "dtype",
+      "choices": ["float16", "bfloat16", "float32", "float64"],
+      "default": "float32"
+    }
+  }
+}

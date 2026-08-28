@@ -59,7 +59,7 @@ class EnronSpamDataset(Dataset):
         model_name: str = "bert-base-uncased",
         batch_size: int = 32,
         train_size: float = 0.8,
-        num_workers: int = 4,
+        num_workers: int = 0,
         max_length: int = 128,
     ):
         super().__init__()

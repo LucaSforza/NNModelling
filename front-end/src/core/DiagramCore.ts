@@ -21,11 +21,10 @@
 //     getSelectedNodes, getSelectedEdges
 
 import { type Node, type Edge } from "@xyflow/svelte";
-import { StereotypeCore } from "./StereotypeCore";
 import { checkValidConnection as coreCheckValidConnection } from "./validation";
 import { validateContainmentGraph } from "./containment";
 import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
-import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig } from "./types";
+import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig, PackageIdentity } from "./types";
 import {
   edgeWithRoutePoints,
   normalizeEditableEdge,
@@ -34,25 +33,44 @@ import {
   sameRoutePoints,
 } from "./edgeRoute";
 
-/**
- * Deep equality for JSON-comparable parameter objects ({ value, position }
- * wrappers and nested plain objects/arrays). Arrays are distinguished from
- * plain objects so `["a","b"]` never compares equal to `{ 0:"a", 1:"b" }`.
- * Used to detect no-op updates before undo capture and graph notification.
- */
-function sameParams(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const aKeys = Object.keys(a as Record<string, unknown>);
-  const bKeys = Object.keys(b as Record<string, unknown>);
-  if (aKeys.length !== bKeys.length) return false;
-  for (const key of aKeys) {
-    if (!sameParams((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) {
-      return false;
-    }
+/** Convert Svelte's reactive proxy payloads into persisted JSON primitives. */
+function clonePackageParams(value: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!value) return {};
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function hasPackageIdentity(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const data = (node as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return false;
+  const pkg = (data as { package?: unknown }).package;
+  if (!pkg || typeof pkg !== "object") return false;
+  const identity = pkg as Record<string, unknown>;
+  return typeof identity.id === "string" &&
+    typeof identity.version === "string" &&
+    typeof identity.name === "string";
+}
+
+/** Legacy parameter wrappers are intentionally rejected, never converted. */
+function hasLegacyParameterWrapper(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasLegacyParameterWrapper);
+  if (!value || typeof value !== "object") return false;
+  const object = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(object, "value") &&
+      (Object.prototype.hasOwnProperty.call(object, "position") || Object.keys(object).length <= 2)) {
+    return true;
   }
-  return true;
+  return Object.values(object).some(hasLegacyParameterWrapper);
+}
+
+function validatePackageNode(node: unknown): void {
+  if (!hasPackageIdentity(node)) {
+    throw new Error("Legacy frontend node rejected: data.package must contain id, version and name");
+  }
+  const data = (node as { data: Record<string, unknown> }).data;
+  if (hasLegacyParameterWrapper(data.params)) {
+    throw new Error("Legacy frontend parameters rejected: values must be primitive package values");
+  }
 }
 
 function normalizedLayoutDirection(value: unknown): LayoutDirection {
@@ -80,8 +98,6 @@ function sameLayoutGeometry(current: readonly Node[], next: readonly Node[]): bo
 }
 
 export class DiagramCore {
-  public stereotypes!: StereotypeCore[];
-
   // nodes/edges are declared but NOT initialized with `= []` here.
   // Diagram.svelte.ts overrides them with $state.raw reactive arrays.
   // Using `!` (definite assignment assertion) tells TS they'll be set
@@ -200,11 +216,6 @@ export class DiagramCore {
     return true;
   }
 
-  /** Inject stereotypes (called by Diagram wrapper or MCP server after construction). */
-  public initStereotypes(stereotypes: StereotypeCore[]): void {
-    this.stereotypes = stereotypes;
-  }
-
   public getNodeById(id: string): Node | undefined {
     return this.nodes.find(n => n.id === id);
   }
@@ -219,188 +230,191 @@ export class DiagramCore {
     return this.nodes.filter(n => parentsIds.find(c_id => c_id === n.id));
   }
 
-  public getStereotype(name: string): StereotypeCore | undefined {
-    return this.stereotypes.find(s => s.name === name);
+  /** Whether an edge was created by the handle-over-handle docking gesture. */
+  public isDockedEdge(edge: Edge): boolean {
+    const data = edge.data as { docked?: unknown } | undefined;
+    return data?.docked === true;
   }
 
-  public addModule(
-    stereotype: StereotypeCore,
+  /** Create a node backed by a versioned package identity. */
+  public addPackageModule(
+    identity: PackageIdentity,
+    kind: "input" | "layer" | "loss" | "output",
     x: number,
     y: number,
-    customConfig?: { name?: string; color?: string; width?: number; height?: number; params?: any; parentId?: string }
-  ) {
+    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[] },
+  ): Node {
     this._captureUndoState();
-    // 1. Name logic: if user provided a name use it, otherwise auto-generate (e.g. Tanh_0)
-    let finalName = customConfig?.name;
-
-    if (!finalName || finalName.trim() === "") {
-      let counter = 0;
-      while (this.nodes.some(n => n.data.name === `${stereotype.name}_${counter}`)) {
-        counter++;
-      }
-      finalName = `${stereotype.name}_${counter}`;
-    }
-
-    // 2. Create the node merging stereotype data with form data
-    const isInput = stereotype.isInput;
-    const w = isInput ? 30 : (customConfig?.width || stereotype.view?.width || 140);
-    const h = isInput ? 30 : (customConfig?.height || stereotype.view?.height || 60);
-
+    const finalName = config?.name?.trim() || identity.name;
     const newNode: Node = {
       id: crypto.randomUUID(),
-      type: 'custom',
+      type: "custom",
       position: { x, y },
-      width: w,
-      height: h,
-      parentId: customConfig?.parentId,
-      data: {
-        stereotype: stereotype.name,
-        name: finalName,
-        color: customConfig?.color || stereotype.view?.color || '#ffffff',
-        params: this._mergeNodeParams(stereotype, customConfig?.params),
-        isInput: isInput,
-        isLoss: stereotype.isLoss,
-      }
-    };
-    // 3. Add the node to state
-    this.nodes = [...this.nodes, newNode];
-
-    this.notifyGraphChanged();
-  }
-
-  public addJoinNode(
-    stereotype: StereotypeCore,
-    x: number,
-    y: number,
-    config?: { name?: string; inputsCount?: number; color?: string; params?: any; parentId?: string }
-  ) {
-    this._captureUndoState();
-    const id = `join_${crypto.randomUUID()}`;
-
-    const newJoinNode: Node = {
-      id,
-      type: "join",
-      position: { x, y },
+      width: config?.width ?? (kind === "input" ? 30 : 140),
+      height: config?.height ?? (kind === "input" ? 30 : 60),
       parentId: config?.parentId,
       data: {
-        stereotype: stereotype.name,
-        name: stereotype.name,
-        inputsCount: config?.inputsCount || 2,
-        color: config?.color || stereotype.view?.color || "#333",
-        params: this._mergeNodeParams(stereotype, config?.params)
-      }
+        package: { ...identity },
+        name: finalName,
+        color: config?.color ?? "#ffffff",
+        params: clonePackageParams(config?.params),
+        ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
+      },
     };
-
-    this.nodes = [...this.nodes, newJoinNode];
-
+    this.nodes = [...this.nodes, newNode];
     this.notifyGraphChanged();
+    return newNode;
   }
 
-  /**
-   * Create a subflow node. Accepts an optional label applied during creation,
-   * producing exactly one undo snapshot and one graph notification. Returns
-   * the created node.
-   */
-  public addSubGraph(
+  /** Create any package kind from declarative metadata, without package-ID cases. */
+  public addPackageNode(
+    identity: PackageIdentity,
+    kind: "input" | "layer" | "loss" | "join" | "subflow" | "output",
     x: number,
     y: number,
-    label?: string,
     config?: {
-      stereotype?: StereotypeCore;
       name?: string;
       color?: string;
       width?: number;
       height?: number;
-      params?: Record<string, string | { value: string; position?: string }>;
+      params?: Record<string, unknown>;
+      inputsCount?: number;
       parentId?: string;
+      wheelAdapters?: readonly string[];
+    },
+  ): Node {
+    if (kind === "join") {
+      return this.addPackageJoin(identity, x, y, config);
+    }
+    if (kind === "subflow") {
+      return this.addPackageSubflow(identity, x, y, config);
+    }
+    return this.addPackageModule(identity, kind, x, y, config);
+  }
+
+  public addPackageJoin(
+    identity: PackageIdentity,
+    x: number,
+    y: number,
+    config?: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      inputsCount?: number;
+      parentId?: string;
+      wheelAdapters?: readonly string[];
     },
   ): Node {
     this._captureUndoState();
-    const id = `subflow_${Date.now()}`;
-    const stereotype = config?.stereotype;
-    const finalLabel = config?.name ?? label ?? stereotype?.name ?? id;
-    const width = config?.width ?? stereotype?.view?.width ?? 400;
-    const height = config?.height ?? stereotype?.view?.height ?? 300;
-    const newSubgraph: Node = {
-      id,
-      type: "subflow",
+    const node: Node = {
+      id: `join_${crypto.randomUUID()}`,
+      type: "join",
       position: { x, y },
+      width: config?.width,
+      height: config?.height,
       parentId: config?.parentId,
       data: {
-        name: finalLabel,
-        label: finalLabel,
-        ...(stereotype ? {
-          stereotype: stereotype.name,
-          color: config?.color ?? stereotype.view?.color ?? "#ffffff",
-          params: this._mergeNodeParams(stereotype, config?.params),
-          isSubFlow: true,
-        } : {}),
+        package: { ...identity },
+        name: config?.name?.trim() || identity.name,
+        color: config?.color ?? "#4779c4",
+        params: clonePackageParams(config?.params),
+        inputsCount: config?.inputsCount ?? 2,
+        ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
+      },
+    };
+    this.nodes = [...this.nodes, node];
+    this.notifyGraphChanged();
+    return node;
+  }
+
+  public addPackageSubflow(
+    identity: PackageIdentity,
+    x: number,
+    y: number,
+    config?: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      parentId?: string;
+      wheelAdapters?: readonly string[];
+    },
+  ): Node {
+    this._captureUndoState();
+    const name = config?.name?.trim() || identity.name;
+    const width = config?.width ?? 180;
+    const height = config?.height ?? 100;
+    const node: Node = {
+      id: `subflow_${crypto.randomUUID()}`,
+      type: "subflow",
+      position: { x, y },
+      width,
+      height,
+      parentId: config?.parentId,
+      data: {
+        package: { ...identity },
+        name,
+        label: name,
+        color: config?.color ?? "#4779c4",
+        params: clonePackageParams(config?.params),
         isCollapsed: false,
         oldWidth: width,
         oldHeight: height,
-        // Dimensions are saved at collapse time in toggleSubflow.
+        ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
       },
-      width,
-      height,
     };
-    this.nodes = [...this.nodes, newSubgraph];
-
+    this.nodes = [...this.nodes, node];
     this.notifyGraphChanged();
-    return newSubgraph;
+    return node;
   }
 
-  public updateModule(
+  /** Update a package node while preserving its exact identity and primitive params. */
+  public updatePackageNode(
     id: string,
-    config: { name?: string; label?: string; color?: string; width?: number; height?: number; params?: any; stereotype?: string }
-  ) {
-    const node = this.nodes.find(n => n.id === id);
-    if (!node) return; // no-op: unknown node
-
-    // Semantic no-op: skip undo capture + notification when nothing changes.
-    const nextParams = config.params !== undefined
-      ? JSON.parse(JSON.stringify(config.params))
-      : node.data.params;
-    // Normalize existing params safely: fresh subflows have no params object
-    // until the sidebar assigns a stereotype (JSON.parse(undefined) throws).
-    const existingParams = node.data.params === undefined ? undefined : JSON.parse(JSON.stringify(node.data.params));
-    const nameChanged = config.name !== undefined && config.name !== node.data.name;
-    const labelChanged = config.label !== undefined && config.label !== node.data.label;
-    const colorChanged = config.color !== undefined && config.color !== node.data.color;
-    const stereotypeChanged = config.stereotype !== undefined && config.stereotype !== node.data.stereotype;
-    const widthChanged = config.width !== undefined && config.width !== node.width;
-    const heightChanged = config.height !== undefined && config.height !== node.height;
-    const paramsChanged = config.params !== undefined && !sameParams(
-      existingParams,
-      nextParams,
-    );
-    if (!nameChanged && !labelChanged && !colorChanged && !stereotypeChanged &&
-        !widthChanged && !heightChanged && !paramsChanged) {
-      return;
+    identity: PackageIdentity,
+    kind: "input" | "layer" | "loss" | "join" | "subflow" | "output",
+    config: {
+      name?: string;
+      color?: string;
+      width?: number;
+      height?: number;
+      params?: Record<string, unknown>;
+      inputsCount?: number;
+      wheelAdapters?: readonly string[];
+    },
+  ): void {
+    const node = this.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    if (!identity.id || !identity.version || !identity.name) {
+      throw new Error("package identity requires id, version and name");
     }
-
+    if (hasLegacyParameterWrapper(config.params)) {
+      throw new Error("package parameters must use primitive values");
+    }
     this._captureUndoState();
-
-    this.nodes = this.nodes.map(node => {
-      if (node.id === id) {
-        return {
-          ...node,
-          width: config.width ?? node.width,
-          height: config.height ?? node.height,
-          data: {
-            ...node.data,
-            name: config.name ?? node.data.name,
-            label: config.label ?? node.data.label,
-            color: config.color ?? node.data.color,
-            stereotype: config.stereotype ?? node.data.stereotype,
-            params: config.params !== undefined ? JSON.parse(JSON.stringify(config.params)) : node.data.params,
-            oldWidth: config.width ?? node.data.oldWidth,
-            oldHeight: config.height ?? node.data.oldHeight,
-          }
-        };
-      }
-      return node;
+    this.nodes = this.nodes.map((candidate) => {
+      if (candidate.id !== id) return candidate;
+      const data = {
+        ...candidate.data,
+        package: { ...identity },
+        name: config.name ?? candidate.data.name,
+        label: kind === "subflow" ? (config.name ?? candidate.data.label ?? candidate.data.name) : candidate.data.label,
+        color: config.color ?? candidate.data.color,
+        params: config.params === undefined ? candidate.data.params : clonePackageParams(config.params),
+        ...(config.wheelAdapters === undefined ? {} : { wheelAdapters: [...config.wheelAdapters] }),
+        ...(kind === "join" ? { inputsCount: config.inputsCount ?? candidate.data.inputsCount ?? 2 } : {}),
+      };
+      return {
+        ...candidate,
+        type: kind === "join" ? "join" : kind === "subflow" ? "subflow" : "custom",
+        width: config.width ?? candidate.width,
+        height: config.height ?? candidate.height,
+        data,
+      };
     });
-
     this.notifyGraphChanged();
   }
 
@@ -571,7 +585,8 @@ export class DiagramCore {
     source: string,
     target: string,
     sourceHandle: string = "out",
-    targetHandle: string = "in"
+    targetHandle: string = "in",
+    options: { docked?: boolean } = {},
   ): Edge {
     // Validate before capturing undo state — don't waste an undo slot on a rejected connection
     const validation = coreCheckValidConnection(
@@ -594,7 +609,10 @@ export class DiagramCore {
       sourceHandle,
       targetHandle,
       type: "editable",
-      data: { route: { points: [] } },
+      data: {
+        route: { points: [] },
+        ...(options.docked ? { docked: true } : {}),
+      },
     };
 
     this.edges = [...this.edges, newEdge];
@@ -710,16 +728,13 @@ export class DiagramCore {
       }
     }
 
-    // Prevalidate every source node and its stereotype before mutating.
-    const originals: Array<{ node: Node; stereo: StereotypeCore }> = [];
+    // Prevalidate every source node and its package identity before mutating.
+    const originals: Node[] = [];
     for (const id of uniqueIds) {
       const node = this.getNodeById(id);
       if (!node) throw new Error(`Node not found: ${id}`);
-      if (node.type === "subflow") continue; // skipped, not an error
-      const nd = node.data as Record<string, unknown>;
-      const stereo = this.getStereotype(nd.stereotype as string);
-      if (!stereo) throw new Error(`Stereotype not found for node ${id}`);
-      originals.push({ node, stereo });
+      validatePackageNode(node);
+      originals.push(node);
     }
 
     // No-op: nothing to duplicate (empty selection or only subflows).
@@ -732,13 +747,12 @@ export class DiagramCore {
 
     // Construct every copy off-state (no capture/notify yet). The final node
     // id is decided first so oldToNew, the created node and the copied edges
-    // all reference the same id (joins are prefixed `join_`, matching the
-    // established addJoinNode id scheme).
+    // all reference the same id (joins retain their visual prefix).
     const oldToNew = new Map<string, string>();
     const newNodes: Node[] = [];
-    for (const { node, stereo } of originals) {
+    for (const node of originals) {
       const nd = node.data as Record<string, unknown>;
-      const isJoin = node.type === "join" || stereo.isJoin;
+      const isJoin = node.type === "join";
       const rawId = crypto.randomUUID();
       const finalId = isJoin ? `join_${rawId}` : rawId;
       oldToNew.set(node.id, finalId);
@@ -746,42 +760,12 @@ export class DiagramCore {
         x: node.position.x + offset.x,
         y: node.position.y + offset.y,
       };
-      const sharedParams = nd.params as
-        | Record<string, string | { value: string; position?: string }>
-        | undefined;
-      if (isJoin) {
-        newNodes.push({
-          id: finalId,
-          type: "join",
-          position: newPos,
-          parentId: node.parentId,
-          data: {
-            stereotype: stereo.name,
-            name: stereo.name,
-            inputsCount: (nd.inputsCount as number | undefined) ?? 2,
-            color: (nd.color as string | undefined) ?? stereo.view?.color ?? "#333",
-            params: this._mergeNodeParams(stereo, sharedParams),
-          },
-        });
-      } else {
-        const isInput = stereo.isInput;
-        newNodes.push({
-          id: finalId,
-          type: "custom",
-          position: newPos,
-          width: node.width ?? stereo.view?.width ?? 140,
-          height: node.height ?? stereo.view?.height ?? 60,
-          parentId: node.parentId,
-          data: {
-            stereotype: stereo.name,
-            name: (nd.name as string | undefined) ?? `${stereo.name}_copy`,
-            color: (nd.color as string | undefined) ?? stereo.view?.color ?? "#ffffff",
-            params: this._mergeNodeParams(stereo, sharedParams),
-            isInput,
-            isLoss: stereo.isLoss,
-          },
-        });
-      }
+      newNodes.push({
+        ...node,
+        id: finalId,
+        position: newPos,
+        data: JSON.parse(JSON.stringify(nd)),
+      });
     }
 
     const newEdges: Edge[] = [];
@@ -927,50 +911,6 @@ export class DiagramCore {
     return result.valid;
   }
 
-  // ── Private Helpers ───────────────────────────────────────────
-
-  private getDefaultParams(stereotype: StereotypeCore): Record<string, { value: string; position?: string }> {
-    if (!stereotype.parameters) {
-      return {};
-    }
-
-    return Object.fromEntries(
-      Object.entries(stereotype.parameters).map(([key, paramDef]) => [
-        key,
-        { value: paramDef.default, position: paramDef.position }
-      ])
-    );
-  }
-
-  /**
-   * Merge user-supplied params (plain strings) with stereotype defaults.
-   * Always starts with getDefaultParams() output ({ value, position } objects),
-   * then overlays each user key as { value: userVal, position: previous?.position }.
-   * This ensures stereotype defaults are preserved for keys not in userParams.
-   */
-  private _mergeNodeParams(
-    stereotype: StereotypeCore,
-    userParams?: Record<string, string | { value: string; position?: string }>
-  ): Record<string, { value: string; position?: string }> {
-    const merged = this.getDefaultParams(stereotype);
-    if (userParams) {
-      for (const [key, value] of Object.entries(userParams)) {
-        const existing = merged[key];
-        // Handle both formats: plain string (from create_node RPC) and
-        // { value } wrapper (from duplicateNodes RPC)
-        const innerValue =
-          typeof value === 'object' && value !== null && 'value' in value
-            ? String((value as { value: string }).value)
-            : String(value);
-        merged[key] = {
-          value: innerValue,
-          ...(existing?.position ? { position: existing.position } : {}),
-        };
-      }
-    }
-    return merged;
-  }
-
   // ── Serialization ─────────────────────────────────────────────
 
   public exportToJson(): string {
@@ -1001,6 +941,7 @@ export class DiagramCore {
         edges: unknown[];
         layoutDirection?: unknown;
       };
+      imported.nodes.forEach(validatePackageNode);
       // Normalize edge handle IDs before validation, but keep the imported
       // graph entirely off-state until containment validation succeeds.
       const normalizedEdges = imported.edges.map((candidate) => {

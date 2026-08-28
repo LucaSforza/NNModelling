@@ -20,7 +20,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   } from "@xyflow/svelte";
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
-  import { getNodeDiagnosticSummary } from "../conversion/typeDiagnostics";
+  import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
 
   let { data, selected, isConnectable, id }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
@@ -33,17 +33,25 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   );
 
   // Svelte 5: Filtriamo dinamicamente i parametri per posizione
-  let topParams = $derived(
-    Object.entries(data.params || {}).filter(
-      ([_, p]: any) => p?.position === "top",
-    ),
-  );
+  let packageMetadata = $derived.by(() => {
+    const identity = data.package as { id?: unknown; version?: unknown } | undefined;
+    if (!identity) return null;
+    return diagram?.packageCatalog.find((metadata) => metadata.id === identity.id && metadata.version === identity.version) ?? null;
+  });
+  let isInput = $derived(packageMetadata?.definition.kind === "input");
 
-  let bottomParams = $derived(
-    Object.entries(data.params || {}).filter(
-      ([_, p]: any) => p?.position === "bottom",
-    ),
-  );
+  function displayParams(position: "top" | "bottom") {
+    const params = (data.params as Record<string, unknown> | undefined) ?? {};
+    if (packageMetadata) {
+      return Object.entries(packageMetadata.definition.parameters)
+        .filter(([, definition]) => definition.position === position)
+        .map(([key]) => [key, params[key]] as const);
+    }
+    return [];
+  }
+
+  let topParams = $derived(displayParams("top"));
+  let bottomParams = $derived(displayParams("bottom"));
 
   function focusInSidebar() {
     diagram.nodes = diagram.nodes.map((n) => ({
@@ -54,34 +62,29 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   // --- Type error indicator ---
   let nodeDiagnostic = $derived(
-    getNodeDiagnosticSummary(diagram?.typeResult ?? null, id),
+    packageDiagnostic(diagram?.typeResult ?? null, id),
   );
 
   // --- Shape tooltip on output handle ---
   let outputShape = $derived.by(() => {
-    const ann = diagram?.typeResult?.annotations.get(id);
-    if (!ann) return null;
-    return ann.outputType.shape.map(d => d.kind === 'const' ? String(d.value) : d.kind === 'symbolic' ? d.name : d.kind).join(',');
+    return packageOutputLabel(diagram?.typeResult ?? null, id);
   });
 </script>
 
 <NodeResizer
   minWidth={140}
   minHeight={80}
-  isVisible={selected && !data.isInput}
+  isVisible={selected && !isInput}
 />
 
-{#if !data.isInput}
+{#if !isInput}
   <Handle type="target" id="in" position={targetPosition} {isConnectable} />
 {/if}
 
-{#if data.isInput}
-  <div class="input-circle" style="position: relative;">
-    <div class="input-label">{data.name}</div>
-  </div>
+{#if isInput}
+  <div class="input-circle" style="position: relative;"><div class="input-label">{data.name}</div></div>
 {:else}
-   <div
-     class="node-body"
+  <div class="node-body"
      style="background-color: {(data.color as string) || 'white'};
             color: {(data.color as string) ? 'white' : 'black'};
             text-shadow: {(data.color as string) ? '1px 1px 2px rgba(0,0,0,0.8)' : 'none'};
@@ -91,23 +94,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
    >
     <div class="params-container top-params">
       {#each topParams as [key, param]}
-        <div class="param-row">
-          <span class="param-key">{key}</span>
-          <span class="param-value">{param.value}</span>
-        </div>
+        <div class="param-row"><span class="param-key">{key}</span><span class="param-value">{String(param ?? "")}</span></div>
       {/each}
     </div>
-
-    <div class="node-title">
-      {data.name || "Senza Nome"}
-    </div>
-
+    <div class="node-title">{data.name || "Senza Nome"}</div>
     <div class="params-container bottom-params">
       {#each bottomParams as [key, param]}
-        <div class="param-row">
-          <span class="param-key">{key}</span>
-          <span class="param-value">{param.value}</span>
-        </div>
+        <div class="param-row"><span class="param-key">{key}</span><span class="param-value">{String(param ?? "")}</span></div>
       {/each}
     </div>
   </div>
@@ -115,17 +108,17 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 {#if nodeDiagnostic}
   <div class="node-indicator {nodeDiagnostic.severity}" title={nodeDiagnostic.message}>
-    {nodeDiagnostic.severity === "suggestion" ? "?" : "!"}
+    !
   </div>
 {/if}
 
-<!-- Loss remains terminal for conversion/runtime, but its source handle and
+<!-- Loss remains terminal for the objective program, but its source handle and
      rank-1 output expose the conceptual result in the visual type system. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="output-handle-wrapper" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
   <Handle type="source" id="out" position={sourcePosition} {isConnectable} />
   {#if isNodeHovered && outputShape}
-    <div class="shape-tooltip">[{outputShape}]</div>
+    <div class="shape-tooltip">{outputShape}</div>
   {/if}
 </div>
 <style>
