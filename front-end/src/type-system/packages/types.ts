@@ -78,7 +78,9 @@ export type Manifest = {
 /** The only persisted package identity. Display names are never part of it. */
 export type PackageKey = `${string}@${string}`
 
-export type PackageSource = "bundled" | "external"
+/** Where an active package record is owned. Model records are ephemeral and
+ * must never be persisted in the installed-package store. */
+export type PackageSource = "bundled" | "external" | "model"
 
 /** Browser resource seam. It deliberately exposes only package-relative reads. */
 export type PackageResourceProvider = {

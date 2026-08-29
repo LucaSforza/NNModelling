@@ -22,7 +22,7 @@ import type { GraphInferenceResult } from "./type-system/graph/types";
 import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
 import type { InstallResult, LocalPackageFile } from "./type-system/packages/install/installer";
 import { IndexedDbInstalledPackageStore } from "./type-system/packages/installed/store";
-import type { PackageCatalogMetadata } from "./type-system/editor-runtime";
+import type { ModelBundleResources, PackageCatalogMetadata } from "./type-system/editor-runtime";
 import type { PackageKey } from "./type-system/packages/types";
 import type { PackageIdentity } from "./core/types";
 import {
@@ -246,18 +246,32 @@ export class Diagram extends DiagramCore {
   }
 
   /** Reconcile exact package references before the single graph commit. */
-  public async importProjectJson(jsonString: string): Promise<boolean> {
+  public async importProjectJson(jsonString: string, modelBundle?: ModelBundleResources): Promise<boolean> {
     const parsed = this.parseProjectJson(jsonString);
     if (!parsed) return false;
     await this.packageRuntimeReadyPromise;
     if (this.packageTypeRuntime) {
-      const identities = parsed.nodes.flatMap((node) => {
-        const identity = node.data?.package as { id?: unknown; version?: unknown; name?: unknown } | undefined;
-        return typeof identity?.id === "string" && typeof identity.version === "string"
-          ? [{ id: identity.id, version: identity.version, ...(typeof identity.name === "string" ? { name: identity.name } : {}) }]
-          : [];
-      });
-      await this.packageTypeRuntime.reconcile(identities);
+      let prepared;
+      try {
+        prepared = await this.packageTypeRuntime.prepareModelScope(parsed.manifest, modelBundle);
+      } catch (error) {
+        this.diagnosticCollection.record({
+          occurrenceId: `runtime:model-switch:${parsed.manifest.id}@${parsed.manifest.version}`,
+          phase: "activation",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        this.publishDiagnostics();
+        return false;
+      }
+      // DiagramCore remains the graph authority: prepare all package runtime
+      // resources first, then commit the parsed graph and finally swap scopes.
+      this.commitProject(parsed);
+      await this.packageTypeRuntime.commitModelScope(prepared);
+      this.diagnosticCollection.clear();
+      this.syncPackageCatalog();
+      this.syncRuntimeDiagnostics();
+      this.refreshTypes();
+      return true;
     }
     this.commitProject(parsed);
     this.refreshTypes();

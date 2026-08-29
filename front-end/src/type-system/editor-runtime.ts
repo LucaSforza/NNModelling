@@ -6,7 +6,10 @@ import { PackageCatalog, packageKey, packageRecordKey } from "./packages/catalog
 import type { InstalledPackageStore } from "./packages/installed/store"
 import { installLocalPackage, type InstallResult, type LocalPackageFile } from "./packages/install/installer"
 import type { InstalledPackageRecord, PackageKey, PackageSource } from "./packages/types"
-import type { PackageIdentity } from "../core/types"
+import { parseModelManifest, type ModelManifest, type PackageIdentity } from "../core/types"
+import { parseDefinition, parseManifest } from "./packages/validation"
+import { createInstalledPackageRecord } from "./packages/installed/records"
+import type { PackageResourceMap } from "./packages/types"
 
 export type RuntimePackageIdentity = {
   readonly id: string
@@ -136,6 +139,18 @@ export type EditorTypeSystemRuntimeOptions = {
   readonly bundled?: readonly InstalledPackageRecord[]
 }
 
+/** Files belonging to a model bundle, keyed by paths relative to its root. */
+export type ModelBundleResources = PackageResourceMap
+
+export type PreparedModelScope = {
+  readonly manifest: ModelManifest
+  readonly customPackages: readonly InstalledPackageRecord[]
+  readonly catalog: PackageCatalog
+  readonly host: TypeSystemHost
+  readonly scheduler: PackageGraphScheduler
+  readonly coordinator: PackageActivationCoordinator
+}
+
 /** Frontend lifecycle owner for package inference and runtime reconciliation. */
 export class EditorTypeSystemRuntime {
   private constructor(
@@ -150,10 +165,14 @@ export class EditorTypeSystemRuntime {
   static async create(options: EditorTypeSystemRuntimeOptions = {}): Promise<EditorTypeSystemRuntime> {
     const bundled = options.bundled ?? await bundledCoreRecords()
     const external = options.external ?? (options.store ? await options.store.list() : [])
-    const catalog = PackageCatalog.compose(bundled, external)
+    // Installed external records remain available to the package installer,
+    // but are not part of the active editor scope until a model explicitly
+    // owns them.
+    const catalog = PackageCatalog.composeModel(bundled, [])
     const selections: PackageSelection[] = catalog.records().map((record) => ({ resources: record.resources }))
     const host = await TypeSystemHost.create(selections)
     const runtime = new EditorTypeSystemRuntime(host, new PackageGraphScheduler(host), catalog, bundled, options.store)
+    void external
     await runtime.bootstrap()
     return runtime
   }
@@ -179,6 +198,52 @@ export class EditorTypeSystemRuntime {
 
   activate(identity: RuntimePackageIdentity, options?: { readonly retry?: boolean }): Promise<PackageActivationStatus> { return this.coordinator.activate(identity, options) }
   reconcile(identities: readonly RuntimePackageIdentity[]): Promise<readonly PackageRuntimeDiagnostic[]> { return this.coordinator.reconcile(identities) }
+
+  /** Prepare a model scope without changing the current host or catalog. */
+  async prepareModelScope(manifestValue: unknown, bundle?: ModelBundleResources): Promise<PreparedModelScope> {
+    const manifest = parseModelManifest(manifestValue)
+    const customPackages = await resolveModelPackageRecords(manifest, bundle)
+    const catalog = PackageCatalog.composeModel(this.bundled, customPackages)
+    const host = await TypeSystemHost.create(catalog.records().map((record) => ({ resources: record.resources })))
+    const coordinator = new PackageActivationCoordinator(host, catalog)
+    const scheduler = new PackageGraphScheduler(host)
+    try {
+      const coreResults = await Promise.all(this.bundled.map((record) => coordinator.activate({
+        id: record.manifest.id, version: record.manifest.version,
+      }, { retry: true })))
+      const customResults = await Promise.all(customPackages.map((record) => coordinator.activate({
+        id: record.manifest.id, version: record.manifest.version,
+      }, { retry: true })))
+      const failed = [...coreResults, ...customResults].filter((status) => status.state === "failed")
+      if (failed.length > 0) {
+        throw new Error(failed.map((status) => `${status.key}: ${status.error ?? "activation failed"}`).join("; "))
+      }
+      return { manifest, customPackages, catalog, host, scheduler, coordinator }
+    } catch (cause) {
+      await coordinator.dispose()
+      await host.dispose()
+      throw cause
+    }
+  }
+
+  /** Commit a previously prepared scope and dispose the old custom runtime. */
+  async commitModelScope(scope: PreparedModelScope): Promise<void> {
+    const previousHost = this.host
+    const previousCoordinator = this.coordinator
+    this.host = scope.host
+    this.scheduler = scope.scheduler
+    this.catalog = scope.catalog
+    this.coordinator = scope.coordinator
+    await previousCoordinator.dispose()
+    await previousHost.dispose()
+  }
+
+  /** Transactional convenience seam for consumers that only need a runtime switch. */
+  async switchModelScope(manifestValue: unknown, bundle?: ModelBundleResources): Promise<PreparedModelScope> {
+    const scope = await this.prepareModelScope(manifestValue, bundle)
+    await this.commitModelScope(scope)
+    return scope
+  }
 
   /** Consume T05's post-persistence result and make the package immediately usable. */
   async install(result: Extract<InstallResult, { status: "installed" | "already-installed" }>): Promise<PackageActivationStatus> {
@@ -215,7 +280,7 @@ export class EditorTypeSystemRuntime {
   }
 
   private async rebuild(external: readonly InstalledPackageRecord[]): Promise<void> {
-    const nextCatalog = PackageCatalog.compose(this.bundled, external)
+    const nextCatalog = PackageCatalog.composeModel(this.bundled, [])
     const nextHost = await TypeSystemHost.create(nextCatalog.records().map((record) => ({ resources: record.resources })))
     const previousHost = this.host
     this.host = nextHost
@@ -225,6 +290,56 @@ export class EditorTypeSystemRuntime {
     await this.bootstrap()
     await previousHost.dispose()
   }
+}
+
+/**
+ * Resolve the exhaustive model package list from model-owned bytes. Keeping
+ * the resolver on the model boundary prevents the installed global store from
+ * becoming an implicit package source during model import.
+ */
+export async function resolveModelPackageRecords(
+  manifest: ModelManifest,
+  bundle: ModelBundleResources | undefined,
+): Promise<readonly InstalledPackageRecord[]> {
+  if (manifest.customPackages.length > 0 && bundle === undefined) {
+    throw new Error(`model '${manifest.id}' declares custom packages but no model bundle was provided`)
+  }
+  if (!bundle) return []
+
+  const records: InstalledPackageRecord[] = []
+  for (const reference of manifest.customPackages) {
+    const prefix = `${reference.path}/`
+    const resources: Record<string, string | Uint8Array> = {}
+    for (const [path, value] of Object.entries(bundle)) {
+      if (path.startsWith(prefix)) resources[path.slice(prefix.length)] = value
+    }
+    const packageManifestValue = resources["manifest.json"]
+    if (packageManifestValue === undefined) {
+      throw new Error(`model package '${reference.id}@${reference.version}' is missing manifest.json at '${reference.path}'`)
+    }
+    const packageManifest = parseManifest(JSON.parse(decodeModelResource(packageManifestValue)))
+    if (packageManifest.id !== reference.id || packageManifest.version !== reference.version) {
+      throw new Error(`model package at '${reference.path}' does not match '${reference.id}@${reference.version}'`)
+    }
+    const definition = parseDefinition(JSON.parse(decodeModelResource(
+      resources[packageManifest.entrypoints.definition] ?? missingResource(packageManifest.entrypoints.definition),
+    )))
+    records.push(await createInstalledPackageRecord({
+      source: "model",
+      manifest: packageManifest,
+      definition,
+      resources,
+    }))
+  }
+  return records
+}
+
+function decodeModelResource(value: string | Uint8Array): string {
+  return typeof value === "string" ? value : new TextDecoder().decode(value)
+}
+
+function missingResource(path: string): never {
+  throw new Error(`model package resource '${path}' is missing`)
 }
 
 function toMetadata(record: InstalledPackageRecord | ReturnType<PackageCatalog["records"]>[number]): ActivePackageMetadata {

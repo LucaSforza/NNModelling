@@ -50,6 +50,23 @@ export class PackageCatalog {
     return catalog
   }
 
+  /** Compose the active model scope. Installed external records are
+   * intentionally not included: a model owns an explicit, exhaustive set of
+   * local packages in addition to the immutable core records. */
+  static composeModel(
+    bundled: readonly InstalledPackageRecord[],
+    custom: readonly InstalledPackageRecord[],
+  ): PackageCatalog {
+    const catalog = PackageCatalog.fromRecords(bundled)
+    const bundledIds = new Set(bundled.map((record) => record.manifest.id))
+    for (const record of custom) {
+      if (record.source !== "model") throw new Error(`model package '${record.key}' has an invalid source`)
+      if (bundledIds.has(record.manifest.id)) throw new BundledPackageCollisionError(record.manifest.id)
+      catalog.addRecord(record)
+    }
+    return catalog
+  }
+
   static async fromStore(
     bundled: readonly InstalledPackageRecord[],
     store: { readonly list: () => Promise<readonly InstalledPackageRecord[]> },
