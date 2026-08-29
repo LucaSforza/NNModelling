@@ -15,6 +15,7 @@ import { type Connection, type Edge, type InternalNode, type Node } from "@xyflo
 import type { Diagram } from "./Diagram.svelte";
 import { checkValidConnection as coreCheckValidConnection } from "./core/validation";
 import { validateReparenting } from "./core/containment";
+import type { ModelBundleResources } from "./type-system/editor-runtime";
 
 // Tipo esatto per il payload dell'evento di trascinamento
 export type NodeDragPayload = {
@@ -315,5 +316,79 @@ export function handleLoadModel(
   input.addEventListener("cancel", cleanup, { once: true });
 
   // Simuliamo il click per aprire la finestra di dialogo del SO
+  input.click();
+}
+
+export type ModelBundleUploadFile = {
+  readonly name: string;
+  readonly webkitRelativePath?: string;
+  text(): Promise<string>;
+};
+
+export type LoadedModelBundle = {
+  readonly modelJson: string;
+  readonly resources: ModelBundleResources;
+};
+
+/** Read a model directory selected through a directory file input. */
+export async function readModelBundleFiles(
+  files: readonly ModelBundleUploadFile[],
+): Promise<LoadedModelBundle> {
+  const entries = files.map((file) => ({
+    file,
+    path: (file.webkitRelativePath || file.name).replaceAll("\\", "/"),
+  }));
+  const modelEntries = entries.filter(({ path }) => path === "model.json" || path.endsWith("/model.json"));
+  if (modelEntries.length !== 1) {
+    throw new Error("Seleziona una directory bundle contenente un solo model.json.");
+  }
+
+  const modelPath = modelEntries[0]!.path;
+  const root = modelPath.slice(0, -"model.json".length);
+  const resources: Record<string, string> = {};
+  for (const { file, path } of entries) {
+    if (!path.startsWith(root)) continue;
+    const relativePath = path.slice(root.length);
+    if (!relativePath || relativePath.includes("..") || relativePath.startsWith("/")) continue;
+    resources[relativePath] = await file.text();
+  }
+
+  const modelJson = resources["model.json"];
+  if (modelJson === undefined) {
+    throw new Error("Il bundle selezionato non contiene model.json nella sua radice.");
+  }
+  return { modelJson, resources };
+}
+
+/** Load a model bundle directory, including model-owned package resources. */
+export function handleLoadModelBundle(
+  diagram: Diagram,
+  onLoad?: () => void,
+  onError?: (message: string) => void,
+) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.multiple = true;
+  input.accept = ".json,application/json";
+  input.setAttribute("webkitdirectory", "");
+  input.setAttribute("directory", "");
+  input.style.display = "none";
+  document.body.appendChild(input);
+
+  const cleanup = () => input.remove();
+  input.onchange = async () => {
+    try {
+      const files = [...(input.files ?? [])];
+      const bundle = await readModelBundleFiles(files);
+      const imported = await diagram.importProjectJson(bundle.modelJson, bundle.resources);
+      if (!imported) throw new Error("Il bundle non contiene un diagramma JSON valido.");
+      onLoad?.();
+    } catch (error) {
+      onError?.(error instanceof Error ? error.message : String(error));
+    } finally {
+      cleanup();
+    }
+  };
+  input.addEventListener("cancel", cleanup, { once: true });
   input.click();
 }

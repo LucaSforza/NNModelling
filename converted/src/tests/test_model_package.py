@@ -185,6 +185,41 @@ def test_wheel_model_facade_loads_embedded_and_compatible_override(tmp_path: Pat
         _cleanup("model", wheel)
 
 
+def test_wheel_normalizes_graph_only_training_state(tmp_path: Path) -> None:
+    """Export accepts the inner graph state emitted by older workers."""
+
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input"},
+            {
+                "id": "linear",
+                "type": "layer",
+                "package": {"id": "core.linear", "version": "0.1.0"},
+                "parameters": {"in_features": 2, "out_features": 2},
+            },
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    artifact = tmp_path / "inner_state"
+    artifact.mkdir()
+    compiled = compile_package_graph(bundle)
+    save_file(compiled.module.state_dict(), artifact / "weights.safetensors")
+    wheel = build_model_wheel(artifact, package_name="nnm_inner_state", package=bundle)
+    assert wheel.name == "nnm_inner_state-0.1.0-py3-none-any.whl"
+    sys.path.insert(0, str(wheel))
+    module = importlib.import_module("nnm_inner_state")
+    try:
+        output = module.Model().predict_tensor(torch.randn(3, 2))
+        assert output.shape == (3, 2)
+    finally:
+        _cleanup("inner_state", wheel)
+
+
 @pytest.mark.parametrize(
     ("checkpoint_kind", "message"),
     [

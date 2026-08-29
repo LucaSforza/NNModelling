@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from nnm_vae_mnist_qa import Model
+from nnm_vae_mnist import Model
 
 
 EXAMPLE_DIR = Path(__file__).resolve().parent

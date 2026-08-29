@@ -54,6 +54,8 @@ def build_model_wheel(
     architecture["architecture_fingerprint"] = _architecture_fingerprint(architecture)
     dist_dir = artifact_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
+    # Wheel filenames use the normalized import-safe project spelling; pip/uv
+    # expose the equivalent distribution name with hyphens.
     wheel_name = f"{module_name}-{version}-py3-none-any.whl"
     wheel_path = dist_dir / wheel_name
     with tempfile.TemporaryDirectory(prefix="nnm-wheel-") as temporary:
@@ -112,6 +114,12 @@ def _vendor_weights(source: Path, destination: Path, fingerprint: str) -> None:
 
     with safe_open(str(source), framework="pt") as handle:
         tensors = {name: handle.get_tensor(name) for name in handle.keys()}
+    wrapper_prefix = "module."
+    has_wrapper_keys = [name.startswith(wrapper_prefix) for name in tensors]
+    if any(has_wrapper_keys) and not all(has_wrapper_keys):
+        raise ValueError("weights.safetensors contains mixed wrapper and graph state-dict keys")
+    if tensors and not has_wrapper_keys[0]:
+        tensors = {f"{wrapper_prefix}{name}": tensor for name, tensor in tensors.items()}
     save_file(tensors, str(destination), metadata={ARCHITECTURE_FINGERPRINT: fingerprint})
 
 

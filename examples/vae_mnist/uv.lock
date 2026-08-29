@@ -207,11 +207,29 @@ wheels = [
 ]
 
 [[package]]
+name = "nnm-vae-mnist"
+version = "0.1.0"
+source = { path = "nnm_vae_mnist-0.1.0-py3-none-any.whl" }
+dependencies = [
+    { name = "safetensors" },
+    { name = "torch" },
+]
+wheels = [
+    { filename = "nnm_vae_mnist-0.1.0-py3-none-any.whl", hash = "sha256:d6205d819c654b99c15c647a56345e9013ba813024149bbb034fdee78524dcbc" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "safetensors" },
+    { name = "torch" },
+]
+
+[[package]]
 name = "nnm-vae-mnist-example"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "nnm-vae-mnist-qa" },
+    { name = "nnm-vae-mnist" },
     { name = "pillow" },
     { name = "torch" },
     { name = "torchvision" },
@@ -224,7 +242,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "nnm-vae-mnist-qa", path = "nnm_vae_mnist_qa-0.1.0-py3-none-any.whl" },
+    { name = "nnm-vae-mnist", path = "nnm_vae_mnist-0.1.0-py3-none-any.whl" },
     { name = "pillow", specifier = ">=10" },
     { name = "torch", specifier = ">=2.0" },
     { name = "torchvision", specifier = ">=0.15" },
@@ -232,24 +250,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
-
-[[package]]
-name = "nnm-vae-mnist-qa"
-version = "0.1.0"
-source = { path = "nnm_vae_mnist_qa-0.1.0-py3-none-any.whl" }
-dependencies = [
-    { name = "safetensors" },
-    { name = "torch" },
-]
-wheels = [
-    { filename = "nnm_vae_mnist_qa-0.1.0-py3-none-any.whl", hash = "sha256:262c6848f39a64bffe35a0660a917727bd681d78ed08872195270539c6fa0eab" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "safetensors" },
-    { name = "torch" },
-]
 
 [[package]]
 name = "numpy"

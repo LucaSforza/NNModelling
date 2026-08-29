@@ -12,7 +12,7 @@ uv sync
 uv run python interpolate.py
 ```
 
-The script imports `Model` directly from `nnm_vae_mnist_qa`. It reconstructs
+The script imports `Model` directly from the downloaded job package. It reconstructs
 two local MNIST fixtures through `Model.predict`, obtains their posterior means
 through the public `encode` adapter, and decodes several interpolated latent
 points through the public `forward` adapter. The result is written to

@@ -49,6 +49,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     checkValidConnection,
     findDockedConnection,
     handleLoadModel,
+    handleLoadModelBundle,
     handleSaveModel,
     onNodeDragStop,
   } from "./utils";
@@ -457,7 +458,19 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
             );
             isSidebarOpen = false;
           }}
-          class="toolbar-btn">📂 Carica</button
+          class="toolbar-btn">📂 Carica JSON</button
+        >
+        <button
+          onclick={() => {
+            loadError = null;
+            handleLoadModelBundle(
+              diagram,
+              () => diagram.refreshTypes(),
+              (message) => (loadError = message),
+            );
+            isSidebarOpen = false;
+          }}
+          class="toolbar-btn">📦 Carica bundle</button
         >
         {#if loadError}
           <div class="load-error" role="alert">{loadError}</div>
