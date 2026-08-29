@@ -91,6 +91,12 @@
       "description": "Full transformer: embed, posenc, encoder\u00d72, pool, linear classifier"
     }
   },
+  "packageModels": {
+    "resnet": "diagrams/package/models/resnet/model.json",
+    "transformer": "diagrams/package/models/transformer/model.json",
+    "variational-autoencoder": "diagrams/package/models/variational-autoencoder/model.json",
+    "variational-autoencoder-simple": "diagrams/package/models/variational-autoencoder/simple.json"
+  },
   "nntrees": {
     "auto_encoder": {
       "inputShape": [1, 1, 28, 28],

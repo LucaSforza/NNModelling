@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "core.reparameterize",
+  "id": "example.vae.kl-divergence",
   "version": "0.1.0",
   "dependencies": {},
   "entrypoints": {

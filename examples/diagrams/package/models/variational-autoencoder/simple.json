@@ -1,4 +1,11 @@
 {
+  "manifest": {
+    "schemaVersion": 1,
+    "id": "example.vae-mnist-simple",
+    "version": "0.1.0",
+    "name": "Variational Autoencoder (simple)",
+    "customPackages": []
+  },
   "nodes": [
     {
       "id": "image",

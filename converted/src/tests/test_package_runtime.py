@@ -81,10 +81,10 @@ def build(parameters, context: BuildContext, services: NoServices):
 
 def test_reparameterize_is_deterministic_in_eval_but_stochastic_in_train() -> None:
     root = Path(__file__).parents[3]
-    source = (root / "stereotype-packages/core/reparameterize/pytorch.py").read_text()
+    source = (root / "examples/diagrams/package/models/variational-autoencoder/packages/sampling/pytorch.py").read_text()
     model = compile_package_graph({
-        "packages": [_package("core.reparameterize", source)],
-        "graph": _graph("core.reparameterize", parameters={"epsilon_scale": 1.0}),
+        "packages": [_package("example.vae.sampling", source)],
+        "graph": _graph("example.vae.sampling", parameters={"epsilon_scale": 1.0}),
     })
     packed = torch.tensor([[1.0, 2.0, 0.0, 0.0]])
     model.eval()
@@ -264,12 +264,17 @@ def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
 
     root = Path(__file__).parents[3]
     diagram = json.loads(
-        (root / "examples/diagrams/package/variational-autoencoder-complete.json").read_text()
+        (root / "examples/diagrams/package/models/variational-autoencoder/model.json").read_text()
     )
     package_ids = sorted({node["data"]["package"]["id"] for node in diagram["nodes"]})
     packages = []
     for package_id in package_ids:
-        package_dir = root / "stereotype-packages" / Path(*package_id.split("."))
+        package_ref = next((entry for entry in diagram["manifest"]["customPackages"] if entry["id"] == package_id), None)
+        package_dir = (
+            root / "examples/diagrams/package/models/variational-autoencoder" / package_ref["path"]
+            if package_ref is not None
+            else root / "stereotype-packages" / Path(*package_id.split("."))
+        )
         manifest = json.loads((package_dir / "manifest.json").read_text())
         files = {}
         for file_path in ["manifest.json", "stereotype.json", "inference.lua"] + (
@@ -326,7 +331,8 @@ def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
     from package_worker import _load_dataset_class
 
     assert _load_dataset_class("dataset.mnist.MNISTDataset").__name__ == "MNISTDataset"
-    diagram = json.loads((root / "examples/diagrams/package/resnet.json").read_text())
+    diagram = json.loads((root / "examples/diagrams/package/models/resnet/model.json").read_text())
+    assert diagram["manifest"]["customPackages"] == []
     package_ids = sorted({node["data"]["package"]["id"] for node in diagram["nodes"]})
     packages = []
     for package_id in package_ids:

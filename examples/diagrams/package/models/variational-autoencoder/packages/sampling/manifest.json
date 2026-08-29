@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "core.kl-divergence",
+  "id": "example.vae.sampling",
   "version": "0.1.0",
   "dependencies": {},
   "entrypoints": {

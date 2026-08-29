@@ -1,4 +1,15 @@
 {
+  "manifest": {
+    "schemaVersion": 1,
+    "id": "example.vae-mnist",
+    "version": "0.1.0",
+    "name": "Variational Autoencoder",
+    "description": "MNIST variational autoencoder",
+    "customPackages": [
+      { "id": "example.vae.sampling", "version": "0.1.0", "path": "packages/sampling" },
+      { "id": "example.vae.kl-divergence", "version": "0.1.0", "path": "packages/kl-divergence" }
+    ]
+  },
   "nodes": [
     {
       "id": "input",
@@ -64,7 +75,7 @@
       "width": 200,
       "height": 100,
       "data": {
-        "package": { "id": "core.reparameterize", "version": "0.1.0", "name": "Reparameterize" },
+        "package": { "id": "example.vae.sampling", "version": "0.1.0", "name": "Reparameterize" },
         "name": "sample_z",
         "color": "#8b6bb8",
         "params": { "epsilon_scale": 1 },
@@ -78,7 +89,7 @@
       "width": 200,
       "height": 100,
       "data": {
-        "package": { "id": "core.kl-divergence", "version": "0.1.0", "name": "KL Divergence" },
+        "package": { "id": "example.vae.kl-divergence", "version": "0.1.0", "name": "KL Divergence" },
         "name": "kl_loss",
         "color": "#8b6bb8",
         "params": {}
