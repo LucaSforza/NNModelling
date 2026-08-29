@@ -250,13 +250,10 @@ Licensed under the GNU General Public License v3 or later.
     for (const node of nodes) {
       const state = result.nodes.get(node.id);
       if (!state || state.status === "success") continue;
-      if (state.status === "fault") diagnostics.push({
-        nodeId: node.id, severity: "fault", title: "Runtime fault", message: state.fault.message,
-      });
-      else if (state.status === "error") diagnostics.push({
+      if (state.status === "error") diagnostics.push({
         nodeId: node.id, severity: "error", title: "Type error", message: state.message,
       });
-      else diagnostics.push({
+      else if (state.status === "unresolved") diagnostics.push({
         nodeId: node.id,
         severity: "unresolved",
         title: "Incomplete",
@@ -267,6 +264,13 @@ Licensed under the GNU General Public License v3 or later.
   });
 
   let diagnosticCount = $derived(packageDiagnostics.length);
+  let runtimeDiagnostics = $derived(diagram.packageRuntimeDiagnostics);
+
+  function runtimeDiagnosticIdentity(diagnostic: (typeof runtimeDiagnostics)[number]): string {
+    if (diagnostic.packageId && diagnostic.packageVersion) return `${diagnostic.packageId}@${diagnostic.packageVersion}`;
+    if (diagnostic.packageId) return diagnostic.packageId;
+    return "Type-system runtime";
+  }
 
   function packageStateMessage(state: EditorInferenceState | GraphNodeResult | undefined): string {
     if (!state) return "Package type-system is initializing.";
@@ -400,6 +404,36 @@ Licensed under the GNU General Public License v3 or later.
                 <span class="type-error-msg">{diagnostic.message}</span>
               </div>
             </div>
+          {/each}
+        {/if}
+      </section>
+
+      <section class="runtime-diagnostic-panel" aria-labelledby="runtime-diagnostic-heading">
+        <div class="runtime-diagnostic-panel-header" id="runtime-diagnostic-heading">
+          <span>Package and runtime errors</span>
+          <span class:has-issues={runtimeDiagnostics.length > 0} class="diagnostic-count">{runtimeDiagnostics.length}</span>
+        </div>
+        {#if runtimeDiagnostics.length === 0}
+          <div class="runtime-diagnostics-empty">No package or runtime errors.</div>
+        {:else}
+          {#each runtimeDiagnostics as diagnostic (diagnostic.occurrenceId)}
+            <button
+              type="button"
+              class="runtime-diagnostic-item"
+              class:runtime-diagnostic-node={diagnostic.nodeId !== undefined}
+              disabled={diagnostic.nodeId === undefined}
+              onclick={() => diagnostic.nodeId && selectDiagnosticNode(diagnostic.nodeId)}
+            >
+              <span class="type-error-icon" aria-hidden="true">⚠</span>
+              <div class="type-error-text">
+                <div class="type-error-heading">
+                  <span class="type-error-node">{runtimeDiagnosticIdentity(diagnostic)}</span>
+                  <span class="type-error-kind">{diagnostic.phase}</span>
+                </div>
+                {#if diagnostic.nodeId}<span class="runtime-diagnostic-node-label">Node: {getNodeLabel(diagnostic.nodeId)}</span>{/if}
+                <span class="type-error-msg">{diagnostic.message}</span>
+              </div>
+            </button>
           {/each}
         {/if}
       </section>

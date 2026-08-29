@@ -8,6 +8,10 @@ import { LuaInferenceService, PackageRegistryService } from "./packages/cordis-s
 import type { PackageResourceMap, PackageResourceProvider } from "./packages/types"
 import type { Definition } from "./packages/types"
 import type { PackageIdentity } from "../core/types"
+import {
+  PackageRuntimeDiagnosticCollection,
+  type PackageRuntimeDiagnostic,
+} from "./diagnostics"
 
 export type PackageSelection = {
   readonly resources: PackageResourceProvider | PackageResourceMap
@@ -30,7 +34,7 @@ export type EditorInferenceState =
       readonly status: "fault"
       readonly fault: {
         readonly packageId: string
-        readonly phase: "inference"
+        readonly phase: "activation" | "inference"
         readonly message: string
       }
     }
@@ -40,6 +44,8 @@ export class TypeSystemHost {
   private readonly context = new Context()
   private readonly registry: PackageRegistryService
   private readonly loader: PackageLoader
+  private readonly diagnosticCollection = new PackageRuntimeDiagnosticCollection()
+  private readonly activationAttempts = new Map<string, number>()
   private disposed = false
 
   private constructor(catalog: PackageCatalog) {
@@ -60,7 +66,21 @@ export class TypeSystemHost {
 
   async activate(identity: PackageIdentity): Promise<void> {
     this.assertActive()
-    await this.loader.load(identity)
+    const key = `${identity.id}@${identity.version}`
+    const activationAttempt = (this.activationAttempts.get(key) ?? 0) + 1
+    this.activationAttempts.set(key, activationAttempt)
+    try {
+      await this.loader.load(identity)
+    } catch (cause) {
+      this.recordDiagnostic({
+        phase: "activation",
+        packageId: identity.id,
+        packageVersion: identity.version,
+        message: cause instanceof Error ? cause.message : String(cause),
+        activationAttempt,
+      })
+      throw cause
+    }
   }
 
   isActive(identity: PackageIdentity): boolean {
@@ -86,6 +106,26 @@ export class TypeSystemHost {
     }))
   }
 
+  /** Snapshot of browser-owned fatal package/runtime failures. */
+  runtimeDiagnostics(): readonly PackageRuntimeDiagnostic[] {
+    return this.diagnosticCollection.snapshot()
+  }
+
+  /** Record an adapter-owned failure while retaining the original cause text. */
+  recordDiagnostic(input: Parameters<PackageRuntimeDiagnosticCollection["record"]>[0]): PackageRuntimeDiagnostic {
+    return this.diagnosticCollection.record(input)
+  }
+
+  /** Failure for the exact package reference, used by the graph scheduler. */
+  packageRuntimeFailure(identity: PackageIdentity): PackageRuntimeDiagnostic | undefined {
+    const key = `${identity.id}@${identity.version}`
+    return this.diagnosticCollection.snapshot().find((diagnostic) => (
+      diagnostic.packageId && diagnostic.packageVersion &&
+      `${diagnostic.packageId}@${diagnostic.packageVersion}` === key &&
+      diagnostic.phase !== "inference" && diagnostic.phase !== "disposal"
+    ))
+  }
+
   /**
    * Adapt semantic inference to editor state without manufacturing an unknown
    * tensor. Required-but-missing parameters stop before Lua invocation.
@@ -94,6 +134,7 @@ export class TypeSystemHost {
     identity: PackageIdentity,
     context: TypeContext,
     parameters: Readonly<Record<string, unknown>>,
+    nodeId?: string,
   ): EditorInferenceState {
     this.assertActive()
     const active = this.registry.get(identity.id)
@@ -107,12 +148,21 @@ export class TypeSystemHost {
     try {
       return this.loader.infer(identity, context, parameters)
     } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      this.recordDiagnostic({
+        occurrenceId: `inference:${identity.id}@${identity.version}:${nodeId ?? "global"}`,
+        phase: "inference",
+        packageId: identity.id,
+        packageVersion: identity.version,
+        nodeId,
+        message,
+      })
       return {
         status: "fault",
         fault: {
           packageId: identity.id,
           phase: "inference",
-          message: cause instanceof Error ? cause.message : String(cause),
+          message,
         },
       }
     }
@@ -121,8 +171,16 @@ export class TypeSystemHost {
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
-    await this.loader.dispose()
-    await this.context.fiber.dispose()
+    try {
+      await this.loader.dispose()
+    } catch (cause) {
+      this.recordDiagnostic({ phase: "disposal", message: cause instanceof Error ? cause.message : String(cause) })
+    }
+    try {
+      await this.context.fiber.dispose()
+    } catch (cause) {
+      this.recordDiagnostic({ phase: "disposal", message: cause instanceof Error ? cause.message : String(cause) })
+    }
   }
 
   private assertActive(): void {

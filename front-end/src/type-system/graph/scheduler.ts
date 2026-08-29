@@ -139,11 +139,46 @@ export class PackageGraphScheduler {
   ): GraphNodeResult {
     const identity = packageIdentity(node)
     if (!identity) return { status: "unresolved", reason: "node has no versioned package identity" }
-    if (!this.host.isActive(identity)) return { status: "unresolved", reason: `package '${identity.id}@${identity.version}' is not active` }
+    if (!this.host.isActive(identity)) {
+      const failure = this.host.packageRuntimeFailure(identity)
+      const message = failure?.message ?? `package '${identity.id}@${identity.version}' is unavailable or failed to activate`
+      if (!failure) {
+        this.host.recordDiagnostic({
+          occurrenceId: `activation:${identity.id}@${identity.version}:${node.id}`,
+          phase: "activation",
+          packageId: identity.id,
+          packageVersion: identity.version,
+          nodeId: node.id,
+          message,
+        })
+      }
+      return {
+        status: "fault",
+        fault: { packageId: identity.id, phase: "activation", message },
+      }
+    }
     const definition = this.host.packageDefinition(identity)
-    if (!definition) return { status: "unresolved", reason: `package '${identity.id}' has no definition` }
+    if (!definition) {
+      const message = `package '${identity.id}@${identity.version}' has no active definition`
+      this.host.recordDiagnostic({
+        occurrenceId: `activation:${identity.id}@${identity.version}:${node.id}`,
+        phase: "activation",
+        packageId: identity.id,
+        packageVersion: identity.version,
+        nodeId: node.id,
+        message,
+      })
+      return { status: "fault", fault: { packageId: identity.id, phase: "activation", message } }
+    }
 
     const nodeEdges = snapshot.edges.filter((edge) => scopeIds.has(edge.source) && scopeIds.has(edge.target))
+    const dependencies = nodeEdges.filter((edge) => edge.target === node.id)
+      .map((edge) => results.get(edge.source))
+    const failedDependency = dependencies.find((result) => result?.status === "fault")
+    if (failedDependency?.status === "fault") return { status: "fault", fault: failedDependency.fault }
+    if (dependencies.some((result) => !result || result.status === "unresolved")) {
+      return { status: "unresolved", reason: "one or more input regions are unresolved" }
+    }
     let inputs = inputsFor(node.id, nodeEdges, results)
     if (inputs && inputs.length === 0 && boundaryInput && definition.kind !== "input") inputs = [boundaryInput]
     if (!inputs) return { status: "unresolved", reason: "one or more input regions are unresolved" }
@@ -178,6 +213,6 @@ export class PackageGraphScheduler {
         },
       }
     }
-    return this.host.inferForEditor(identity, context, nodeParameters(node))
+    return this.host.inferForEditor(identity, context, nodeParameters(node), node.id)
   }
 }
