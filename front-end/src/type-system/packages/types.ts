@@ -75,12 +75,29 @@ export type Manifest = {
   }
 }
 
+/** The only persisted package identity. Display names are never part of it. */
+export type PackageKey = `${string}@${string}`
+
+export type PackageSource = "bundled" | "external"
+
 /** Browser resource seam. It deliberately exposes only package-relative reads. */
 export type PackageResourceProvider = {
   readonly read: (path: string) => string | Uint8Array | Promise<string | Uint8Array>
 }
 
 export type PackageResourceMap = Readonly<Record<string, string | Uint8Array>>
+
+/** A validated, immutable package record owned by the installed catalog. */
+export type InstalledPackageRecord = {
+  readonly key: PackageKey
+  readonly source: PackageSource
+  readonly manifest: Manifest
+  readonly definition: Definition
+  /** Every package-relative file, retained byte-for-byte. */
+  readonly resources: Readonly<Record<string, Uint8Array>>
+  readonly digest: string
+  readonly resolvedDependencies: Readonly<Record<string, PackageKey>>
+}
 
 export type PackageBundle = {
   readonly manifest: Manifest
@@ -89,7 +106,7 @@ export type PackageBundle = {
   readonly directory?: string
 }
 
-export type Package = PackageBundle
+export type Package = PackageBundle | InstalledPackageRecord
 
 /** Raw resources exposed only to the package transport/export boundary. */
 export type PackageExportInfo = {

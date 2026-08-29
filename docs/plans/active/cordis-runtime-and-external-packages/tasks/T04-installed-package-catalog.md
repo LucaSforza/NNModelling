@@ -1,7 +1,7 @@
 ---
 id: T04
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: storage
 depends_on:
@@ -73,6 +73,21 @@ runtime activation yet.
 - [ ] Full resource bytes round-trip without newline or encoding corruption.
 - [ ] No activation, UI, DiagramCore, or MCP code is changed in this task.
 
+## Evidence (2026-08-29)
+
+- `pnpm --dir front-end test -- src/__tests__/installedPackageCatalog.test.ts` — 21 files, 146 tests passed.
+- `pnpm --dir front-end check` — 0 errors (9 pre-existing accessibility/CSS warnings).
+- `git diff --check` — passed.
+- T03 files remained outside the T04 commit; no host, loader, registry, Lua,
+  DiagramCore, UI, or MCP files were changed by T04.
+
+The catalog now exposes exact `PackageKey` lookup, ID/range queries, immutable
+installed records, complete byte resources, content digests, and resolved
+dependency keys. The store contract is list/get/put/delete; IndexedDB uses
+`nnmodelling-packages` schema version 1 and one transaction per operation, while
+the in-memory adapter provides the same seam. Bundled records compose before
+external records, and any shared package ID is rejected.
+
 ## Validation
 
 ```bash
@@ -86,4 +101,3 @@ git diff --check
 Return the catalog/store interfaces, IndexedDB schema and transaction boundary,
 the bundled-composition rule, exact test output, and any coordination needed
 before T03 and T04 are integrated.
-
