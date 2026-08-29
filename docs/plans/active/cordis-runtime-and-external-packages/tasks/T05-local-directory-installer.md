@@ -92,9 +92,16 @@ pnpm --dir front-end check
 git diff --check
 ```
 
+## Evidence (2026-08-29)
+
+- `pnpm --dir front-end exec vitest run src/__tests__/packageInstaller.test.ts src/__tests__/packageManager.test.ts` — 2 files, 8 tests passed.
+- `pnpm --dir front-end check` — 0 errors; 9 pre-existing accessibility/CSS warnings remain in unrelated components.
+- `git diff --check` — passed.
+- The installer accepts normalized `{relativePath, bytes}` records, validates the root manifest and complete definition/Lua/Python resource closure, resolves exact static dependency keys and cycles, computes the catalog digest, and performs one store `put` only after validation. Successful results expose an `activationRequest` for T06; no graph or Cordis activation is performed here.
+- Fixtures cover a byte-preserving external layer (including `pytorch.py` and `helper.bin`), missing entrypoint, malformed definition, missing dependency, and bundled-ID collision; tests additionally cover identical/changed reinstall, ambiguity, cycles, browser path normalization, and zero writes on rejection.
+
 ## Required handoff
 
 Return the normalized file-input contract, validation order, install result
 shape, fixture identities, exact test output, and the callback interface T06
 must connect.
-
