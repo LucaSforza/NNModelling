@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-29
 ---
 
 # Remote-training architecture
@@ -26,7 +26,8 @@ TrainingSidebar or MCP HTTP client
 contains:
 
 - `network`: a `package` bundle reference plus semantic graph;
-- `training`: dataset, optimizer, trainer, W&B and early stopping;
+- `training`: an opaque resolved dataset reference with typed parameters,
+  optimizer, trainer, W&B and early stopping;
 - `resources`: CPU, memory, GPU and optional controller selectors;
 - `priority` and optional `nnm_<name>` package name.
 
@@ -54,8 +55,11 @@ and must be reassessed against current code before becoming a new plan.
   through a Podman/Docker controller.
 - Artifacts default to `converted/jobs/<job-id>/` and may be relocated with
   `NNM_BACKEND_ARTIFACT_ROOT`.
-- Dataset discovery and package execution follow the registered-dataset and
-  worker-only policy.
+- Built-in and project-owned datasets share declarative parameters and named
+  input/target tensor-slot contracts. Project dataset archives are bounded,
+  content-addressed and ownership-scoped; their Python executes only inside
+  the worker. See
+  [Project-owned datasets](../decisions/project-owned-datasets.md).
 - Job access is scoped to an authenticated browser connection; see
   [Pairing and ownership](../contracts/pairing.md).
 - The package path emits the portable wheel contract. See

@@ -8,12 +8,17 @@ updated: 2026-08-29
 
 ## Context
 
-The package runtime now knows how to install and activate external packages,
-but model loading still has no ownership boundary for custom stereotypes. A
-package that happens to be installed or active can therefore appear unrelated
-to the model being edited. This is especially misleading for the VAE example:
-sampling and KL divergence are model-specific operations, not core library
-operations.
+An intermediate package runtime could install and activate external packages,
+but model loading had no ownership boundary for custom stereotypes. A package
+that happened to exist globally could therefore appear unrelated to the model
+being edited. This was especially misleading for the VAE example: sampling and
+KL divergence are model-specific operations, not core library operations.
+
+The later accepted
+[writable project decision](project-workspaces-and-stereotype-authoring.md)
+removes that global installer ownership and makes the project directory the
+authoring and persistence boundary. The model-scope rules below remain the
+runtime contract.
 
 ## Decision
 
@@ -27,7 +32,7 @@ operations.
 - Bundled core packages remain globally active and available to every model.
   They are not repeated in `customPackages`.
 - Only the packages listed by the current model manifest may be activated as
-  model custom packages. Installed packages that are not listed are not
+  model custom packages. Package resources outside the project are not
   searched, inferred, or added to the current editor palette.
 - Model custom package directories are physically owned by the model bundle.
   Their package manifest must match the manifest entry's exact `id` and
@@ -93,11 +98,11 @@ model manifest + relative directories┘       = core + custom packages
                                       DiagramCore + Lua inference + bundle
 ```
 
-With no model open, only the core scope is active. Opening or importing a
-model first prepares its scope without mutating `DiagramCore`; after a
-successful commit, the old custom package fibers and diagnostics are disposed.
-The browser remains the sole graph authority and the MCP server remains a thin
-proxy.
+The project-first shell does not mount the editor runtime before a project is
+created or opened. Opening a model first prepares its core-plus-custom scope
+without mutating `DiagramCore`; after a successful commit, the old custom
+package fibers and diagnostics are disposed. The browser remains the sole
+graph authority and the MCP server remains a thin proxy.
 
 ## Example ownership
 
@@ -112,7 +117,7 @@ proxy.
 
 - A shared model-package library, marketplace, discovery service, or package
   deduplication policy.
-- Making every installed external package active for every model.
+- Loading global or undeclared custom package resources for a model.
 - Changing Lua or PyTorch package semantics, package dependency rules, or the
   backend sandbox boundary.
 - Persisting filesystem handles or absolute paths in model JSON.

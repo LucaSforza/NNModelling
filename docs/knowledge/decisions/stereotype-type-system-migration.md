@@ -52,15 +52,23 @@ integration.
 
 ## Current package policy
 
-The implemented product still uses bundled packages. A later accepted decision
-now defines the migration to upstream Cordis and complete local-directory
-installation for external packages. See
-[`local-package-runtime.md`](local-package-runtime.md) for that future contract
-and its executable plan.
+The product uses immutable bundled core packages plus the complete custom
+package set declared and physically owned by the current model. Upstream Cordis
+owns activation lifecycle; the writable project workspace owns custom package
+files and authoring. See
+[`local-package-runtime.md`](local-package-runtime.md),
+[`model-scoped-stereotype-packages.md`](model-scoped-stereotype-packages.md) and
+[`project-workspaces-and-stereotype-authoring.md`](project-workspaces-and-stereotype-authoring.md).
+
+The former visible local-directory installer and global IndexedDB ownership
+path are not part of the supported package policy. Transitional implementation
+code is removed by the writable-project initiative rather than preserved as a
+second custom-package source.
 
 Remote discovery, download, marketplaces, a general dependency solver,
-lockfiles and hot reload remain non-goals. This document continues to describe
-the completed package type-system cutover until the external-package plan lands.
+lockfiles and hot reload remain non-goals. Acquiring third-party packages is a
+separate future design; a node or installed record never causes implicit
+package discovery for the current model.
 
 ## Backend boundary
 

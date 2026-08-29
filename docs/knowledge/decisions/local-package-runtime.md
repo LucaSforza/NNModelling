@@ -4,24 +4,20 @@ status: accepted
 updated: 2026-08-29
 ---
 
-# Upstream Cordis and local external package runtime
+# Upstream Cordis package runtime
 
 ## Context
 
-The frontend currently depends on DeepSeek's Cordis fork even though
-NNModelling is not part of the DeepSeek harness. Its package loader also wraps
-Cordis with a second resource-lifecycle mechanism. Bundled packages work, but
-the product cannot install a stereotype package supplied by another author.
+NNModelling migrated from the DeepSeek Cordis fork to upstream Cordis and made
+Cordis Fibers the sole lifecycle owner for active package registrations, Lua
+rules and dependency leases. That runtime foundation remains current.
 
-The owner has accepted a complete first external-package flow and selected a
-local directory as its only installation source.
-
-The model-loading scope is refined by the accepted
-[model-scoped custom package decision](model-scoped-stereotype-packages.md):
-installed records remain durable package data, but opening a model activates
-only the exact model-local packages listed by that model's manifest, together
-with the immutable core set. The explicit installer behavior below is not an
-implicit model dependency mechanism.
+An intermediate product iteration added a visible local-directory installer
+and IndexedDB package ownership. The later accepted
+[model-scoped package decision](model-scoped-stereotype-packages.md) and
+[writable project workspace decision](project-workspaces-and-stereotype-authoring.md)
+supersede that ownership model: custom stereotypes now belong to the current
+project, while the global catalog contains only immutable core packages.
 
 ## Decision
 
@@ -34,56 +30,46 @@ implicit model dependency mechanism.
   owner of registry removal, Lua rule cleanup, and dependency lease release.
 - Keep bundled core packages mandatory, immutable, and automatically active at
   editor startup even when the diagram does not use them.
-- Install external packages only from a browser-selected local directory in
-  this release. Store validated immutable package bytes in IndexedDB by exact
-  ID and version; do not persist a directory handle or local path.
-- Preserve all package-relative files. An external package must provide valid
-  definition, Lua inference, and Python entrypoints and becomes eligible for
-  both editor inference and the package bundle.
-- Diagrams persist only exact package ID and version. Display name, bytes,
-  source, digest, and resolved static dependencies belong to the installed
-  catalog. The current redundant persisted `name` field is accepted on read,
-  ignored, and omitted on subsequent saves.
-- Multiple versions may be installed, but one Cordis context activates only
-  one version per ID. Static dependencies must resolve to exactly one already
-  available candidate during installation; ambiguous or missing resolutions
-  fail explicitly.
-- A valid installed external package activates immediately in the current
-  session and on demand in later sessions when selected or referenced by an
-  opened diagram.
-- A model load does not select packages from the installed catalog by display
-  name, package ID, or availability. Model custom packages must be declared in
-  the model manifest and supplied by its model-relative package directories;
-  their activation scope is replaced on model switch.
+- Preserve every package-relative file. A model-owned custom package provides
+  a valid definition, Lua inference and Python entrypoint and is eligible for
+  editor inference and the resolved backend package bundle.
+- Diagrams persist only exact package ID and version. Display metadata and
+  package bytes are resolved from immutable core resources or the current
+  project's declared package directory. Filesystem handles and absolute paths
+  are never persisted.
+- One Cordis context activates only one version per package ID. Static
+  dependencies resolve to exactly one core or current-project package;
+  ambiguous or missing resolutions fail explicitly.
+- A model load does not discover packages by display name, package ID, prior
+  installation or availability. Model custom packages must be declared in the
+  model manifest and supplied by its model-relative directories; their active
+  scope is replaced transactionally on model switch.
 - Fatal host/package/runtime diagnostics are structured browser state shown in
   the editor below Type errors and returned through the MCP proxy. A failed
-  external package affects its nodes and dependent graph region, while
+  model-owned package affects its nodes and dependent graph region, while
   unrelated regions continue to infer.
 - Cordis events, waterfall semantics, loader/HMR, and a general package registry
   or network installer are not part of this release.
 
 ## Consequences
 
-- Installed, active, and referenced packages are three distinct states with
-  separate owners.
-- Package installation needs a durable browser store, a composed catalog, an
-  activation coordinator, package-management UI, and transactional tests.
-- Project loading becomes package-aware but does not acquire graph authority.
-- The frontend package export seam must expose external resource bytes instead
-  of assuming bundled source modules.
-- A package remains installed when its activation fails, allowing the editor
-  and MCP to report and retry the exact failure without rereading the directory.
-- There is no automatic resolution choice when more than one installed package
-  satisfies a dependency. A later package-manager design may add an explicit
-  user choice without changing project references.
+- Core resource ownership, current-project resource ownership, active runtime
+  state and node references remain distinct. They are not collapsed into one
+  map or inferred from one another.
+- Project loading is package-aware but does not acquire graph authority.
+- The frontend package export seam exposes the complete resolved project
+  resource closure instead of assuming globally bundled source modules.
+- There is no automatic discovery or version choice outside the current model
+  manifest. Third-party acquisition requires a separate future design.
 
 ## Implementation
 
-The executable work breakdown is archived at
+The completed Cordis migration and lifecycle evidence is archived at
 [`../../archive/completed-plans/cordis-runtime-and-external-packages/plan.md`](../../archive/completed-plans/cordis-runtime-and-external-packages/plan.md).
 
-The plan is complete. The implemented contract is recorded in
-[`../contracts/package-type-system.md`](../contracts/package-type-system.md)
-and verified in the plan's T09 evidence, including the visible local-directory
-installer, IndexedDB reload behavior, exact on-demand activation, Lua
-inference, MCP parity, and deterministic external bundle resources.
+The current project ownership replacement is defined by
+[`../../plans/active/project-workspaces-and-stereotype-authoring/plan.md`](../../plans/active/project-workspaces-and-stereotype-authoring/plan.md).
+That initiative removes transitional installer/IndexedDB callers while
+preserving the Cordis lifecycle, Lua inference, diagnostics, MCP parity and
+deterministic bundle-resource contracts recorded in
+[`../contracts/package-type-system.md`](../contracts/package-type-system.md).

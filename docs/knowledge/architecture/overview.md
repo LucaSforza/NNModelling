@@ -46,9 +46,9 @@ Every frontend node persists only exact package ID and version. Definition
 metadata drives topology, parameters, presentation and dtype controls;
 package-owned Lua drives inference. A model JSON also persists its model
 manifest, whose relative `customPackages` entries are the complete model-owned
-package scope. External records retain immutable bytes and resolved dependency
-keys in IndexedDB, never in project JSON. The frontend contains no central
-package-ID inference switch.
+package scope. Custom resources live inside the writable project directory;
+filesystem handles and absolute paths never enter project JSON, MCP or backend
+payloads. The frontend contains no central package-ID inference switch.
 
 ## Backend boundary
 
@@ -64,6 +64,13 @@ That target makes package graphs the only backend format and places all
 remains the sole frontend semantic authority; PyTorch is never a type-
 inference fallback.
 
+Built-in and project-owned datasets share one declarative parameter and named
+tensor-slot contract. Project dataset archives travel separately from model
+packages, resolve through opaque ownership-scoped references and are imported
+only inside the isolated worker; FastAPI never executes project dataset Python.
+See the accepted
+[project-owned dataset decision](../decisions/project-owned-datasets.md).
+
 See [Remote training](remote-training.md), the [pairing contract](../contracts/pairing.md),
 and the [model-package contract](../contracts/model-package.md).
 
@@ -71,13 +78,15 @@ and the [model-package contract](../contracts/model-package.md).
 
 - `DiagramCore` owns every live graph mutation and snapshot.
 - Every frontend node has exact package identity and primitive parameter data.
-- Bundled packages activate during bootstrap; external package metadata is
-  durable and external activation is on demand after reload.
+- Bundled core packages activate during bootstrap; custom package resources are
+  owned by and loaded from the current writable project.
 - The active package scope is the immutable core set plus the exact custom
   package set declared by the current model manifest. Switching models removes
   the previous custom scope before exposing the new one.
 - A model custom package is loaded only from its validated model-relative
-  directory; an installed but undeclared package is not activated implicitly.
+  directory; an undeclared package is not discovered or activated implicitly.
+- Project datasets are likewise exhaustive manifest-owned resources; their
+  source and data paths cannot escape the project directory.
 - Type semantics come from activated package definitions and Lua rules.
 - Expected semantic errors, unresolved editor state and runtime faults remain
   distinct.

@@ -43,24 +43,29 @@ records only the NNModelling-owned integration boundary.
 - Browser RPC and the visible editor expose the same package-only graph and
   inference result.
 
-## Installed external packages
+## Project-owned custom packages
 
 - Bundled core records are loaded and activated at editor bootstrap. The
   runtime is ready, and the automatic `Input` node is created, only after all
   bundled packages activate successfully.
-- The visible Packages manager accepts one local directory, validates the
-  complete manifest/definition/Lua/Python resource closure, persists external
-  bytes in IndexedDB under exact `id@version`, and activates a successful
-  installation immediately.
-- Reload restores installed metadata without eagerly activating external
-  packages. Selecting or creating a node, or importing a diagram that names an
-  exact external identity, activates that package on demand.
-- The catalog retains helper resources and resolved dependency identities for
-  deterministic package-bundle export. The bundle contains the declared
-  `pytorch.py` and all package-relative helper files byte-for-byte.
-- Invalid directories are rejected before persistence. The editor and the
-  browser-backed MCP expose the same structured runtime diagnostics; a failed
-  package branch faults only its dependent graph region.
+- Custom stereotype packages live under the writable project directory and
+  are declared exhaustively by `manifest.customPackages`. They are never
+  installed into or discovered from a global browser catalog.
+- The visible Stereotypes manager lists immutable core packages and the current
+  project's exact custom set. Creating a stereotype writes its package
+  manifest, definition, Lua rule and PyTorch entrypoint inside the project,
+  updates the model manifest and stages the resulting package scope.
+- The project catalog retains every declared helper resource and exact resolved
+  dependency identity for deterministic package-bundle export. The bundle
+  contains `pytorch.py` and all package-relative helper files byte-for-byte.
+- Invalid authoring input, project directories or package scopes are rejected
+  transactionally. The editor and browser-backed MCP expose the same structured
+  runtime diagnostics; a failed package branch faults only its dependent graph
+  region.
+- The former local-directory installer and IndexedDB external-package ownership
+  path are superseded by the accepted
+  [writable project decision](../decisions/project-workspaces-and-stereotype-authoring.md)
+  and are scheduled for removal by its active implementation plan.
 
 ## Model-scoped package loading
 
@@ -68,7 +73,7 @@ records only the NNModelling-owned integration boundary.
   identity and a complete `customPackages` list. Each entry contains an exact
   package ID/version and a model-relative package directory.
 - The active editor scope is `core + current-model-custom`. Core packages are
-  automatically active; no undeclared installed package is searched or added
+  automatically active; no undeclared package is searched or added
   to the palette.
 - Model package manifests and paths are validated before `DiagramCore` commits
   the model. A failed model switch leaves the previous graph and custom scope

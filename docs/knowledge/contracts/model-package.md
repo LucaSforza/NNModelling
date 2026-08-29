@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-28
+updated: 2026-08-29
 ---
 
 # Portable model-package contract
@@ -37,24 +37,29 @@ wheel after checking job ownership; clients cannot provide filesystem paths.
 ## Editable model source manifest
 
 The editable package-graph source has a separate top-level `manifest` object.
-It identifies the model and declares its complete model-owned stereotype
-package set:
+Schema v2 identifies the model and declares its complete model-owned
+stereotype and dataset sets:
 
 ```json
 {
   "manifest": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "example.vae-mnist",
     "version": "0.1.0",
     "name": "Variational Autoencoder",
     "customPackages": [
       { "id": "example.vae.sampling", "version": "0.1.0", "path": "packages/sampling" }
+    ],
+    "customDatasets": [
+      { "id": "example.vae.images", "version": "0.1.0", "path": "datasets/images" }
     ]
   }
 }
 ```
 
-The list is model scope, not a global package library. Core packages are
+Schema v1 remains readable during the dataset migration and means
+`customDatasets: []`; the next successful write upgrades it to v2. The package
+list is model scope, not a global package library. Core packages are
 implicit and remain globally available. Paths are resolved only while opening
 the model and are never persisted as absolute paths or sent to the backend.
 The exporter resolves the listed package resources into the normal immutable
@@ -65,6 +70,14 @@ the resolved bytes include the current core plus model-custom closure (and any
 declared helper files). The model manifest remains source metadata; each bundle
 package retains its own package manifest, and no model-relative path is copied
 into the backend payload.
+
+The dataset list is likewise exhaustive project source ownership, but dataset
+resources are not embedded in the model wheel. A selected project dataset is
+validated and uploaded as a separate bounded content-addressed archive, while
+built-in datasets resolve through the backend descriptor catalog. Training
+jobs retain an opaque resolved dataset reference and exact identity/version/
+digest; inference wheels remain independent of every training dataset. See the
+[project-owned dataset decision](../decisions/project-owned-datasets.md).
 
 ## Public API
 
