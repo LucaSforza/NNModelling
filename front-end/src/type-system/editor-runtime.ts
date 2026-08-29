@@ -164,7 +164,6 @@ export class EditorTypeSystemRuntime {
 
   static async create(options: EditorTypeSystemRuntimeOptions = {}): Promise<EditorTypeSystemRuntime> {
     const bundled = options.bundled ?? await bundledCoreRecords()
-    const external = options.external ?? (options.store ? await options.store.list() : [])
     // Installed external records remain available to the package installer,
     // but are not part of the active editor scope until a model explicitly
     // owns them.
@@ -172,7 +171,6 @@ export class EditorTypeSystemRuntime {
     const selections: PackageSelection[] = catalog.records().map((record) => ({ resources: record.resources }))
     const host = await TypeSystemHost.create(selections)
     const runtime = new EditorTypeSystemRuntime(host, new PackageGraphScheduler(host), catalog, bundled, options.store)
-    void external
     await runtime.bootstrap()
     return runtime
   }
@@ -326,7 +324,12 @@ export async function resolveModelPackageRecords(
     const prefix = `${reference.path}/`
     const resources: Record<string, string | Uint8Array> = {}
     for (const [path, value] of Object.entries(bundle)) {
-      if (path.startsWith(prefix)) resources[path.slice(prefix.length)] = value
+      if (!path.startsWith(prefix)) continue
+      const relativePath = path.slice(prefix.length)
+      if (!isSafeModelResourcePath(relativePath)) {
+        throw new Error(`model package resource '${path}' escapes package directory`)
+      }
+      resources[relativePath] = value
     }
     const packageManifestValue = resources["manifest.json"]
     if (packageManifestValue === undefined) {
@@ -355,6 +358,11 @@ function decodeModelResource(value: string | Uint8Array): string {
 
 function missingResource(path: string): never {
   throw new Error(`model package resource '${path}' is missing`)
+}
+
+function isSafeModelResourcePath(path: string): boolean {
+  return path.length > 0 && !path.startsWith("/") && !path.includes("\\") &&
+    !path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
 }
 
 function toMetadata(record: InstalledPackageRecord | ReturnType<PackageCatalog["records"]>[number]): ActivePackageMetadata {
