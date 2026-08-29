@@ -1,7 +1,7 @@
 ---
 id: T03
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: runtime
 depends_on:

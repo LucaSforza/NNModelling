@@ -318,6 +318,15 @@ export class BrowserRPCHandler {
           throw new Error(`Unknown method: ${method}`);
       }
 
+      if (result instanceof Promise) {
+        void result.then((resolved) => this.sendResponse({ id, result: resolved })).catch((error) => {
+          this.sendResponse({
+            id,
+            error: { message: error instanceof Error ? error.message : String(error) },
+          });
+        });
+        return;
+      }
       this.sendResponse({ id, result });
     } catch (error) {
       this.sendResponse({
@@ -478,7 +487,7 @@ export class BrowserRPCHandler {
 
   // ── Mutation Handlers ───────────────────────────────────────────────
 
-  private handleCreateNode(params: Record<string, unknown>): Record<string, unknown> {
+  private handleCreateNode(params: Record<string, unknown>): Record<string, unknown> | Promise<Record<string, unknown>> {
     const position = params.position as { x: number; y: number } | undefined;
     const x = position?.x ?? 0;
     const y = position?.y ?? 0;
@@ -505,30 +514,37 @@ export class BrowserRPCHandler {
       if (metadata.definition.name !== packageSpec.name) {
         throw new Error(`Package name mismatch for ${packageSpec.id}: expected '${metadata.definition.name}'`);
       }
-      const beforeCount = this.diagram.nodes.length;
-      this.diagram.addPackageNode(
-        { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name },
-        metadata.definition.kind,
-        x,
-        y,
-        {
-          name: config.name as string | undefined,
-          color: (config.color as string | undefined) ?? metadata.definition.view.color,
-          width: (config.width as number | undefined) ?? metadata.definition.view.width,
-          height: (config.height as number | undefined) ?? metadata.definition.view.height,
-          params: (config.params as Record<string, unknown>) ?? {},
-          inputsCount: config.inputsCount as number | undefined,
-          parentId: config.parentId as string | undefined,
-        },
-      );
-      const added = this.diagram.nodes[beforeCount];
-      if (!added) throw new Error("Failed to create package node");
-      return {
-        nodeId: added.id,
-        name: added.data.name ?? packageSpec.name,
-        type: added.type ?? "custom",
-        package: added.data.package,
+      const identity = { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name };
+      const create = () => {
+        const beforeCount = this.diagram.nodes.length;
+        this.diagram.addPackageNode(
+          identity,
+          metadata.definition.kind,
+          x,
+          y,
+          {
+            name: config.name as string | undefined,
+            color: (config.color as string | undefined) ?? metadata.definition.view.color,
+            width: (config.width as number | undefined) ?? metadata.definition.view.width,
+            height: (config.height as number | undefined) ?? metadata.definition.view.height,
+            params: (config.params as Record<string, unknown>) ?? {},
+            inputsCount: config.inputsCount as number | undefined,
+            parentId: config.parentId as string | undefined,
+          },
+        );
+        const added = this.diagram.nodes[beforeCount];
+        if (!added) throw new Error("Failed to create package node");
+        return {
+          nodeId: added.id,
+          name: added.data.name ?? packageSpec.name,
+          type: added.type ?? "custom",
+          package: added.data.package,
+        };
       };
+      if (metadata.state === undefined || metadata.state === "active") return create();
+      return this.diagram.activatePackage(
+        identity,
+      ).then(create);
     }
 
     throw new Error("create_node requires package {id, version, name, kind}");

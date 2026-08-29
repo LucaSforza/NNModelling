@@ -1,7 +1,7 @@
 ---
 id: T08
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: transport
 depends_on:
@@ -98,4 +98,3 @@ git diff --check
 Return the RPC/MCP response additions, proof the server remains stateless, one
 external bundle manifest example without raw source in the report, backend-plan
 coordination notes, and exact test output.
-

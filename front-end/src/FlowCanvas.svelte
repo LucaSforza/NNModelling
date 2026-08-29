@@ -27,6 +27,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import Sidebar from "./components/Sidebar.svelte";
   import DockedGroup from "./components/DockedGroup.svelte";
   import TrainingSidebar from "./components/TrainingSidebar.svelte";
+  import PackageManager from "./components/PackageManager.svelte";
 
   const {
     getInternalNode,
@@ -101,6 +102,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   );
 
   let isSidebarOpen = $state(false);
+  let isPackageManagerOpen = $state(false);
   let activeMode = $state<"nodes" | "training">("nodes");
   let loadError = $state<string | null>(null);
   let layoutError = $state<string | null>(null);
@@ -463,6 +465,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         <button onclick={handleExportPng} class="toolbar-btn"
           >🖼️ Esporta PNG</button
         >
+        <button onclick={() => (isPackageManagerOpen = !isPackageManagerOpen)} class="toolbar-btn">
+          📦 Packages
+        </button>
         <button onclick={handleAddSubGraph} class="toolbar-btn"
           >📦 Aggiungi SubGraph</button
         >
@@ -549,6 +554,15 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       onClose={() => (activeMode = "nodes")}
     />
   {/if}
+  {#if isPackageManagerOpen}
+    <div class="package-manager-drawer">
+      <PackageManager
+        packages={diagram.packageCatalog}
+        onInstall={(files) => diagram.installLocalPackage(files)}
+        onRemove={(key) => diagram.removePackage(key)}
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -579,5 +593,19 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     color: #a00;
     font-size: 0.85rem;
     white-space: normal;
+  }
+
+  .package-manager-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 10;
+    width: min(560px, 100vw);
+    height: 100vh;
+    overflow: auto;
+    padding: 16px;
+    box-sizing: border-box;
+    background: #fff;
+    box-shadow: -4px 0 18px rgba(0, 0, 0, 0.16);
   }
 </style>

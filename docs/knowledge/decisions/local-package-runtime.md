@@ -68,10 +68,11 @@ local directory as its only installation source.
 
 ## Implementation
 
-The executable work breakdown is
-[`../../plans/active/cordis-runtime-and-external-packages/plan.md`](../../plans/active/cordis-runtime-and-external-packages/plan.md).
+The executable work breakdown is archived at
+[`../../archive/completed-plans/cordis-runtime-and-external-packages/plan.md`](../../archive/completed-plans/cordis-runtime-and-external-packages/plan.md).
 
-Until that plan is complete, the current bundled-only behavior in
+The plan is complete. The implemented contract is recorded in
 [`../contracts/package-type-system.md`](../contracts/package-type-system.md)
-remains the implemented contract.
-
+and verified in the plan's T09 evidence, including the visible local-directory
+installer, IndexedDB reload behavior, exact on-demand activation, Lua
+inference, MCP parity, and deterministic external bundle resources.

@@ -1,7 +1,7 @@
 ---
 id: T07
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: diagnostics
 depends_on:
@@ -95,4 +95,3 @@ git diff --check
 Return the diagnostic schema, occurrence/deduplication rules, failure-scope
 algorithm, screenshots or DOM assertions for panel placement, and exact test
 output.
-

@@ -1,7 +1,7 @@
 ---
 id: cordis-runtime-and-external-packages
 kind: plan
-status: ready
+status: complete
 updated: 2026-08-29
 areas:
   - architecture
@@ -364,4 +364,3 @@ required real-interface scenarios and the evidence to retain.
 - [Upstream core package manifest](https://github.com/cordiverse/cordis/blob/main/packages/core/package.json)
 - [Published `cordis` package](https://www.npmjs.com/package/cordis)
 - [Cordis primer](https://deepseek-harness.github.io/deepseek-harness/reference/cordis-primer)
-

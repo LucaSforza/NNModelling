@@ -139,11 +139,11 @@ Licensed under the GNU General Public License v3 or later.
     form.wheelAdapters = [];
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     const position = getSpawnPosition();
     if (packageSelection) {
       const definition = packageSelection.definition;
-      diagram.addPackageNode(packageIdentity(packageSelection), definition.kind, position.x, position.y, {
+      await diagram.addActivatedPackageNode(packageIdentity(packageSelection), definition.kind, position.x, position.y, {
         name: form.name,
         color: form.color,
         width: form.width,
@@ -155,8 +155,6 @@ Licensed under the GNU General Public License v3 or later.
       resetForm();
       return;
     }
-    return;
-    resetForm();
   }
 
   function handleManualUpdate() {

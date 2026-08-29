@@ -29,4 +29,35 @@ describe("BrowserRPCHandler package diagnostics", () => {
     expect(sent[1]?.result).toMatchObject({ packageRuntimeReady: false, packageRuntimeDiagnostics: diagram.packageRuntimeDiagnostics })
     expect(sent[0]?.result?.packageRuntimeDiagnostics).toStrictEqual(sent[1]?.result?.packageRuntimeDiagnostics)
   })
+
+  test("activates an installed exact package before asynchronous node creation", async () => {
+    const packageMetadata = {
+      id: "vendor.layer",
+      version: "1.0.0",
+      state: "installed",
+      definition: { name: "Vendor Layer", kind: "layer", view: { color: "#fff", width: 100, height: 60 }, parameters: {} },
+    }
+    const nodes: any[] = []
+    const diagram = {
+      nodes,
+      packageCatalog: [packageMetadata],
+      activatePackage: async () => { packageMetadata.state = "active" },
+      addPackageNode(identity: any, kind: string, x: number, y: number) {
+        nodes.push({ id: "created", type: "custom", position: { x, y }, data: { package: identity, name: identity.name, kind } })
+      },
+    } as any
+    const sent: Array<Record<string, unknown>> = []
+    const handler: any = new BrowserRPCHandler(diagram, "ws://test")
+    handler.ws = { readyState: 1, send(payload: string) { sent.push(JSON.parse(payload)) } }
+
+    handler.handleMessage({ data: JSON.stringify({
+      id: "create",
+      method: "create_node",
+      params: { package: { id: "vendor.layer", version: "1.0.0", name: "Vendor Layer", kind: "layer" }, position: { x: 10, y: 20 } },
+    }) })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(nodes).toHaveLength(1)
+    expect(sent[0]?.result).toMatchObject({ nodeId: "created", package: { id: "vendor.layer", version: "1.0.0" } })
+  })
 })

@@ -1,7 +1,7 @@
 ---
 id: T09
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: verification
 depends_on:
@@ -15,8 +15,7 @@ write_scope:
   - front-end/tests/fixtures/packages/
   - docs/knowledge/contracts/package-type-system.md
   - docs/knowledge/architecture/overview.md
-  - docs/plans/active/cordis-runtime-and-external-packages/
-  - docs/archive/plans/
+  - docs/archive/completed-plans/cordis-runtime-and-external-packages/
 ---
 
 # Verify the complete browser and MCP package flow
@@ -81,15 +80,15 @@ archive the completed plan without expanding scope.
 
 ## Acceptance criteria
 
-- [ ] All initiative acceptance criteria have current unit/integration or
+- [x] All initiative acceptance criteria have current unit/integration or
       real-interface evidence.
-- [ ] Valid external install, immediate use, reload, exact project reopen, Lua
+- [x] Valid external install, immediate use, reload, exact project reopen, Lua
       inference, bundle export, and MCP inspection work end to end.
-- [ ] Failure cases are transactional, visible, scoped, and consistent between
+- [x] Failure cases are transactional, visible, scoped, and consistent between
       editor and MCP.
-- [ ] Full frontend and MCP gates pass.
-- [ ] Knowledge describes implemented behavior, not the earlier plan.
-- [ ] Plan archive contains exact commands/results and unresolved external
+- [x] Full frontend and MCP gates pass.
+- [x] Knowledge describes implemented behavior, not the earlier plan.
+- [x] Plan archive contains exact commands/results and unresolved external
       blockers, if any.
 
 ## Validation
@@ -108,4 +107,3 @@ git status --short
 Return changed files grouped by ownership, exact command results, real browser
 and MCP evidence for every scenario, knowledge/archive updates, and any remaining
 blocker. Do not claim completion if a required scenario was skipped.
-

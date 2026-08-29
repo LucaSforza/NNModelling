@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-22
+updated: 2026-08-29
 ---
 
 # System architecture
@@ -23,26 +23,27 @@ lives under `docs2/`.
 ## Current frontend flow
 
 ```text
-bundled stereotype packages
+bundled packages + IndexedDB external records
         |
         v
-browser package catalog -> TypeSystemHost / Cordis -> isolated Lua inference
-        |                                             |
-        v                                             v
-DiagramCore graph <---------------------------- semantic type state
-        |
-        v
-visible editor and browser-backed MCP
+composed package catalog -> Cordis services/Fibers -> isolated Lua inference
+        |                                               |
+        v                                               v
+DiagramCore graph <------------------------------- semantic type state
+        |                                               |
+        +--> visible editor + Packages manager           |
+        +--> browser-backed MCP <------------------------+
 ```
 
 The browser is the only source of truth for a live diagram. The MCP server
 routes request/response RPC and must not mirror the graph, catalog or inferred
 types. See [Browser-backed MCP](browser-mcp.md).
 
-Every frontend node stores exact package ID, version and display name.
-Definition metadata drives topology, parameters, presentation and dtype
-controls; package-owned Lua drives inference. The frontend contains no central
-package-ID inference switch.
+Every frontend node persists only exact package ID and version. Definition
+metadata drives topology, parameters, presentation and dtype controls;
+package-owned Lua drives inference. External records retain immutable bytes and
+resolved dependency keys in IndexedDB, never in project JSON. The frontend
+contains no central package-ID inference switch.
 
 ## Backend boundary
 
@@ -65,9 +66,13 @@ and the [model-package contract](../contracts/model-package.md).
 
 - `DiagramCore` owns every live graph mutation and snapshot.
 - Every frontend node has exact package identity and primitive parameter data.
+- Bundled packages activate during bootstrap; external package metadata is
+  durable and external activation is on demand after reload.
 - Type semantics come from activated package definitions and Lua rules.
 - Expected semantic errors, unresolved editor state and runtime faults remain
   distinct.
+- The browser owns package diagnostics and MCP forwards them without a second
+  catalog or runtime state.
 - Join inputs retain `targetHandle` order.
 - Every edge connects endpoints in the same immediate containment scope.
 - Hidden children of collapsed subflows remain part of graph semantics.

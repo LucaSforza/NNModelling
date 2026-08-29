@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-22
+updated: 2026-08-29
 ---
 
 # Frontend package type-system contract
@@ -26,8 +26,10 @@ records only the NNModelling-owned integration boundary.
 ## Current frontend boundary
 
 - `DiagramCore` is the only authority for the live graph.
-- Every frontend node has exact `data.package = {id, version, name}` identity.
-  Display names never resolve packages.
+- Every frontend node has exact `data.package = {id, version}` project identity.
+  Display names are derived from the installed definition and never resolve
+  packages. Current imports may contain a redundant `name`; it is ignored and
+  omitted on the next save.
 - Bundled resources under `stereotype-packages/` provide one independently
   identified package per stereotype.
 - `TypeSystemHost` activates definitions and isolated Lua inference rules in
@@ -39,6 +41,25 @@ records only the NNModelling-owned integration boundary.
   `{value, position}` wrappers.
 - Browser RPC and the visible editor expose the same package-only graph and
   inference result.
+
+## Installed external packages
+
+- Bundled core records are loaded and activated at editor bootstrap. The
+  runtime is ready, and the automatic `Input` node is created, only after all
+  bundled packages activate successfully.
+- The visible Packages manager accepts one local directory, validates the
+  complete manifest/definition/Lua/Python resource closure, persists external
+  bytes in IndexedDB under exact `id@version`, and activates a successful
+  installation immediately.
+- Reload restores installed metadata without eagerly activating external
+  packages. Selecting or creating a node, or importing a diagram that names an
+  exact external identity, activates that package on demand.
+- The catalog retains helper resources and resolved dependency identities for
+  deterministic package-bundle export. The bundle contains the declared
+  `pytorch.py` and all package-relative helper files byte-for-byte.
+- Invalid directories are rejected before persistence. The editor and the
+  browser-backed MCP expose the same structured runtime diagnostics; a failed
+  package branch faults only its dependent graph region.
 
 ## Tensor and result model
 

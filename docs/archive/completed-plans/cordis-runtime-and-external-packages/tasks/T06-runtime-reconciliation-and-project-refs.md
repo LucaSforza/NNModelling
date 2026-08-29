@@ -1,7 +1,7 @@
 ---
 id: T06
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: integration
 depends_on:
@@ -106,4 +106,3 @@ git diff --check
 Return the state-transition table, project schema migration behavior, removal
 preconditions, exact test output, and any existing public API changed with its
 callers updated.
-

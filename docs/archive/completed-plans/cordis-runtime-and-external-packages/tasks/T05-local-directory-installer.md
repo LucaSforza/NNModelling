@@ -1,7 +1,7 @@
 ---
 id: T05
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: frontend-feature
 depends_on:

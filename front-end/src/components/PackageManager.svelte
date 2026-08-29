@@ -3,7 +3,7 @@
   import { readBrowserPackageDirectory, type InstallResult, type LocalPackageFile, type PackageIdentity } from "../type-system/packages/install/installer";
   import type { InstalledPackageRecord, PackageKey } from "../type-system/packages/types";
 
-  export type PackageManagerPackage = Pick<InstalledPackageRecord, "key" | "source" | "manifest" | "definition">;
+  export type PackageManagerPackage = Pick<InstalledPackageRecord, "key" | "source" | "definition">;
 
   interface Props {
     packages: readonly PackageManagerPackage[];

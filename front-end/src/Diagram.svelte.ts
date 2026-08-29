@@ -20,8 +20,9 @@ import { DiagramCore } from "./core/DiagramCore";
 import type { LayoutDirection } from "./layout/autoLayout";
 import type { GraphInferenceResult } from "./type-system/graph/types";
 import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
-import type { ActivePackageMetadata } from "./type-system/host";
-import type { InstallResult } from "./type-system/packages/install/installer";
+import type { InstallResult, LocalPackageFile } from "./type-system/packages/install/installer";
+import { IndexedDbInstalledPackageStore } from "./type-system/packages/installed/store";
+import type { PackageCatalogMetadata } from "./type-system/editor-runtime";
 import type { PackageKey } from "./type-system/packages/types";
 import type { PackageIdentity } from "./core/types";
 import {
@@ -38,11 +39,12 @@ export class Diagram extends DiagramCore {
   private reactiveLayoutDirection: LayoutDirection = $state("vertical");
   /** Sole editor inference result; it is always package-engine data. */
   public typeResult: GraphInferenceResult | null = $state.raw(null);
-  public packageCatalog: ActivePackageMetadata[] = $state.raw([]);
+  public packageCatalog: PackageCatalogMetadata[] = $state.raw([]);
   /** Reactive readiness and fatal diagnostics for the browser-owned runtime. */
   public packageRuntimeReady = $state(false);
   public packageRuntimeDiagnostics: PackageRuntimeDiagnostic[] = $state.raw([]);
   private packageTypeRuntime: EditorTypeSystemRuntime | null = null;
+  private packageStore: IndexedDbInstalledPackageStore | undefined;
   private readonly packageRuntimeReadyPromise: Promise<void>;
   private readonly diagnosticCollection = new PackageRuntimeDiagnosticCollection();
 
@@ -126,8 +128,9 @@ export class Diagram extends DiagramCore {
 
   private async initializePackageTypes(): Promise<void> {
     try {
-      this.packageTypeRuntime = await EditorTypeSystemRuntime.create();
-      this.packageCatalog = this.packageTypeRuntime.availablePackages();
+      this.packageStore = typeof indexedDB === "undefined" ? undefined : await IndexedDbInstalledPackageStore.open();
+      this.packageTypeRuntime = await EditorTypeSystemRuntime.create({ store: this.packageStore });
+      this.syncPackageCatalog();
       this.packageRuntimeReady = this.packageTypeRuntime.isReady();
       this.syncRuntimeDiagnostics();
       if (!this.packageRuntimeReady) {
@@ -184,7 +187,7 @@ export class Diagram extends DiagramCore {
       this.syncRuntimeDiagnostics();
       throw new Error(status.error ?? `package '${identity.id}@${identity.version}' activation failed`);
     }
-    this.packageCatalog = this.packageTypeRuntime.availablePackages();
+    this.syncPackageCatalog();
     this.syncRuntimeDiagnostics();
     this.refreshTypes();
   }
@@ -206,8 +209,19 @@ export class Diagram extends DiagramCore {
     await this.packageRuntimeReadyPromise;
     if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
     await this.packageTypeRuntime.install(result);
-    this.packageCatalog = this.packageTypeRuntime.availablePackages();
+    this.syncPackageCatalog();
     await this.activatePackage({ ...result.activationRequest, name: result.package.id });
+  }
+
+  /** Install, persist, and activate a package selected by the visible manager. */
+  public async installLocalPackage(files: readonly LocalPackageFile[]): Promise<InstallResult> {
+    await this.packageRuntimeReadyPromise;
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    const result = await this.packageTypeRuntime.installLocalPackage(files);
+    this.syncPackageCatalog();
+    this.syncRuntimeDiagnostics();
+    this.refreshTypes();
+    return result;
   }
 
   public async removePackage(key: PackageKey): Promise<void> {
@@ -219,8 +233,16 @@ export class Diagram extends DiagramCore {
         ? [`${identity.id}@${identity.version}` as PackageKey] : [];
     });
     await this.packageTypeRuntime.remove(key, referenced);
-    this.packageCatalog = this.packageTypeRuntime.availablePackages();
+    this.syncPackageCatalog();
     this.refreshTypes();
+  }
+
+  public get packageActivationStates() {
+    return this.packageTypeRuntime?.activationStates() ?? [];
+  }
+
+  private syncPackageCatalog(): void {
+    if (this.packageTypeRuntime) this.packageCatalog = this.packageTypeRuntime.availablePackages();
   }
 
   /** Reconcile exact package references before the single graph commit. */

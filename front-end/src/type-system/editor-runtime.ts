@@ -4,7 +4,7 @@ import { TypeSystemHost, type ActivePackageMetadata, type PackageSelection } fro
 import { bundledCoreRecords } from "./bundled/catalog"
 import { PackageCatalog, packageKey, packageRecordKey } from "./packages/catalog"
 import type { InstalledPackageStore } from "./packages/installed/store"
-import type { InstallResult } from "./packages/install/installer"
+import { installLocalPackage, type InstallResult, type LocalPackageFile } from "./packages/install/installer"
 import type { InstalledPackageRecord, PackageKey, PackageSource } from "./packages/types"
 import type { PackageIdentity } from "../core/types"
 
@@ -24,6 +24,12 @@ export type PackageActivationStatus = {
   readonly source: PackageSource
   readonly state: PackageActivationState
   readonly error?: string
+}
+
+export type PackageCatalogMetadata = ActivePackageMetadata & {
+  readonly key: PackageKey
+  readonly source: PackageSource
+  readonly state: PackageActivationState
 }
 
 export type PackageRuntimeDiagnostic = {
@@ -154,7 +160,18 @@ export class EditorTypeSystemRuntime {
 
   infer(snapshot: TypeGraphSnapshot): GraphInferenceResult { return this.scheduler.infer(snapshot) }
   packages(): ActivePackageMetadata[] { return this.host.activePackages() }
-  availablePackages(): ActivePackageMetadata[] { return this.catalog.records().map(toMetadata) }
+  availablePackages(): PackageCatalogMetadata[] {
+    return this.catalog.records().map((record) => {
+      const key = packageRecordKey(record as InstalledPackageRecord)
+      const status = this.coordinator.status(key)
+      return {
+        ...toMetadata(record),
+        key,
+        source: "source" in record ? record.source : "external",
+        state: status?.state ?? "installed",
+      }
+    })
+  }
   activationState(key: PackageKey): PackageActivationStatus | undefined { return this.coordinator.status(key) }
   activationStates(): readonly PackageActivationStatus[] { return this.coordinator.states() }
   isReady(): boolean { return this.bundled.every((record) => this.coordinator.status(record.key)?.state === "active") }
@@ -169,6 +186,13 @@ export class EditorTypeSystemRuntime {
     const external = [...this.catalog.records().filter((record) => "source" in record && record.source === "external" && record.key !== result.key), result.record]
     await this.rebuild(external.filter((record): record is InstalledPackageRecord => "source" in record))
     return this.activate(result.activationRequest, { retry: true })
+  }
+
+  /** Install and activate one browser-selected package directory. */
+  async installLocalPackage(files: readonly LocalPackageFile[]): Promise<InstallResult> {
+    const result = await installLocalPackage(files, { catalog: this.catalog, store: this.store })
+    if (result.status !== "rejected") await this.install(result)
+    return result
   }
 
   async remove(key: PackageKey, referencedKeys: readonly PackageKey[] = []): Promise<void> {
