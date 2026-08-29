@@ -59,7 +59,12 @@ implicit and remain globally available. Paths are resolved only while opening
 the model and are never persisted as absolute paths or sent to the backend.
 The exporter resolves the listed package resources into the normal immutable
 package bundle; therefore model-local `pytorch.py` files are transported with
-the other package entrypoints.
+the other package entrypoints. The training sidebar reads the active
+`EditorTypeSystemRuntime` catalog through its read-only package export seam, so
+the resolved bytes include the current core plus model-custom closure (and any
+declared helper files). The model manifest remains source metadata; each bundle
+package retains its own package manifest, and no model-relative path is copied
+into the backend payload.
 
 ## Public API
 
