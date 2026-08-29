@@ -23,10 +23,10 @@ describe("Cordis package activation contract", () => {
     contexts.push(context)
     const loader = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.service-check", {}, "rule")]))
 
-    await expect(loader.load("test.service-check")).rejects.toThrow("packageRegistry")
+    await expect(loader.load(ref("test.service-check"))).rejects.toThrow("packageRegistry")
 
     new PackageRegistryService(context)
-    await expect(loader.load("test.service-check")).rejects.toThrow("luaInference")
+    await expect(loader.load(ref("test.service-check"))).rejects.toThrow("luaInference")
   })
 
   test("activates static dependencies first and disposes them in reverse order", async () => {
@@ -36,7 +36,7 @@ describe("Cordis package activation contract", () => {
       bundle("test.app", { "test.dep": "1.0.0" }, "app-rule"),
     ], events)
 
-    const lease = await loader.load("test.app")
+    const lease = await loader.load(ref("test.app"))
 
     expect(context.registry.size).toBe(2)
     expect(events).toEqual(["load:test.dep", "load:test.app"])
@@ -62,8 +62,8 @@ describe("Cordis package activation contract", () => {
     const events: string[] = []
     const { loader, registry } = createLoader([bundle("test.shared", {}, "shared-rule")], events)
 
-    const first = await loader.load("test.shared")
-    const second = await loader.load("test.shared")
+    const first = await loader.load(ref("test.shared"))
+    const second = await loader.load(ref("test.shared"))
 
     expect(events).toEqual(["load:test.shared"])
     expect(registry.has("test.shared")).toBe(true)
@@ -130,7 +130,7 @@ describe("Cordis package activation contract", () => {
       const events: string[] = []
       const { loader, registry } = createLoader(scenario.bundles, events, scenario.name === "Lua load failure" ? scenario.failingId : undefined)
 
-      await expect(loader.load(scenario.failingId)).rejects.toThrow(scenario.expected)
+      await expect(loader.load(ref(scenario.failingId))).rejects.toThrow(scenario.expected)
       expect([...registry.values()]).toHaveLength(0)
       expect(events.filter(event => event.startsWith("dispose:"))).toHaveLength(scenario.expectedDisposals)
     }
@@ -146,8 +146,8 @@ describe("Cordis package activation contract", () => {
     const first = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.duplicate", {}, "first-rule", "1.0.0")]))
     const second = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.duplicate", {}, "second-rule", "2.0.0")]))
 
-    await first.load("test.duplicate")
-    await expect(second.load("test.duplicate")).rejects.toThrow("already active")
+    await first.load(ref("test.duplicate"))
+    await expect(second.load(ref("test.duplicate", "2.0.0"))).rejects.toThrow("already active")
 
     expect(registry.get("test.duplicate")?.packageInfo.manifest.version).toBe("1.0.0")
     expect(events).toEqual(["load:test.duplicate", "load:test.duplicate", "dispose:test.duplicate"])
@@ -213,4 +213,8 @@ function bundle(
     parameters: {},
   }
   return { manifest, definition, resources: {} }
+}
+
+function ref(id: string, version = "1.0.0") {
+  return { id, version, name: id }
 }

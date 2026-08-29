@@ -24,7 +24,7 @@ import { type Node, type Edge } from "@xyflow/svelte";
 import { checkValidConnection as coreCheckValidConnection } from "./validation";
 import { validateContainmentGraph } from "./containment";
 import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
-import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig, PackageIdentity } from "./types";
+import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig, PackageIdentity, PersistedPackageIdentity } from "./types";
 import {
   edgeWithRoutePoints,
   normalizeEditableEdge,
@@ -47,8 +47,7 @@ function hasPackageIdentity(node: unknown): boolean {
   if (!pkg || typeof pkg !== "object") return false;
   const identity = pkg as Record<string, unknown>;
   return typeof identity.id === "string" &&
-    typeof identity.version === "string" &&
-    typeof identity.name === "string";
+    typeof identity.version === "string";
 }
 
 /** Legacy parameter wrappers are intentionally rejected, never converted. */
@@ -65,12 +64,47 @@ function hasLegacyParameterWrapper(value: unknown): boolean {
 
 function validatePackageNode(node: unknown): void {
   if (!hasPackageIdentity(node)) {
-    throw new Error("Legacy frontend node rejected: data.package must contain id, version and name");
+    throw new Error("Package node rejected: data.package must contain exact id and version");
   }
   const data = (node as { data: Record<string, unknown> }).data;
   if (hasLegacyParameterWrapper(data.params)) {
     throw new Error("Legacy frontend parameters rejected: values must be primitive package values");
   }
+}
+
+/** Keep legacy display metadata readable without allowing it to resolve a package. */
+function canonicalizePackageNode(node: Node): Node {
+  const data = node.data as Record<string, unknown>;
+  const packageValue = data.package as Record<string, unknown>;
+  const persisted: PersistedPackageIdentity = {
+    id: packageValue.id as string,
+    version: packageValue.version as string,
+  };
+  const legacyName = typeof packageValue.name === "string" ? packageValue.name : undefined;
+  return {
+    ...node,
+    data: {
+      ...data,
+      // Keep the in-memory name for old UI callers. It is stripped by export.
+      package: { ...persisted, name: legacyName ?? (typeof data.name === "string" ? data.name : persisted.id) },
+      ...(typeof data.name === "string" ? {} : { name: legacyName ?? persisted.id }),
+    },
+  };
+}
+
+function persistedNode(node: Node): Node {
+  const data = node.data as Record<string, unknown>;
+  const packageValue = data.package;
+  if (!packageValue || typeof packageValue !== "object") return node;
+  const identity = packageValue as Record<string, unknown>;
+  if (typeof identity.id !== "string" || typeof identity.version !== "string") return node;
+  return {
+    ...node,
+    data: {
+      ...data,
+      package: { id: identity.id, version: identity.version },
+    },
+  };
 }
 
 function normalizedLayoutDirection(value: unknown): LayoutDirection {
@@ -245,7 +279,7 @@ export class DiagramCore {
     config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[] },
   ): Node {
     this._captureUndoState();
-    const finalName = config?.name?.trim() || identity.name;
+    const finalName = config?.name?.trim() || identity.name || identity.id;
     const newNode: Node = {
       id: crypto.randomUUID(),
       type: "custom",
@@ -254,7 +288,7 @@ export class DiagramCore {
       height: config?.height ?? (kind === "input" ? 30 : 60),
       parentId: config?.parentId,
       data: {
-        package: { ...identity },
+        package: { ...identity, name: identity.name || identity.id },
         name: finalName,
         color: config?.color ?? "#ffffff",
         params: clonePackageParams(config?.params),
@@ -316,8 +350,8 @@ export class DiagramCore {
       height: config?.height,
       parentId: config?.parentId,
       data: {
-        package: { ...identity },
-        name: config?.name?.trim() || identity.name,
+        package: { ...identity, name: identity.name || identity.id },
+        name: config?.name?.trim() || identity.name || identity.id,
         color: config?.color ?? "#4779c4",
         params: clonePackageParams(config?.params),
         inputsCount: config?.inputsCount ?? 2,
@@ -344,7 +378,7 @@ export class DiagramCore {
     },
   ): Node {
     this._captureUndoState();
-    const name = config?.name?.trim() || identity.name;
+    const name = config?.name?.trim() || identity.name || identity.id;
     const width = config?.width ?? 180;
     const height = config?.height ?? 100;
     const node: Node = {
@@ -355,7 +389,7 @@ export class DiagramCore {
       height,
       parentId: config?.parentId,
       data: {
-        package: { ...identity },
+        package: { ...identity, name: identity.name || identity.id },
         name,
         label: name,
         color: config?.color ?? "#4779c4",
@@ -388,8 +422,8 @@ export class DiagramCore {
   ): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
     if (!node) return;
-    if (!identity.id || !identity.version || !identity.name) {
-      throw new Error("package identity requires id, version and name");
+    if (!identity.id || !identity.version) {
+      throw new Error("package identity requires exact id and version");
     }
     if (hasLegacyParameterWrapper(config.params)) {
       throw new Error("package parameters must use primitive values");
@@ -399,7 +433,7 @@ export class DiagramCore {
       if (candidate.id !== id) return candidate;
       const data = {
         ...candidate.data,
-        package: { ...identity },
+        package: { ...identity, name: identity.name || identity.id },
         name: config.name ?? candidate.data.name,
         label: kind === "subflow" ? (config.name ?? candidate.data.label ?? candidate.data.name) : candidate.data.label,
         color: config.color ?? candidate.data.color,
@@ -915,7 +949,9 @@ export class DiagramCore {
 
   public exportToJson(): string {
     const exportData = {
-      nodes: this.nodes,
+      // Display names are definition metadata, not project identity. The
+      // explicit projection also keeps reactive proxies out of persistence.
+      nodes: this.nodes.map(persistedNode),
       // Persist the canonical edge contract even when a caller constructed a
       // legacy edge directly instead of going through addEdge/import.
       edges: this.edges.map((edge) => normalizeEditableEdge(edge)),
@@ -924,7 +960,8 @@ export class DiagramCore {
     return JSON.stringify(exportData, null, 2);
   }
 
-  public importFromJson(jsonString: string): boolean {
+  /** Parse and validate a project without changing the live graph. */
+  public parseProjectJson(jsonString: string): DiagramCoreSnapshot | undefined {
     try {
       const parsedData: unknown = JSON.parse(jsonString);
       if (
@@ -942,6 +979,7 @@ export class DiagramCore {
         layoutDirection?: unknown;
       };
       imported.nodes.forEach(validatePackageNode);
+      const normalizedNodes = imported.nodes.map((node) => canonicalizePackageNode(node as Node));
       // Normalize edge handle IDs before validation, but keep the imported
       // graph entirely off-state until containment validation succeeds.
       const normalizedEdges = imported.edges.map((candidate) => {
@@ -958,19 +996,31 @@ export class DiagramCore {
         throw new Error(containment.reason);
       }
       const importedDirection = normalizedLayoutDirection(imported.layoutDirection);
-
-      this._captureUndoState();
-
-      // No callbacks needed — SubflowNode uses getContext to access diagram.
-      this.nodes = imported.nodes as Node[];
-      this.edges = normalizedEdges as Edge[];
-      this.layoutDirection = importedDirection;
+      return {
+        nodes: normalizedNodes,
+        edges: normalizedEdges as Edge[],
+        layoutDirection: importedDirection,
+      };
     } catch (error) {
       console.error("Errore durante l'importazione del modello:", error);
-      return false;
+      return undefined;
     }
+  }
 
+  /** Commit one already parsed project through the sole graph authority. */
+  public commitProject(snapshot: DiagramCoreSnapshot): boolean {
+    this._assertNotNotifying();
+    this._captureUndoState();
+    this.nodes = [...snapshot.nodes];
+    this.edges = snapshot.edges.map((edge) => normalizeEditableEdge(edge));
+    this.layoutDirection = normalizedLayoutDirection(snapshot.layoutDirection);
     this.notifyGraphChanged();
     return true;
+  }
+
+  /** Synchronous compatibility path; async package reconciliation uses Diagram.importProjectJson. */
+  public importFromJson(jsonString: string): boolean {
+    const parsed = this.parseProjectJson(jsonString);
+    return parsed === undefined ? false : this.commitProject(parsed);
   }
 }

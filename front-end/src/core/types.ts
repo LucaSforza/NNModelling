@@ -42,11 +42,21 @@ export interface NodeConfig {
   params?: Record<string, unknown>;
 }
 
-/** Stable identity persisted by nodes created through the new package host. */
+/** Runtime identity carried by editor nodes.
+ *
+ * `name` is retained in memory for existing editor callers, but it is not a
+ * persisted identity (DiagramCore strips it at the project boundary).
+ */
 export interface PackageIdentity {
   id: string;
   version: string;
   name: string;
+}
+
+/** Canonical project identity. Display metadata is deliberately absent. */
+export interface PersistedPackageIdentity {
+  id: string;
+  version: string;
 }
 
 export interface JoinNodeConfig extends NodeConfig {

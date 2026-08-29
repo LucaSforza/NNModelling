@@ -7,6 +7,7 @@ import { PackageLoader } from "./packages/loader"
 import { LuaInferenceService, PackageRegistryService } from "./packages/cordis-services"
 import type { PackageResourceMap, PackageResourceProvider } from "./packages/types"
 import type { Definition } from "./packages/types"
+import type { PackageIdentity } from "../core/types"
 
 export type PackageSelection = {
   readonly resources: PackageResourceProvider | PackageResourceMap
@@ -57,22 +58,24 @@ export class TypeSystemHost {
     return new TypeSystemHost(await PackageCatalog.fromResources(packages))
   }
 
-  async activate(packageId: string): Promise<void> {
+  async activate(identity: PackageIdentity): Promise<void> {
     this.assertActive()
-    await this.loader.load(packageId)
+    await this.loader.load(identity)
   }
 
-  isActive(packageId: string): boolean {
-    return this.registry.has(packageId)
+  isActive(identity: PackageIdentity): boolean {
+    return this.registry.get(identity.id)?.packageInfo.manifest.version === identity.version
   }
 
   /** Read-only metadata used by the graph adapter; inference remains package-owned. */
-  packageDefinition(packageId: string): Definition | undefined {
-    return this.registry.get(packageId)?.packageInfo.definition
+  packageDefinition(identity: PackageIdentity): Definition | undefined {
+    const active = this.registry.get(identity.id)
+    return active?.packageInfo.manifest.version === identity.version ? active.packageInfo.definition : undefined
   }
 
-  packageVersion(packageId: string): string | undefined {
-    return this.registry.get(packageId)?.packageInfo.manifest.version
+  packageVersion(identity: PackageIdentity): string | undefined {
+    const active = this.registry.get(identity.id)
+    return active?.packageInfo.manifest.version === identity.version ? active.packageInfo.manifest.version : undefined
   }
 
   activePackages(): ActivePackageMetadata[] {
@@ -88,12 +91,12 @@ export class TypeSystemHost {
    * tensor. Required-but-missing parameters stop before Lua invocation.
    */
   inferForEditor(
-    packageId: string,
+    identity: PackageIdentity,
     context: TypeContext,
     parameters: Readonly<Record<string, unknown>>,
   ): EditorInferenceState {
     this.assertActive()
-    const active = this.registry.get(packageId)
+    const active = this.registry.get(identity.id)
     if (active) {
       const missingParameters = Object.entries(active.packageInfo.definition.parameters)
         .filter(([name, definition]) => parameters[name] === undefined && definition.default === undefined)
@@ -102,12 +105,12 @@ export class TypeSystemHost {
     }
 
     try {
-      return this.loader.infer(packageId, context, parameters)
+      return this.loader.infer(identity, context, parameters)
     } catch (cause) {
       return {
         status: "fault",
         fault: {
-          packageId,
+          packageId: identity.id,
           phase: "inference",
           message: cause instanceof Error ? cause.message : String(cause),
         },

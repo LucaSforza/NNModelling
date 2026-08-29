@@ -285,7 +285,7 @@ export function handleLoadModel(
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const fileContent = event.target?.result as string;
       if (!fileContent) {
         onError?.(`Il file "${file.name}" è vuoto.`);
@@ -293,7 +293,8 @@ export function handleLoadModel(
         return;
       }
 
-      if (diagram.importFromJson(fileContent)) {
+      const imported = await diagram.importProjectJson(fileContent);
+      if (imported) {
         onLoad?.();
       } else {
         onError?.(

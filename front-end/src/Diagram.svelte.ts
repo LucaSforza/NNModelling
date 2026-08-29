@@ -21,6 +21,9 @@ import type { LayoutDirection } from "./layout/autoLayout";
 import type { GraphInferenceResult } from "./type-system/graph/types";
 import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
 import type { ActivePackageMetadata } from "./type-system/host";
+import type { InstallResult } from "./type-system/packages/install/installer";
+import type { PackageKey } from "./type-system/packages/types";
+import type { PackageIdentity } from "./core/types";
 
 export const DIAGRAM_CONTEXT_KEY = Symbol("diagram-context");
 
@@ -32,6 +35,7 @@ export class Diagram extends DiagramCore {
   public typeResult: GraphInferenceResult | null = $state.raw(null);
   public packageCatalog: ActivePackageMetadata[] = $state.raw([]);
   private packageTypeRuntime: EditorTypeSystemRuntime | null = null;
+  private readonly packageRuntimeReady: Promise<void>;
 
   public override get layoutDirection(): LayoutDirection {
     return this.reactiveLayoutDirection;
@@ -58,7 +62,7 @@ export class Diagram extends DiagramCore {
     });
 
     this.refreshTypes();
-    void this.initializePackageTypes();
+    this.packageRuntimeReady = this.initializePackageTypes();
   }
 
   /** Recompute tensor annotations and diagnostics for the current graph. */
@@ -89,8 +93,8 @@ export class Diagram extends DiagramCore {
   private async initializePackageTypes(): Promise<void> {
     try {
       this.packageTypeRuntime = await EditorTypeSystemRuntime.create();
-      this.packageCatalog = this.packageTypeRuntime.packages();
-      if (this.nodes.length === 0) {
+      this.packageCatalog = this.packageTypeRuntime.availablePackages();
+      if (this.nodes.length === 0 && this.packageTypeRuntime.isReady()) {
         const input = this.packageCatalog.find((metadata) => metadata.definition.kind === "input");
         if (input) {
           const centerX = (typeof window !== "undefined" ? window.innerWidth : 1024) / 2 - 15;
@@ -110,5 +114,71 @@ export class Diagram extends DiagramCore {
     } catch (error) {
       console.error("[Diagram] package type-system initialization failed:", error);
     }
+  }
+
+  /** Wait for bootstrap before package-aware project operations. */
+  public waitForPackageRuntime(): Promise<void> { return this.packageRuntimeReady; }
+
+  /** Activate one exact package identity before a package node is created. */
+  public async activatePackage(identity: PackageIdentity): Promise<void> {
+    await this.packageRuntimeReady;
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    const status = await this.packageTypeRuntime.activate(identity);
+    if (status.state === "failed") throw new Error(status.error ?? `package '${identity.id}@${identity.version}' activation failed`);
+    this.packageCatalog = this.packageTypeRuntime.availablePackages();
+    this.refreshTypes();
+  }
+
+  /** Node creation seam used by package-manager/sidebar integrations. */
+  public async addActivatedPackageNode(
+    identity: PackageIdentity,
+    kind: Parameters<DiagramCore["addPackageNode"]>[1],
+    x: number,
+    y: number,
+    config?: Parameters<DiagramCore["addPackageNode"]>[4],
+  ) {
+    await this.activatePackage(identity);
+    return this.addPackageNode(identity, kind, x, y, config);
+  }
+
+  /** Persist an installer result, activate its exact package, and refresh metadata. */
+  public async installPackage(result: Extract<InstallResult, { status: "installed" | "already-installed" }>): Promise<void> {
+    await this.packageRuntimeReady;
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    await this.packageTypeRuntime.install(result);
+    this.packageCatalog = this.packageTypeRuntime.availablePackages();
+    await this.activatePackage({ ...result.activationRequest, name: result.package.id });
+  }
+
+  public async removePackage(key: PackageKey): Promise<void> {
+    await this.packageRuntimeReady;
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    const referenced = this.nodes.flatMap((node) => {
+      const identity = node.data?.package as { id?: unknown; version?: unknown } | undefined;
+      return typeof identity?.id === "string" && typeof identity.version === "string"
+        ? [`${identity.id}@${identity.version}` as PackageKey] : [];
+    });
+    await this.packageTypeRuntime.remove(key, referenced);
+    this.packageCatalog = this.packageTypeRuntime.availablePackages();
+    this.refreshTypes();
+  }
+
+  /** Reconcile exact package references before the single graph commit. */
+  public async importProjectJson(jsonString: string): Promise<boolean> {
+    const parsed = this.parseProjectJson(jsonString);
+    if (!parsed) return false;
+    await this.packageRuntimeReady;
+    if (this.packageTypeRuntime) {
+      const identities = parsed.nodes.flatMap((node) => {
+        const identity = node.data?.package as { id?: unknown; version?: unknown; name?: unknown } | undefined;
+        return typeof identity?.id === "string" && typeof identity.version === "string"
+          ? [{ id: identity.id, version: identity.version, ...(typeof identity.name === "string" ? { name: identity.name } : {}) }]
+          : [];
+      });
+      await this.packageTypeRuntime.reconcile(identities);
+    }
+    this.commitProject(parsed);
+    this.refreshTypes();
+    return true;
   }
 }

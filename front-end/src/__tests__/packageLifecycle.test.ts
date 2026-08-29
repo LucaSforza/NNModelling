@@ -16,15 +16,15 @@ describe("public package lifecycle", () => {
       selection("test.lifecycle-app", { "test.lifecycle-dependency": "1.0.0" }, identityLua),
     ])
 
-    await host.activate("test.lifecycle-app")
+    await host.activate(ref("test.lifecycle-app"))
 
     expect(host.activePackages().map(({ id }) => id)).toEqual([
       "test.lifecycle-dependency",
       "test.lifecycle-app",
     ])
-    expect(host.isActive("test.lifecycle-dependency")).toBe(true)
-    expect(host.isActive("test.lifecycle-app")).toBe(true)
-    expect(host.inferForEditor("test.lifecycle-app", {
+    expect(host.isActive(ref("test.lifecycle-dependency"))).toBe(true)
+    expect(host.isActive(ref("test.lifecycle-app"))).toBe(true)
+    expect(host.inferForEditor(ref("test.lifecycle-app"), {
       kind: "layer",
       inputs: [{ shape: ["B", 4], dtype: "float32" }],
     }, {})).toEqual({ status: "success", output: { shape: ["B", 4], dtype: "float32" } })
@@ -33,15 +33,15 @@ describe("public package lifecycle", () => {
     await host.dispose()
 
     expect(host.activePackages()).toEqual([])
-    expect(host.isActive("test.lifecycle-dependency")).toBe(false)
-    expect(host.isActive("test.lifecycle-app")).toBe(false)
+    expect(host.isActive(ref("test.lifecycle-dependency"))).toBe(false)
+    expect(host.isActive(ref("test.lifecycle-app"))).toBe(false)
   })
 
   test("keeps semantic incompatibility as an error and Lua exceptions as a fault", async () => {
     const host = await createHost([selection("test.faulting", {}, throwingLua)])
-    await host.activate("test.faulting")
+    await host.activate(ref("test.faulting"))
 
-    expect(host.inferForEditor("test.faulting", {
+    expect(host.inferForEditor(ref("test.faulting"), {
       kind: "input",
       inputs: [],
     }, {})).toEqual({
@@ -49,7 +49,7 @@ describe("public package lifecycle", () => {
       message: "package 'test.faulting' requires layer",
     })
 
-    const fault = host.inferForEditor("test.faulting", {
+    const fault = host.inferForEditor(ref("test.faulting"), {
       kind: "layer",
       inputs: [{ shape: ["B", 4], dtype: "float32" }],
     }, {})
@@ -67,11 +67,11 @@ describe("public package lifecycle", () => {
       "test.not-installed": "1.0.0",
     }, identityLua)])
 
-    await expect(host.activate("test.missing-runtime-dependency")).rejects.toThrow(
+    await expect(host.activate(ref("test.missing-runtime-dependency"))).rejects.toThrow(
       "static dependency 'test.not-installed' is missing or incompatible",
     )
     expect(host.activePackages()).toEqual([])
-    expect(host.isActive("test.missing-runtime-dependency")).toBe(false)
+    expect(host.isActive(ref("test.missing-runtime-dependency"))).toBe(false)
   })
 })
 
@@ -80,6 +80,8 @@ async function createHost(packages: readonly PackageSelection[]): Promise<TypeSy
   hosts.push(host)
   return host
 }
+
+function ref(id: string, version = "1.0.0") { return { id, version, name: id } }
 
 function selection(
   id: string,

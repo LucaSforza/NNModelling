@@ -23,10 +23,10 @@ describe("new package type-system input slice", () => {
   test("activates core.input through Cordis and adapts its Lua result", async () => {
     const host = await TypeSystemHost.create([coreInputPackage])
     hosts.push(host)
-    await host.activate("core.input")
+    await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
-    expect(host.isActive("core.input")).toBe(true)
-    expect(host.inferForEditor("core.input", { kind: "input", inputs: [] }, {
+    expect(host.isActive({ id: "core.input", version: "0.1.0", name: "Input" })).toBe(true)
+    expect(host.inferForEditor({ id: "core.input", version: "0.1.0", name: "Input" }, { kind: "input", inputs: [] }, {
       shape: ["B", 3, 32, 32],
       dtype: "float16",
     })).toEqual({
@@ -35,15 +35,15 @@ describe("new package type-system input slice", () => {
     })
 
     await host.dispose()
-    expect(host.isActive("core.input")).toBe(false)
+    expect(host.isActive({ id: "core.input", version: "0.1.0", name: "Input" })).toBe(false)
   })
 
   test("uses the MNIST-sized default shape when shape is omitted", async () => {
     const host = await TypeSystemHost.create([coreInputPackage])
     hosts.push(host)
-    await host.activate("core.input")
+    await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
-    expect(host.inferForEditor("core.input", { kind: "input", inputs: [] }, { dtype: "float32" })).toEqual({
+    expect(host.inferForEditor({ id: "core.input", version: "0.1.0", name: "Input" }, { kind: "input", inputs: [] }, { dtype: "float32" })).toEqual({
       status: "success",
       output: { shape: ["B", 28, 28], dtype: "float32" },
     })
@@ -57,9 +57,9 @@ describe("new package type-system input slice", () => {
       },
     }])
     hosts.push(host)
-    await host.activate("core.input")
+    await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
-    const result = host.inferForEditor("core.input", { kind: "input", inputs: [] }, {
+    const result = host.inferForEditor({ id: "core.input", version: "0.1.0", name: "Input" }, { kind: "input", inputs: [] }, {
       shape: ["B", 8],
       dtype: "float32",
     })
@@ -79,8 +79,8 @@ describe("new package type-system input slice", () => {
     }])
     hosts.push(host)
 
-    await expect(host.activate("core.input")).rejects.toThrow("activation failed")
-    expect(host.isActive("core.input")).toBe(false)
+    await expect(host.activate({ id: "core.input", version: "0.1.0", name: "Input" })).rejects.toThrow("activation failed")
+    expect(host.isActive({ id: "core.input", version: "0.1.0", name: "Input" })).toBe(false)
   })
 
   test.each(["input-symbolic.json", "input-default-dtype.json"])(

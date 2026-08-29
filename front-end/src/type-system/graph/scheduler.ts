@@ -40,7 +40,7 @@ export class PackageGraphScheduler {
   private trainingRoles(snapshot: TypeGraphSnapshot, topLevel: readonly Node[], terminals: readonly string[]) {
     const kindOf = (node: Node): string | undefined => {
       const identity = packageIdentity(node)
-      return identity ? this.host.packageDefinition(identity.id)?.kind : undefined
+      return identity ? this.host.packageDefinition(identity)?.kind : undefined
     }
     const topLevelIds = new Set(topLevel.map(node => node.id))
     const predictionTerminals = terminals.filter(id => kindOf(topLevel.find(node => node.id === id)!) === "output")
@@ -139,10 +139,8 @@ export class PackageGraphScheduler {
   ): GraphNodeResult {
     const identity = packageIdentity(node)
     if (!identity) return { status: "unresolved", reason: "node has no versioned package identity" }
-    if (!this.host.isActive(identity.id)) return { status: "unresolved", reason: `package '${identity.id}' is not active` }
-    const version = this.host.packageVersion(identity.id)
-    if (version !== identity.version) return { status: "unresolved", reason: `package '${identity.id}' version '${identity.version}' is not active` }
-    const definition = this.host.packageDefinition(identity.id)
+    if (!this.host.isActive(identity)) return { status: "unresolved", reason: `package '${identity.id}@${identity.version}' is not active` }
+    const definition = this.host.packageDefinition(identity)
     if (!definition) return { status: "unresolved", reason: `package '${identity.id}' has no definition` }
 
     const nodeEdges = snapshot.edges.filter((edge) => scopeIds.has(edge.source) && scopeIds.has(edge.target))
@@ -180,6 +178,6 @@ export class PackageGraphScheduler {
         },
       }
     }
-    return this.host.inferForEditor(identity.id, context, nodeParameters(node))
+    return this.host.inferForEditor(identity, context, nodeParameters(node))
   }
 }
