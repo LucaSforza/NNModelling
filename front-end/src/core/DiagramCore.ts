@@ -24,7 +24,7 @@ import { type Node, type Edge } from "@xyflow/svelte";
 import { checkValidConnection as coreCheckValidConnection } from "./validation";
 import { validateContainmentGraph } from "./containment";
 import { computeAutoLayout, type LayoutDirection } from "../layout/autoLayout";
-import type { DiagramCoreSnapshot, NodeConfig, JoinNodeConfig, PackageIdentity, PersistedPackageIdentity } from "./types";
+import { parseModelManifest, type DiagramCoreSnapshot, type ModelManifest, type NodeConfig, type JoinNodeConfig, type PackageIdentity, type PersistedPackageIdentity } from "./types";
 import {
   edgeWithRoutePoints,
   normalizeEditableEdge,
@@ -138,6 +138,14 @@ export class DiagramCore {
   // before use (by the Diagram constructor chain calling initStereotypes).
   declare public nodes: Node[];
   declare public edges: Edge[];
+  /** Metadata for the currently loaded package-native model. */
+  public modelManifest: ModelManifest = {
+    schemaVersion: 1,
+    id: "model.untitled",
+    version: "0.1.0",
+    name: "Untitled model",
+    customPackages: [],
+  };
   private _layoutDirection: LayoutDirection = "vertical";
 
   public get layoutDirection(): LayoutDirection {
@@ -898,16 +906,19 @@ export class DiagramCore {
       // so undo/redo changes the renderer's route state in both directions.
       edges: this.edges.map((edge) => normalizeEditableEdge(edge)),
       layoutDirection: this.layoutDirection,
+      manifest: structuredClone(this.modelManifest),
     };
   }
 
   public restoreSnapshot(snapshot: DiagramCoreSnapshot): void {
     this._assertNotNotifying();
+    const manifest = parseModelManifest(snapshot.manifest);
     this.nodes = [...snapshot.nodes];
     this.edges = snapshot.edges.map((edge) => normalizeEditableEdge(edge));
     this.layoutDirection = normalizedLayoutDirection(
       (snapshot as DiagramCoreSnapshot & { layoutDirection?: unknown }).layoutDirection,
     );
+    this.modelManifest = manifest;
     this.notifyGraphChanged();
   }
 
@@ -956,6 +967,7 @@ export class DiagramCore {
       // legacy edge directly instead of going through addEdge/import.
       edges: this.edges.map((edge) => normalizeEditableEdge(edge)),
       layoutDirection: this.layoutDirection,
+      manifest: this.modelManifest,
     };
     return JSON.stringify(exportData, null, 2);
   }
@@ -977,7 +989,9 @@ export class DiagramCore {
         nodes: unknown[];
         edges: unknown[];
         layoutDirection?: unknown;
+        manifest?: unknown;
       };
+      const manifest = parseModelManifest(imported.manifest);
       imported.nodes.forEach(validatePackageNode);
       const normalizedNodes = imported.nodes.map((node) => canonicalizePackageNode(node as Node));
       // Normalize edge handle IDs before validation, but keep the imported
@@ -1000,6 +1014,7 @@ export class DiagramCore {
         nodes: normalizedNodes,
         edges: normalizedEdges as Edge[],
         layoutDirection: importedDirection,
+        manifest,
       };
     } catch (error) {
       console.error("Errore durante l'importazione del modello:", error);
@@ -1010,10 +1025,12 @@ export class DiagramCore {
   /** Commit one already parsed project through the sole graph authority. */
   public commitProject(snapshot: DiagramCoreSnapshot): boolean {
     this._assertNotNotifying();
+    const manifest = parseModelManifest(snapshot.manifest);
     this._captureUndoState();
     this.nodes = [...snapshot.nodes];
     this.edges = snapshot.edges.map((edge) => normalizeEditableEdge(edge));
     this.layoutDirection = normalizedLayoutDirection(snapshot.layoutDirection);
+    this.modelManifest = manifest;
     this.notifyGraphChanged();
     return true;
   }
