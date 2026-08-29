@@ -13,7 +13,7 @@ uv sync
 uv run python classify.py /absolute/path/to/digit.png
 ```
 
-The installed wheel exposes `nnm_resnet_mnist_reference.Model`; the example
+The installed wheel exposes `nnm_resnet_mnist.Model`; the example
 loads it with `Model()` and calls its public `predict` method. Images should
 contain one grayscale digit; ordinary PNG or JPEG files are accepted and
 resized to 28x28 by the wheel's declared image adapter.
