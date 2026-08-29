@@ -16,6 +16,13 @@ the product cannot install a stereotype package supplied by another author.
 The owner has accepted a complete first external-package flow and selected a
 local directory as its only installation source.
 
+The model-loading scope is refined by the accepted
+[model-scoped custom package decision](model-scoped-stereotype-packages.md):
+installed records remain durable package data, but opening a model activates
+only the exact model-local packages listed by that model's manifest, together
+with the immutable core set. The explicit installer behavior below is not an
+implicit model dependency mechanism.
+
 ## Decision
 
 - Use upstream `cordiverse/cordis`, published as `cordis`, pinned exactly to
@@ -44,6 +51,10 @@ local directory as its only installation source.
 - A valid installed external package activates immediately in the current
   session and on demand in later sessions when selected or referenced by an
   opened diagram.
+- A model load does not select packages from the installed catalog by display
+  name, package ID, or availability. Model custom packages must be declared in
+  the model manifest and supplied by its model-relative package directories;
+  their activation scope is replaced on model switch.
 - Fatal host/package/runtime diagnostics are structured browser state shown in
   the editor below Type errors and returned through the MCP proxy. A failed
   external package affects its nodes and dependent graph region, while

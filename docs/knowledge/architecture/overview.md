@@ -15,24 +15,27 @@ lives under `docs2/`.
 | Area | Responsibility | State authority |
 | --- | --- | --- |
 | `front-end/` | Svelte editor, graph mutations, package catalog, Lua type inference and browser RPC | Browser `DiagramCore` |
-| `stereotype-packages/` | Independently identified definitions, Lua inference and future PyTorch entrypoints | Package manifest and resources |
+| `stereotype-packages/` | Globally shared core definitions, Lua inference and PyTorch entrypoints | Core package manifests and resources |
 | `mcp-server/` | Thin proxy to the selected browser tab | No diagram or type state |
 | `converted/` | Package compiler/runtime, authenticated API, scheduler and worker controller | Valkey job state and backend stores |
-| `examples/` | Package-format editable diagrams and historical compiled fixtures | Format-specific fixtures |
+| `examples/` | Editable model diagrams and model-owned package resources | Model manifest and bundle resources |
 
 ## Current frontend flow
 
 ```text
-bundled packages + IndexedDB external records
-        |
-        v
-composed package catalog -> Cordis services/Fibers -> isolated Lua inference
-        |                                               |
-        v                                               v
-DiagramCore graph <------------------------------- semantic type state
-        |                                               |
-        +--> visible editor + Packages manager           |
-        +--> browser-backed MCP <------------------------+
+core package records ────────────────┐
+                                     ├─> staged model package scope
+model manifest + local package dirs ─┘       = core + current custom packages
+                                                   |
+                                                   v
+                                      Cordis services/Fibers + Lua inference
+                                                   |
+                                                   v
+                                      DiagramCore graph + semantic type state
+                                                   |
+                                      ┌────────────┴────────────┐
+                                      v                         v
+                              visible editor + MCP       backend bundle export
 ```
 
 The browser is the only source of truth for a live diagram. The MCP server
@@ -41,9 +44,11 @@ types. See [Browser-backed MCP](browser-mcp.md).
 
 Every frontend node persists only exact package ID and version. Definition
 metadata drives topology, parameters, presentation and dtype controls;
-package-owned Lua drives inference. External records retain immutable bytes and
-resolved dependency keys in IndexedDB, never in project JSON. The frontend
-contains no central package-ID inference switch.
+package-owned Lua drives inference. A model JSON also persists its model
+manifest, whose relative `customPackages` entries are the complete model-owned
+package scope. External records retain immutable bytes and resolved dependency
+keys in IndexedDB, never in project JSON. The frontend contains no central
+package-ID inference switch.
 
 ## Backend boundary
 
@@ -68,6 +73,11 @@ and the [model-package contract](../contracts/model-package.md).
 - Every frontend node has exact package identity and primitive parameter data.
 - Bundled packages activate during bootstrap; external package metadata is
   durable and external activation is on demand after reload.
+- The active package scope is the immutable core set plus the exact custom
+  package set declared by the current model manifest. Switching models removes
+  the previous custom scope before exposing the new one.
+- A model custom package is loaded only from its validated model-relative
+  directory; an installed but undeclared package is not activated implicitly.
 - Type semantics come from activated package definitions and Lua rules.
 - Expected semantic errors, unresolved editor state and runtime faults remain
   distinct.

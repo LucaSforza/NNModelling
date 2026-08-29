@@ -31,7 +31,8 @@ records only the NNModelling-owned integration boundary.
   packages. Current imports may contain a redundant `name`; it is ignored and
   omitted on the next save.
 - Bundled resources under `stereotype-packages/` provide one independently
-  identified package per stereotype.
+  identified core package per stereotype. Model-owned packages are supplied by
+  the current model manifest and are not part of this global core catalog.
 - `TypeSystemHost` activates definitions and isolated Lua inference rules in
   the browser. Production inference never invokes Python or the reference
   repository.
@@ -60,6 +61,23 @@ records only the NNModelling-owned integration boundary.
 - Invalid directories are rejected before persistence. The editor and the
   browser-backed MCP expose the same structured runtime diagnostics; a failed
   package branch faults only its dependent graph region.
+
+## Model-scoped package loading
+
+- A package-native model JSON has a required top-level `manifest` with model
+  identity and a complete `customPackages` list. Each entry contains an exact
+  package ID/version and a model-relative package directory.
+- The active editor scope is `core + current-model-custom`. Core packages are
+  automatically active; no undeclared installed package is searched or added
+  to the palette.
+- Model package manifests and paths are validated before `DiagramCore` commits
+  the model. A failed model switch leaves the previous graph and custom scope
+  unchanged. A successful switch disposes the previous custom fibers,
+  registrations and runtime diagnostics.
+- The backend bundle resolves model-relative resources before transport and
+  includes each package's declared Python entrypoint and complete helper-file
+  closure. The backend never receives a filesystem path from the model
+  manifest.
 
 ## Tensor and result model
 

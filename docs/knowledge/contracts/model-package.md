@@ -34,6 +34,33 @@ The manifest records package name, version, relative wheel path, SHA-256
 digest, and adapter specification. The backend streams the server-selected
 wheel after checking job ownership; clients cannot provide filesystem paths.
 
+## Editable model source manifest
+
+The editable package-graph source has a separate top-level `manifest` object.
+It identifies the model and declares its complete model-owned stereotype
+package set:
+
+```json
+{
+  "manifest": {
+    "schemaVersion": 1,
+    "id": "example.vae-mnist",
+    "version": "0.1.0",
+    "name": "Variational Autoencoder",
+    "customPackages": [
+      { "id": "example.vae.sampling", "version": "0.1.0", "path": "packages/sampling" }
+    ]
+  }
+}
+```
+
+The list is model scope, not a global package library. Core packages are
+implicit and remain globally available. Paths are resolved only while opening
+the model and are never persisted as absolute paths or sent to the backend.
+The exporter resolves the listed package resources into the normal immutable
+package bundle; therefore model-local `pytorch.py` files are transported with
+the other package entrypoints.
+
 ## Public API
 
 ```python
