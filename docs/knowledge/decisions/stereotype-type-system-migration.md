@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: implemented
-updated: 2026-08-22
+updated: 2026-08-29
 ---
 
 # Package type-system cutover
@@ -52,16 +52,15 @@ integration.
 
 ## Current package policy
 
-The working product uses bundled packages. The existing lifecycle and lease
-model should be retained while it is useful, but it is not a mandate to add a
-package manager or more lifecycle machinery.
+The implemented product still uses bundled packages. A later accepted decision
+now defines the migration to upstream Cordis and complete local-directory
+installation for external packages. See
+[`local-package-runtime.md`](local-package-runtime.md) for that future contract
+and its executable plan.
 
-Future NNModelling versions should be able to obtain trusted stereotype
-packages published by other people on GitHub. Discovery, download, integrity,
-trust, version selection and installation need evidence-driven design when
-that work starts. For now, external installation, dependency solving,
-lockfiles, provenance, hot reload and Python sandboxing are temporary
-non-goals.
+Remote discovery, download, marketplaces, a general dependency solver,
+lockfiles and hot reload remain non-goals. This document continues to describe
+the completed package type-system cutover until the external-package plan lands.
 
 ## Backend boundary
 
