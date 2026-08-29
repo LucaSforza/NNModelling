@@ -97,3 +97,33 @@ Return a resource-ownership table mapping every acquire operation to its Fiber
 effect, the removed duplicate cleanup paths, exact test output, and any public
 Cordis API limitation encountered.
 
+## Evidence
+
+| Acquire operation | Fiber owner/effect | Disposal order |
+| --- | --- | --- |
+| Static dependency `PackageLease` | Parent package Fiber dependency effect | Reverse dependency acquisition order |
+| `LoadedInferenceRule` from `LuaInferenceService` | Same package Fiber Lua effect | After registry removal, before dependency leases |
+| Active registry entry | Same package Fiber registry effect | First during Fiber unwind |
+
+The loader no longer keeps dependency arrays, loaded-rule disposers, registry
+unregister callbacks, or package Fiber disposers in a second cleanup stack.
+Host disposal asks the loader to dispose active Fibers before disposing the root
+context. Services are mounted through `PackageRegistryService` and
+`LuaInferenceService`, and loader checks use public `Context.get` directly;
+Cordis `inject`, events, waterfall, loader, and HMR APIs are not used.
+
+Validation run on 2026-08-29:
+
+```text
+pnpm --dir front-end test -- --run src/__tests__/cordisMigration.test.ts src/__tests__/packageLifecycle.test.ts
+Test Files 20 passed (20); Tests 139 passed (139)
+
+pnpm --dir front-end exec vitest run src/__tests__/cordisMigration.test.ts src/__tests__/packageLifecycle.test.ts src/__tests__/packageTypeGraph.test.ts src/__tests__/packageStandardLibrary.test.ts
+Test Files 4 passed (4); Tests 18 passed (18)
+
+pnpm --dir front-end check
+svelte-check found 0 errors and 9 warnings in 4 files
+
+git diff --check
+clean
+```

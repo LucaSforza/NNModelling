@@ -3,9 +3,8 @@ import { Context } from "cordis"
 import type { TensorType } from "./tensor-type"
 import type { TypeContext } from "./type-inference"
 import { PackageCatalog } from "./packages/catalog"
-import { PackageLoader, type PackageLease } from "./packages/loader"
-import { LuaPackageInferenceRuntime } from "./packages/lua-runtime"
-import { PackageRegistry } from "./packages/registry"
+import { PackageLoader } from "./packages/loader"
+import { LuaInferenceService, PackageRegistryService } from "./packages/cordis-services"
 import type { PackageResourceMap, PackageResourceProvider } from "./packages/types"
 import type { Definition } from "./packages/types"
 
@@ -38,18 +37,20 @@ export type EditorInferenceState =
 /** Frontend owner of Cordis, package leases, and Lua inference capability. */
 export class TypeSystemHost {
   private readonly context = new Context()
-  private readonly registry = new PackageRegistry()
+  private readonly registry: PackageRegistryService
   private readonly loader: PackageLoader
-  private readonly leases: PackageLease[] = []
   private disposed = false
 
   private constructor(catalog: PackageCatalog) {
-    this.loader = new PackageLoader(
-      this.context,
-      catalog,
-      this.registry,
-      new LuaPackageInferenceRuntime(),
-    )
+    new PackageRegistryService(this.context)
+    new LuaInferenceService(this.context)
+    const registry = this.context.get("packageRegistry", true)
+    const luaInference = this.context.get("luaInference", true)
+    if (!(registry instanceof PackageRegistryService) || !(luaInference instanceof LuaInferenceService)) {
+      throw new Error("type-system host requires its Cordis services")
+    }
+    this.registry = registry
+    this.loader = new PackageLoader(this.context, catalog)
   }
 
   static async create(packages: readonly PackageSelection[]): Promise<TypeSystemHost> {
@@ -58,7 +59,7 @@ export class TypeSystemHost {
 
   async activate(packageId: string): Promise<void> {
     this.assertActive()
-    this.leases.push(await this.loader.load(packageId))
+    await this.loader.load(packageId)
   }
 
   isActive(packageId: string): boolean {
@@ -117,7 +118,7 @@ export class TypeSystemHost {
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
-    for (const lease of this.leases.reverse()) await lease.dispose()
+    await this.loader.dispose()
     await this.context.fiber.dispose()
   }
 

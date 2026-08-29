@@ -2,8 +2,8 @@ import { Context } from "cordis"
 import { afterEach, describe, expect, test } from "vitest"
 
 import { PackageCatalog } from "../type-system/packages/catalog"
+import { LuaInferenceService, PackageRegistryService } from "../type-system/packages/cordis-services"
 import { PackageLoader } from "../type-system/packages/loader"
-import { PackageRegistry } from "../type-system/packages/registry"
 import type {
   InferenceRule,
   InferenceRuntime,
@@ -18,15 +18,27 @@ afterEach(async () => {
 })
 
 describe("Cordis package activation contract", () => {
+  test("fails activation when a required host service is absent", async () => {
+    const context = new Context()
+    contexts.push(context)
+    const loader = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.service-check", {}, "rule")]))
+
+    await expect(loader.load("test.service-check")).rejects.toThrow("packageRegistry")
+
+    new PackageRegistryService(context)
+    await expect(loader.load("test.service-check")).rejects.toThrow("luaInference")
+  })
+
   test("activates static dependencies first and disposes them in reverse order", async () => {
     const events: string[] = []
-    const { loader, registry } = createLoader([
+    const { loader, registry, context } = createLoader([
       bundle("test.dep", {}, "dep-rule"),
       bundle("test.app", { "test.dep": "1.0.0" }, "app-rule"),
     ], events)
 
     const lease = await loader.load("test.app")
 
+    expect(context.registry.size).toBe(2)
     expect(events).toEqual(["load:test.dep", "load:test.app"])
     expect([...registry.values()].map(({ packageInfo }) => packageInfo.manifest.id)).toEqual([
       "test.dep",
@@ -43,6 +55,7 @@ describe("Cordis package activation contract", () => {
     ])
     expect(registry.has("test.dep")).toBe(false)
     expect(registry.has("test.app")).toBe(false)
+    expect(context.registry.size).toBe(0)
   })
 
   test("shares one loaded rule across leases and releases it once", async () => {
@@ -126,10 +139,12 @@ describe("Cordis package activation contract", () => {
   test("disposes a loaded rule when registry activation rejects a duplicate ID", async () => {
     const context = new Context()
     contexts.push(context)
-    const registry = new PackageRegistry()
+    new PackageRegistryService(context)
     const events: string[] = []
-    const first = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.duplicate", {}, "first-rule", "1.0.0")]), registry, runtime(events))
-    const second = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.duplicate", {}, "second-rule", "2.0.0")]), registry, runtime(events))
+    new LuaInferenceService(context, runtime(events))
+    const registry = context.packageRegistry
+    const first = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.duplicate", {}, "first-rule", "1.0.0")]))
+    const second = new PackageLoader(context, PackageCatalog.fromBundles([bundle("test.duplicate", {}, "second-rule", "2.0.0")]))
 
     await first.load("test.duplicate")
     await expect(second.load("test.duplicate")).rejects.toThrow("already active")
@@ -146,14 +161,14 @@ function createLoader(
 ) {
   const context = new Context()
   contexts.push(context)
-  const registry = new PackageRegistry()
+  new PackageRegistryService(context)
+  const registry = context.packageRegistry
   const loader = new PackageLoader(
     context,
     PackageCatalog.fromBundles(bundles),
-    registry,
-    runtime(events, failingId),
   )
-  return { loader, registry }
+  new LuaInferenceService(context, runtime(events, failingId))
+  return { loader, registry, context }
 }
 
 function runtime(events: string[], failingId?: string): InferenceRuntime {
