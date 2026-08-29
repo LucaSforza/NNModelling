@@ -13,12 +13,12 @@ importers:
       '@dagrejs/dagre':
         specifier: ^3.1.1
         version: 3.1.1
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.1
-        version: 4.0.1
       '@xyflow/svelte':
         specifier: ^1.5.2
         version: 1.6.1(svelte@5.56.4)
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8
       html-to-image:
         specifier: ^1.11.13
         version: 1.11.13
@@ -95,21 +95,6 @@ packages:
 
   '@dagrejs/graphlib@4.0.5':
     resolution: {integrity: sha512-7xrBTqIts3o+PMUZX97wSc+7TUbW+/rULzGNCTP6yooNVDXbzw4Wutg/H/xOutTB/c/k0YqOAavgPh4/Zk9PFA==}
-
-  '@deepseek-ai/cordis@4.0.1':
-    resolution: {integrity: sha512-YBdskTU2Po1kru3GgcUWUbkTsPMA9LkSQDAY8rBkFJeajdgcQad3QPJZE26JyK99Xb6HaASvoXg2DSUTeN/0Nw==}
-    hasBin: true
-    peerDependencies:
-      '@deepseek-ai/cordis-plugin-include': ^1.0.6
-      '@deepseek-ai/cordis-plugin-loader': ^1.0.2
-    peerDependenciesMeta:
-      '@deepseek-ai/cordis-plugin-include':
-        optional: true
-      '@deepseek-ai/cordis-plugin-loader':
-        optional: true
-
-  '@deepseek-ai/cosmokit@1.8.2':
-    resolution: {integrity: sha512-muBOKtSrUKU5m/xpq8ZXWL6hQ/jgd4PhU2PqH97bcxIiLEJfNwZOGQEx4t/aS/GgxRAR+ra9pMHPMtTHU4sqqA==}
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -607,9 +592,24 @@ packages:
     resolution: {integrity: sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==}
     engines: {node: '>= 0.6'}
 
+  cordis@4.0.0-rc.8:
+    resolution: {integrity: sha512-vXaYK6XZJlIFTnODp4Rd973Qnd/gm3cwFzWsMTaeu6cQQheA7N+aA0GqHRNl0cFIrxMXWU8dst1ZXHlUQvfyRw==}
+    hasBin: true
+    peerDependencies:
+      '@cordisjs/plugin-include': ^1.0.4
+      '@cordisjs/plugin-loader': ^1.0.0-rc.5
+    peerDependenciesMeta:
+      '@cordisjs/plugin-include':
+        optional: true
+      '@cordisjs/plugin-loader':
+        optional: true
+
   cors@2.8.6:
     resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
     engines: {node: '>= 0.10'}
+
+  cosmokit@1.8.1:
+    resolution: {integrity: sha512-PDBv4l90xZKrUsZ0vtoycgZpO/j4iFsqJXrAxsyBDsnQRI7ZMJXIjgDJsKNjd5L8jnVnnlrDCdhkFbTncgCVjQ==}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -1315,13 +1315,6 @@ snapshots:
 
   '@dagrejs/graphlib@4.0.5': {}
 
-  '@deepseek-ai/cordis@4.0.1':
-    dependencies:
-      '@deepseek-ai/cosmokit': 1.8.2
-      '@standard-schema/spec': 1.1.0
-
-  '@deepseek-ai/cosmokit@1.8.2': {}
-
   '@emnapi/core@1.11.1':
     dependencies:
       '@emnapi/wasi-threads': 1.2.2
@@ -1732,10 +1725,17 @@ snapshots:
 
   cookie@0.7.2: {}
 
+  cordis@4.0.0-rc.8:
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      cosmokit: 1.8.1
+
   cors@2.8.6:
     dependencies:
       object-assign: 4.1.1
       vary: 1.1.2
+
+  cosmokit@1.8.1: {}
 
   cross-spawn@7.0.6:
     dependencies:

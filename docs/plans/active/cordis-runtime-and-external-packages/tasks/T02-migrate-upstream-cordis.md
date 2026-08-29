@@ -1,7 +1,7 @@
 ---
 id: T02
 kind: task
-status: ready
+status: complete
 plan: ../plan.md
 role: dependency-migration
 depends_on:
@@ -14,6 +14,7 @@ write_scope:
   - front-end/pnpm-lock.yaml
   - front-end/src/type-system/host.ts
   - front-end/src/type-system/packages/loader.ts
+  - front-end/src/__tests__/cordisMigration.test.ts
   - front-end/tests/differential/oracle-adapter.ts
 ---
 
@@ -62,12 +63,12 @@ with a failing test; do not start T03.
 
 ## Acceptance criteria
 
-- [ ] `@deepseek-ai/cordis` has zero repository matches outside archived
+- [x] `@deepseek-ai/cordis` has zero repository matches outside archived
       evidence that intentionally names the old dependency.
-- [ ] `cordis@4.0.0-rc.8` is the only Cordis runtime in the relevant pnpm graph.
-- [ ] T01 passes unchanged under upstream Cordis.
-- [ ] Frontend checking and selected differential tests pass.
-- [ ] No lifecycle refactor appears in the diff.
+- [x] `cordis@4.0.0-rc.8` is the only Cordis runtime in the relevant pnpm graph.
+- [x] T01 passes unchanged under upstream Cordis.
+- [x] Frontend checking and selected differential tests pass.
+- [x] No lifecycle refactor appears in the diff.
 
 ## Validation
 
@@ -82,9 +83,40 @@ git diff --check
 Use the repository's actual differential test selector if the shown Vitest
 selector is not how that suite is wired; report the exact replacement command.
 
+## Execution evidence (2026-08-29)
+
+- Pre-migration T01 gate: `pnpm --dir front-end exec vitest run src/__tests__/cordisMigration.test.ts src/__tests__/packageLifecycle.test.ts`
+  passed exactly: `Test Files  2 passed (2)` and `Tests  7 passed (7)`.
+- An initial strict-scope migration attempt (before the authorized test-import
+  extension) failed before API assertions:
+  `Error: Cannot find package '@deepseek-ai/cordis' imported from
+  /home/softdream/Programming/gits/NNModelling/front-end/src/__tests__/cordisMigration.test.ts`.
+  `packageLifecycle.test.ts` still ran (`Tests  3 passed (3)`). This was caused
+  by the T01 test import being outside the original strict scope, not by an
+  upstream Cordis API incompatibility; those changes were rolled back.
+- With the test import explicitly authorized in scope, migrated all five
+  `Context` imports to `cordis`, pinned `"cordis": "4.0.0-rc.8"`, and removed
+  fork/peer lock entries. `pnpm --dir front-end install --frozen-lockfile`
+  reported `- @deepseek-ai/cordis 4.0.1` and `+ cordis 4.0.0-rc.8`.
+- Post-rollback T01 gate: `pnpm --dir front-end exec vitest run
+  src/__tests__/cordisMigration.test.ts src/__tests__/packageLifecycle.test.ts`
+  passed exactly: `Test Files  2 passed (2)` and `Tests  7 passed (7)`.
+- Frontend check: `pnpm --dir front-end check` exited 0 with `0 errors` and 9
+  pre-existing warnings.
+- Real differential selector:
+  `pnpm --dir front-end exec vitest run
+  src/__tests__/modelConformance.test.ts
+  src/__tests__/differentialGraphFuzz.test.ts` passed exactly: `Test Files  2
+  passed (2)`, `Tests  5 passed (5)`.
+- Dependency proof: `pnpm --dir front-end why cordis` reports only
+  `cordis 4.0.0-rc.8` under `@nnmodelling/front-end`; FFF search finds no
+  `@deepseek-ai/cordis` outside intentional plan/evidence text.
+- `git diff --check` passes. The diff contains only T02 manifest/import/lockfile
+  changes plus this evidence record; no lifecycle refactor appears. T03 is
+  unblocked.
+
 ## Required handoff
 
 Return dependency and import changes, lockfile proof, before/after T01 results,
 the selected differential result, and a statement that T03 is or is not
 unblocked.
-

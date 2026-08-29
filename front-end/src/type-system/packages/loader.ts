@@ -1,4 +1,4 @@
-import type { Context } from "@deepseek-ai/cordis"
+import type { Context } from "cordis"
 
 import { PackageCatalog } from "./catalog"
 import { PackageRegistry } from "./registry"

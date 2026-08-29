@@ -1,4 +1,4 @@
-import { Context } from "@deepseek-ai/cordis"
+import { Context } from "cordis"
 import { afterEach, describe, expect, test } from "vitest"
 
 import { PackageCatalog } from "../type-system/packages/catalog"

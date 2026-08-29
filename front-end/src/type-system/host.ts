@@ -1,4 +1,4 @@
-import { Context } from "@deepseek-ai/cordis"
+import { Context } from "cordis"
 
 import type { TensorType } from "./tensor-type"
 import type { TypeContext } from "./type-inference"
