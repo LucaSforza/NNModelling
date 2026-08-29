@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { describe, expect, test } from "vitest"
+import { parseModelManifest } from "../core/types"
 
 import type { ModelInferenceRequest, ProtocolResponse } from "../../tests/differential/protocol"
 
@@ -19,6 +20,32 @@ const models = [
 ] as const
 
 describe("model semantic conformance", () => {
+  test.each([
+    ["resnet", {
+      schemaVersion: 1,
+      id: "example.resnet-mnist",
+      version: "0.1.0",
+      name: "ResNet",
+      customPackages: [],
+    }],
+    ["vae", {
+      schemaVersion: 1,
+      id: "example.vae-mnist",
+      version: "0.1.0",
+      name: "Variational Autoencoder",
+      description: "MNIST variational autoencoder",
+      customPackages: [
+        { id: "example.vae.sampling", version: "0.1.0", path: "packages/sampling" },
+        { id: "example.vae.kl-divergence", version: "0.1.0", path: "packages/kl-divergence" },
+      ],
+    }],
+  ])("parses %s model manifest deterministically", (_model, manifest) => {
+    const first = parseModelManifest(manifest)
+    const second = parseModelManifest(JSON.parse(JSON.stringify(manifest)))
+    expect(first).toEqual(manifest)
+    expect(second).toEqual(first)
+  })
+
   test.each(models)("candidate matches pinned oracle for %s", async (modelId, expectedShape, expectedDtype) => {
     const request = JSON.parse(await readFile(resolve(differentialRoot, "models", `${modelId}.json`), "utf8")) as ModelInferenceRequest
     const [candidate, oracle] = await Promise.all([
