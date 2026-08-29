@@ -4,6 +4,8 @@ import type { PackageExportInfo } from "../type-system/packages/types"
 import type { Edge, Node } from "@xyflow/svelte"
 import { bundledCorePackages } from "../type-system/bundled/catalog"
 import { parseDefinition } from "../type-system/packages/validation"
+import { EditorTypeSystemRuntime } from "../type-system/editor-runtime"
+import { createInstalledPackageRecord } from "../type-system/packages/installed/records"
 
 const adapterInference = {
   nodes: new Map([
@@ -193,6 +195,64 @@ describe("package bundle v1", () => {
     ])
     expect(packageInfo.files["helpers/constants.bin"]?.content).toBe("AP8BAg==")
     expect(packageInfo.files["pytorch.py"]?.content).toBe(btoa("# exact bytes\r\n"))
+  })
+
+  it("exports the active model scope, including local Python resources only", async () => {
+    const coreInput = await createInstalledPackageRecord({
+      source: "bundled",
+      manifest: input.manifest,
+      definition: parseDefinition(JSON.parse(input.definition)),
+      resources: {
+        "manifest.json": JSON.stringify(input.manifest),
+        "stereotype.json": input.definition,
+        "inference.lua": "return function() end",
+      },
+    })
+    const sampling = resourceExport("example.vae.sampling", "0.1.0", {}, new Uint8Array([1]))
+    const kl = resourceExport("example.vae.kl-divergence", "0.1.0", {}, new Uint8Array([2]))
+    const runtime = await EditorTypeSystemRuntime.create({ bundled: [coreInput] })
+    try {
+      const modelBundle = (record: PackageExportInfo, path: string): Record<string, string | Uint8Array> => (
+        Object.fromEntries(Object.entries(record.resources ?? {}).map(([filePath, content]) => [`${path}/${filePath}`, content]))
+      )
+      await runtime.switchModelScope({
+        schemaVersion: 1,
+        id: "example.vae-mnist",
+        version: "0.1.0",
+        name: "VAE",
+        customPackages: [
+          { id: "example.vae.sampling", version: "0.1.0", path: "packages/sampling" },
+          { id: "example.vae.kl-divergence", version: "0.1.0", path: "packages/kl-divergence" },
+        ],
+      }, { ...modelBundle(sampling, "packages/sampling"), ...modelBundle(kl, "packages/kl-divergence") }, [
+        { id: "core.input", version: "0.1.0" },
+        { id: "example.vae.sampling", version: "0.1.0" },
+        { id: "example.vae.kl-divergence", version: "0.1.0" },
+      ])
+      const graphNodes = [
+        node("input", { id: "core.input", version: "0.1.0", name: "Input" }),
+        node("sampling", { id: "example.vae.sampling", version: "0.1.0", name: "Sampling" }),
+        node("kl", { id: "example.vae.kl-divergence", version: "0.1.0", name: "KL" }),
+      ]
+      const vaeBundle = await buildPackageBundle(graphNodes, [], runtime.packageExports())
+      expect(vaeBundle.packages.map(({ id }) => id)).toEqual([
+        "core.input", "example.vae.kl-divergence", "example.vae.sampling",
+      ])
+      expect(vaeBundle.packages.filter(({ id }) => id.startsWith("example.vae.")).every(({ files }) => files["pytorch.py"]?.size > 0)).toBe(true)
+
+      await runtime.switchModelScope({
+        schemaVersion: 1,
+        id: "example.resnet-mnist",
+        version: "0.1.0",
+        name: "ResNet",
+        customPackages: [],
+      }, undefined, [{ id: "core.input", version: "0.1.0" }])
+      const resnetBundle = await buildPackageBundle([graphNodes[0]!], [], runtime.packageExports())
+      expect(resnetBundle.packages.map(({ id }) => id)).toEqual(["core.input"])
+      expect(resnetBundle.packages.some(({ id }) => id.startsWith("example.vae."))).toBe(false)
+    } finally {
+      await runtime.dispose()
+    }
   })
 
   it("rejects wrong-version, ambiguous, and failed exact package selections", async () => {

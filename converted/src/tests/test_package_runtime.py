@@ -277,11 +277,7 @@ def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
         )
         manifest = json.loads((package_dir / "manifest.json").read_text())
         files = {}
-        for file_path in ["manifest.json", "stereotype.json", "inference.lua"] + (
-            [manifest["entrypoints"]["pytorch"]["file"]]
-            if "pytorch" in manifest["entrypoints"]
-            else []
-        ):
+        for file_path in sorted(path.relative_to(package_dir).as_posix() for path in package_dir.rglob("*") if path.is_file()):
             content = (package_dir / file_path).read_bytes()
             files[file_path] = {
                 "content": base64.b64encode(content).decode(),
@@ -323,6 +319,9 @@ def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
     objective = model.objective(inputs, targets)
     assert output.shape == targets.flatten(1).shape
     assert objective.ndim == 0
+    package_by_id = {package["manifest"]["id"]: package for package in packages}
+    assert package_by_id["example.vae.sampling"]["files"]["pytorch.py"]["content"]
+    assert package_by_id["example.vae.kl-divergence"]["files"]["pytorch.py"]["content"]
 
 
 def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
@@ -339,11 +338,7 @@ def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
         package_dir = root / "stereotype-packages" / Path(*package_id.split("."))
         manifest = json.loads((package_dir / "manifest.json").read_text())
         files = {}
-        for file_path in ["manifest.json", "stereotype.json", "inference.lua"] + (
-            [manifest["entrypoints"]["pytorch"]["file"]]
-            if "pytorch" in manifest["entrypoints"]
-            else []
-        ):
+        for file_path in sorted(path.relative_to(package_dir).as_posix() for path in package_dir.rglob("*") if path.is_file()):
             content = (package_dir / file_path).read_bytes()
             files[file_path] = {
                 "content": base64.b64encode(content).decode(),
@@ -371,6 +366,7 @@ def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
     labels = torch.tensor([0, 1, 2, 3])
     assert tuple(logits.shape) == (4, 10)
     assert torch.isfinite(torch.nn.functional.cross_entropy(logits, labels))
+    assert not any(package["manifest"]["id"].startswith("example.vae.") for package in packages)
 
 
 def _role_packages(*, binding: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:

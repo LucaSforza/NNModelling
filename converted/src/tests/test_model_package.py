@@ -21,6 +21,7 @@ from package_runtime.compiler import compile_package_graph
 
 ROOT = Path(__file__).parents[3]
 CORE = ROOT / "stereotype-packages" / "core"
+VAE_PACKAGES = ROOT / "examples" / "diagrams" / "package" / "models" / "variational-autoencoder" / "packages"
 
 
 def test_dataset_adapter_uses_registered_target() -> None:
@@ -43,6 +44,10 @@ def test_dataset_adapter_rejects_unregistered_target() -> None:
 
 def _package(package_id: str) -> dict[str, object]:
     directory = CORE / package_id.removeprefix("core.")
+    if package_id == "example.vae.sampling":
+        directory = VAE_PACKAGES / "sampling"
+    elif package_id == "example.vae.kl-divergence":
+        directory = VAE_PACKAGES / "kl-divergence"
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     files: dict[str, dict[str, str]] = {}
     for filename in ("manifest.json", "stereotype.json", "inference.lua", "pytorch.py"):
@@ -290,7 +295,7 @@ def test_vae_wheel_returns_reconstruction_and_never_executes_mse_or_kl(tmp_path:
             {"id": "statistics", "type": "layer", "package": {"id": "core.linear", "version": "0.1.0"}, "parameters": {"in_features": 2, "out_features": 4}},
             {"id": "prediction", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
             {"id": "mse", "type": "layer", "package": {"id": "core.mse-loss", "version": "0.1.0"}, "parameters": {}},
-            {"id": "kl", "type": "layer", "package": {"id": "core.kl-divergence", "version": "0.1.0"}, "parameters": {}},
+            {"id": "kl", "type": "layer", "package": {"id": "example.vae.kl-divergence", "version": "0.1.0"}, "parameters": {}},
             {"id": "objective", "type": "layer", "package": {"id": "core.add", "version": "0.1.0"}, "parameters": {}},
         ],
         [
@@ -302,7 +307,7 @@ def test_vae_wheel_returns_reconstruction_and_never_executes_mse_or_kl(tmp_path:
             {"source": "mse", "target": "objective", "targetHandle": "in-0"},
             {"source": "kl", "target": "objective", "targetHandle": "in-1"},
         ],
-        ["core.linear", "core.output", "core.mse-loss", "core.kl-divergence", "core.add"],
+        ["core.linear", "core.output", "core.mse-loss", "example.vae.kl-divergence", "core.add"],
     )
     wheel, module = _wheel_model(tmp_path, bundle, "vae")
     try:
