@@ -24,7 +24,6 @@
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
   import { buildPackageBundle } from "../training/package-bundle";
-  import { bundledCorePackageExports } from "../type-system/bundled/catalog";
 
   interface Props {
     diagram: Diagram;
@@ -280,7 +279,8 @@
 
   async function buildRequest(): Promise<TrainingJobRequest> {
     if (!selectedDataset) throw new Error("Seleziona un dataset prima di accodare il training");
-    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports(), diagram.typeResult);
+    await diagram.waitForPackageRuntime();
+    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, diagram.packageExports(), diagram.typeResult);
     const uploaded = await requireApi().uploadPackageBundle(bundle);
     return {
       schema_version: 1,

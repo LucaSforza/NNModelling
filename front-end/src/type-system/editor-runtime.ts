@@ -5,7 +5,7 @@ import { bundledCoreRecords } from "./bundled/catalog"
 import { PackageCatalog, packageKey, packageRecordKey } from "./packages/catalog"
 import type { InstalledPackageStore } from "./packages/installed/store"
 import { installLocalPackage, type InstallResult, type LocalPackageFile } from "./packages/install/installer"
-import type { InstalledPackageRecord, PackageKey, PackageSource } from "./packages/types"
+import type { InstalledPackageRecord, PackageExportInfo, PackageKey, PackageSource } from "./packages/types"
 import { parseModelManifest, type ModelManifest, type PackageIdentity } from "../core/types"
 import { parseDefinition, parseManifest } from "./packages/validation"
 import { createInstalledPackageRecord } from "./packages/installed/records"
@@ -177,6 +177,23 @@ export class EditorTypeSystemRuntime {
 
   infer(snapshot: TypeGraphSnapshot): GraphInferenceResult { return this.scheduler.infer(snapshot) }
   packages(): ActivePackageMetadata[] { return this.host.activePackages() }
+  /** Export the current core + model scope without exposing filesystem paths. */
+  packageExports(): ReadonlyMap<string, PackageExportInfo> {
+    const exports = new Map<string, PackageExportInfo>()
+    for (const candidate of this.catalog.records()) {
+      if (!("source" in candidate)) throw new Error("active package catalog contains a legacy package bundle")
+      const record = candidate as InstalledPackageRecord
+      const status = this.coordinator.status(record.key)
+      exports.set(record.key, {
+        manifest: record.manifest,
+        definition: record.definition,
+        resources: record.resources,
+        resolvedDependencies: record.resolvedDependencies,
+        ...(status ? { state: status.state === "active" ? "active" : status.state === "failed" ? "failed" : "installed" } : {}),
+      })
+    }
+    return exports
+  }
   availablePackages(): PackageCatalogMetadata[] {
     return this.catalog.records().map((record) => {
       const key = packageRecordKey(record as InstalledPackageRecord)

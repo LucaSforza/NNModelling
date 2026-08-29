@@ -23,6 +23,7 @@ import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
 import type { InstallResult, LocalPackageFile } from "./type-system/packages/install/installer";
 import { IndexedDbInstalledPackageStore } from "./type-system/packages/installed/store";
 import type { ModelBundleResources, PackageCatalogMetadata } from "./type-system/editor-runtime";
+import type { PackageExportInfo } from "./type-system/packages/types";
 import type { PackageKey } from "./type-system/packages/types";
 import type { PackageIdentity } from "./core/types";
 import {
@@ -239,6 +240,12 @@ export class Diagram extends DiagramCore {
 
   public get packageActivationStates() {
     return this.packageTypeRuntime?.activationStates() ?? [];
+  }
+
+  /** Read-only package resource seam for the backend bundle exporter. */
+  public packageExports(): ReadonlyMap<string, PackageExportInfo> {
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    return this.packageTypeRuntime.packageExports();
   }
 
   private syncPackageCatalog(): void {
