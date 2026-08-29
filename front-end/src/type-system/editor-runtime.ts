@@ -200,7 +200,11 @@ export class EditorTypeSystemRuntime {
   reconcile(identities: readonly RuntimePackageIdentity[]): Promise<readonly PackageRuntimeDiagnostic[]> { return this.coordinator.reconcile(identities) }
 
   /** Prepare a model scope without changing the current host or catalog. */
-  async prepareModelScope(manifestValue: unknown, bundle?: ModelBundleResources): Promise<PreparedModelScope> {
+  async prepareModelScope(
+    manifestValue: unknown,
+    bundle?: ModelBundleResources,
+    graphIdentities: readonly RuntimePackageIdentity[] = [],
+  ): Promise<PreparedModelScope> {
     const manifest = parseModelManifest(manifestValue)
     const customPackages = await resolveModelPackageRecords(manifest, bundle)
     const catalog = PackageCatalog.composeModel(this.bundled, customPackages)
@@ -217,6 +221,13 @@ export class EditorTypeSystemRuntime {
       const failed = [...coreResults, ...customResults].filter((status) => status.state === "failed")
       if (failed.length > 0) {
         throw new Error(failed.map((status) => `${status.key}: ${status.error ?? "activation failed"}`).join("; "))
+      }
+      for (const identity of graphIdentities) {
+        const key = packageKey(identity.id, identity.version)
+        if (!catalog.getExact(key)) throw new Error(`package '${key}' is not declared by the model manifest`)
+        if (!coordinator.status(key) || coordinator.status(key)?.state !== "active") {
+          throw new Error(`package '${key}' is unavailable in the prepared model scope`)
+        }
       }
       return { manifest, customPackages, catalog, host, scheduler, coordinator }
     } catch (cause) {
@@ -239,8 +250,12 @@ export class EditorTypeSystemRuntime {
   }
 
   /** Transactional convenience seam for consumers that only need a runtime switch. */
-  async switchModelScope(manifestValue: unknown, bundle?: ModelBundleResources): Promise<PreparedModelScope> {
-    const scope = await this.prepareModelScope(manifestValue, bundle)
+  async switchModelScope(
+    manifestValue: unknown,
+    bundle?: ModelBundleResources,
+    graphIdentities: readonly RuntimePackageIdentity[] = [],
+  ): Promise<PreparedModelScope> {
+    const scope = await this.prepareModelScope(manifestValue, bundle, graphIdentities)
     await this.commitModelScope(scope)
     return scope
   }

@@ -253,7 +253,13 @@ export class Diagram extends DiagramCore {
     if (this.packageTypeRuntime) {
       let prepared;
       try {
-        prepared = await this.packageTypeRuntime.prepareModelScope(parsed.manifest, modelBundle);
+        const graphIdentities = parsed.nodes.flatMap((node) => {
+          const identity = node.data?.package as { id?: unknown; version?: unknown; name?: unknown } | undefined;
+          return typeof identity?.id === "string" && typeof identity.version === "string"
+            ? [{ id: identity.id, version: identity.version, ...(typeof identity.name === "string" ? { name: identity.name } : {}) }]
+            : [];
+        });
+        prepared = await this.packageTypeRuntime.prepareModelScope(parsed.manifest, modelBundle, graphIdentities);
       } catch (error) {
         this.diagnosticCollection.record({
           occurrenceId: `runtime:model-switch:${parsed.manifest.id}@${parsed.manifest.version}`,
