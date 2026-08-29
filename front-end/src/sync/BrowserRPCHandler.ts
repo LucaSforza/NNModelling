@@ -44,6 +44,32 @@ interface RPCResponse {
 // which is absent in Node 20 test environments.
 const WEBSOCKET_OPEN = 1;
 
+function packageLifecycleMetadata(
+  metadata: { readonly id: string; readonly version: string },
+  diagnostics: readonly { readonly packageId?: string; readonly packageVersion?: string; readonly phase?: string }[],
+  states: readonly { readonly id: string; readonly version: string; readonly source?: "bundled" | "external"; readonly state?: "installed" | "active" | "failed" }[] = [],
+): Record<string, unknown> {
+  // ActivePackageMetadata is deliberately small. Newer Diagram owners may
+  // attach catalog lifecycle fields; serialize those fields without making
+  // the RPC handler a second package registry.
+  const attached = metadata as typeof metadata & {
+    readonly source?: "bundled" | "external";
+    readonly state?: "installed" | "active" | "failed";
+    readonly active?: boolean;
+  };
+  const lifecycle = states.find((candidate) => candidate.id === metadata.id && candidate.version === metadata.version);
+  const failed = diagnostics.some((diagnostic) => (
+    diagnostic.packageId === metadata.id && diagnostic.packageVersion === metadata.version && diagnostic.phase === "activation"
+  ));
+  const state = lifecycle?.state ?? attached.state ?? (failed ? "failed" : attached.active === false ? "installed" : "active");
+  return {
+    installed: true,
+    active: state === "active",
+    state,
+    ...(lifecycle?.source === undefined && attached.source === undefined ? {} : { source: lifecycle?.source ?? attached.source }),
+  };
+}
+
 function serializeTypeResult(result: GraphInferenceResult | null): unknown {
   if (!result) return null;
   return {
@@ -192,6 +218,9 @@ export class BrowserRPCHandler {
         case "list_stereotypes":
           result = this.handleListStereotypes(params);
           break;
+        case "get_package_diagnostics":
+          result = this.handleGetPackageDiagnostics();
+          break;
 
         // ── Mutations ─────────────────────────────────────────────
         case "create_node":
@@ -322,6 +351,8 @@ export class BrowserRPCHandler {
       nodes: this.diagram.nodes,
       edges: this.diagram.edges,
       typeInfo: serializeTypeResult(typeResult),
+      packageRuntimeReady: this.diagram.packageRuntimeReady,
+      packageRuntimeDiagnostics: this.diagram.packageRuntimeDiagnostics,
     };
   }
 
@@ -348,9 +379,14 @@ export class BrowserRPCHandler {
       ? this.diagram.refreshTypes()
       : this.diagram.typeResult;
 
-    return nodeId
+    const serialized = nodeId
       ? serializeTypeResult({ nodes: new Map([[nodeId, typeResult.nodes.get(nodeId) ?? { status: "unresolved", reason: "node has no type result" }]]), order: [nodeId], terminals: typeResult.terminals, complete: typeResult.complete })
       : serializeTypeResult(typeResult);
+    return {
+      ...((serialized ?? {}) as Record<string, unknown>),
+      packageRuntimeReady: this.diagram.packageRuntimeReady,
+      packageRuntimeDiagnostics: this.diagram.packageRuntimeDiagnostics,
+    };
   }
 
   private handleGetEdges(params: Record<string, unknown>): { edges: Edge[] } {
@@ -416,6 +452,10 @@ export class BrowserRPCHandler {
     const category = params.category as string | undefined;
     let list = this.diagram.packageCatalog;
     if (category) list = list.filter((metadata) => metadata.definition.kind === category);
+    const diagnostics = this.diagram.packageRuntimeDiagnostics;
+    const states = (this.diagram as unknown as {
+      packageActivationStates?: readonly { id: string; version: string; source?: "bundled" | "external"; state?: "installed" | "active" | "failed" }[]
+    }).packageActivationStates ?? [];
     return {
       packages: list.map((metadata) => ({
         id: metadata.id,
@@ -424,7 +464,15 @@ export class BrowserRPCHandler {
         kind: metadata.definition.kind,
         parameters: metadata.definition.parameters,
         view: metadata.definition.view,
+        ...packageLifecycleMetadata(metadata, diagnostics, states),
       })),
+    };
+  }
+
+  private handleGetPackageDiagnostics(): Record<string, unknown> {
+    return {
+      packageRuntimeReady: this.diagram.packageRuntimeReady,
+      packageRuntimeDiagnostics: this.diagram.packageRuntimeDiagnostics,
     };
   }
 

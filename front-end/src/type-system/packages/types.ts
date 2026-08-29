@@ -111,7 +111,15 @@ export type Package = PackageBundle | InstalledPackageRecord
 /** Raw resources exposed only to the package transport/export boundary. */
 export type PackageExportInfo = {
   readonly manifest: Manifest
-  readonly definition: string
+  /** JSON source for legacy bundled exports, or parsed definition on records. */
+  readonly definition: string | Definition
+  /** Complete immutable package-relative resources, when available. */
+  readonly resources?: Readonly<Record<string, string | Uint8Array>>
+  /** Exact dependency resolution persisted by the installed catalog. */
+  readonly resolvedDependencies?: Readonly<Record<string, PackageKey>>
+  /** Runtime state is carried through transport only to reject unusable records. */
+  readonly state?: "installed" | "active" | "failed"
+  readonly active?: boolean
   readonly pytorch?: string
 }
 

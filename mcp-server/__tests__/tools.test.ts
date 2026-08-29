@@ -262,6 +262,20 @@ describe("inspection tools", () => {
     expect(mockBrowser.call).toHaveBeenCalledWith("graph_statistics", {});
     expect(result).toEqual(expectedResult);
   });
+
+  it("get_package_diagnostics is a stateless browser proxy", async () => {
+    const expectedResult = {
+      packageRuntimeReady: false,
+      packageRuntimeDiagnostics: [{ occurrenceId: "runtime:one", severity: "fatal", phase: "activation", message: "one" }],
+    };
+    (mockBrowser.call as ReturnType<typeof vi.fn>).mockResolvedValue(expectedResult);
+
+    const result = await inspectionTools.get_package_diagnostics.handler(ctx, {});
+
+    expect(mockBrowser.call).toHaveBeenCalledWith("get_package_diagnostics", {});
+    expect(result).toBe(expectedResult);
+    expect(Object.keys(inspectionTools)).not.toContain("packageCatalog");
+  });
 });
 
 // ── Validation Tools ────────────────────────────────────────────────────

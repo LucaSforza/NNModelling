@@ -43,6 +43,23 @@ function node(id: string, identity: { id: string; version: string; name: string 
   return { id, type: "custom", position: { x: 100, y: 100 }, ...(parentId ? { parentId } : {}), data: { package: identity, params: { width: 4, labels: ["x", "y"] } } }
 }
 
+function resourceExport(id: string, version: string, dependencies: Record<string, string>, helper: Uint8Array): PackageExportInfo {
+  const manifest = { schemaVersion: 1 as const, id, version, dependencies, entrypoints: { definition: "stereotype.json", inference: { language: "lua" as const, file: "lua/inference.lua" }, pytorch: { language: "python" as const, file: "pytorch.py" } } }
+  const definition = { name: id, kind: "layer" as const, view: { color: "#000000", width: 80, height: 40 }, parameters: {} }
+  return {
+    manifest,
+    definition: JSON.stringify(definition),
+    resolvedDependencies: Object.fromEntries(Object.keys(dependencies).map((dependency) => [dependency, `${dependency}@0.1.0`])),
+    resources: {
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      "stereotype.json": new TextEncoder().encode(JSON.stringify(definition)),
+      "lua/inference.lua": new TextEncoder().encode("return function() end"),
+      "pytorch.py": new TextEncoder().encode("# exact bytes\r\n"),
+      "helpers/constants.bin": helper,
+    },
+  }
+}
+
 describe("package bundle v1", () => {
   it("validates typed stereotype-declared wheel adapters", () => {
     expect(parseDefinition(JSON.parse(layer.definition)).wheelAdapters).toEqual([{
@@ -160,5 +177,29 @@ describe("package bundle v1", () => {
     await expect(buildPackageBundle([bound, layerNode], [{ id: "edge", source: "input", target: "layer", sourceHandle: "out", targetHandle: "in" }], new Map([["core.input", input], ["test.layer", layer]]), incompatible)).rejects.toThrow(
       "wheel adapter 'decode' output schema is incompatible",
     )
+  })
+
+  it("exports an external package's exact resource closure and resolved keys", async () => {
+    const helper = new Uint8Array([0, 255, 1, 2])
+    const external = resourceExport("vendor.layer", "2.0.0", { "core.input": "0.1.0" }, helper)
+    const core = resourceExport("core.input", "0.1.0", {}, new Uint8Array([9]))
+    const bundle = await buildPackageBundle([node("external", { id: "vendor.layer", version: "2.0.0", name: "ignored" })], [], new Map([
+      ["vendor.layer@2.0.0", external], ["core.input@0.1.0", core],
+    ]))
+    const packageInfo = bundle.packages.find((candidate) => candidate.id === "vendor.layer")!
+    expect(packageInfo.resolvedDependencies).toEqual({ "core.input": "core.input@0.1.0" })
+    expect(Object.keys(packageInfo.files)).toEqual([
+      "helpers/constants.bin", "lua/inference.lua", "manifest.json", "pytorch.py", "stereotype.json",
+    ])
+    expect(packageInfo.files["helpers/constants.bin"]?.content).toBe("AP8BAg==")
+    expect(packageInfo.files["pytorch.py"]?.content).toBe(btoa("# exact bytes\r\n"))
+  })
+
+  it("rejects wrong-version, ambiguous, and failed exact package selections", async () => {
+    const v1 = resourceExport("vendor.layer", "1.0.0", {}, new Uint8Array())
+    const v2 = resourceExport("vendor.layer", "2.0.0", {}, new Uint8Array())
+    await expect(buildPackageBundle([node("layer", { id: "vendor.layer", version: "3.0.0", name: "Layer" })], [], new Map([["vendor.layer@1.0.0", v1]]))).rejects.toThrow("vendor.layer@3.0.0")
+    await expect(buildPackageBundle([node("layer", { id: "vendor.layer", version: "1.0.0", name: "Layer" })], [], new Map([["a", v1], ["b", v1]]))).rejects.toThrow("ambiguous")
+    await expect(buildPackageBundle([node("layer", { id: "vendor.layer", version: "2.0.0", name: "Layer" })], [], new Map([["vendor.layer@2.0.0", { ...v2, state: "failed" }]]))).rejects.toThrow("not active")
   })
 })
