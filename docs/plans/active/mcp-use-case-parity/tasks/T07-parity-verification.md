@@ -1,10 +1,10 @@
 ---
 id: T07
 kind: task
-status: draft
+status: blocked
 plan: ../plan.md
 role: integration
-depends_on: [T06]
+depends_on: [T06, T08]
 parallel_with: []
 write_scope:
   - mcp-server/__tests__/
@@ -92,3 +92,22 @@ Return changed files, exact checks/results, observed user-facing behavior,
 resolved assumptions, remaining blockers and affected KB statements. Keep
 credentials out of evidence. Update this task's status in its own file; the
 initiative plan owns overall status.
+
+## Handoff status
+
+Parity verification is blocked on external integration gates, not on a
+manufactured test result. The public stdio server and in-app Browser were
+exercised. The browser remained at the startup chooser, so no DiagramCore was
+mounted; M1–M3 and T1–T3 cannot be claimed. The catalog has no `format_view`
+operation, and screenshot capture still requires a selected-tab binding and
+available DevTools; M4–M5 cannot be claimed. No authorized backend job or
+wheel was available, so T4–T5 and clean-consumer Model prediction cannot be
+claimed.
+
+Detailed commands, transport observations, all eleven UML mappings and exact
+blockers are recorded in [`../evidence/parity.md`](../evidence/parity.md).
+
+The startup-project dependency is now explicitly T08: the parent workflow has
+reopened T08 to implement MCP-owned create/open with an explicit `projectPath`.
+T07 must be rerun after that handoff and must not be marked complete from the
+current startup-chooser observation.
