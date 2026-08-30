@@ -1,4 +1,823 @@
 {
+  "nodes": [
+    {
+      "id": "input",
+      "type": "custom",
+      "position": {
+        "x": 330,
+        "y": 0
+      },
+      "width": 30,
+      "height": 30,
+      "data": {
+        "package": {
+          "id": "core.input",
+          "version": "0.1.0"
+        },
+        "name": "Input",
+        "color": "#ffffff",
+        "params": {
+          "shape": [
+            "B",
+            28,
+            28
+          ],
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 30,
+        "height": 30
+      }
+    },
+    {
+      "id": "flatten",
+      "type": "custom",
+      "position": {
+        "x": 255,
+        "y": 126
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.flatten",
+          "version": "0.1.0"
+        },
+        "name": "flatten",
+        "color": "#a9a9a9",
+        "params": {
+          "start_dim": 1,
+          "end_dim": -1
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "encoder",
+      "type": "subflow",
+      "position": {
+        "x": 101,
+        "y": 322
+      },
+      "width": 488,
+      "height": 1082,
+      "data": {
+        "package": {
+          "id": "core.repeat",
+          "version": "0.1.0"
+        },
+        "name": "Encoder",
+        "label": "Encoder",
+        "color": "#4779c4",
+        "params": {
+          "times": 1
+        },
+        "wheelAdapters": [
+          "encode"
+        ],
+        "isCollapsed": false,
+        "oldWidth": 488,
+        "oldHeight": 1082
+      },
+      "measured": {
+        "width": 800,
+        "height": 900
+      }
+    },
+    {
+      "id": "latent-branch",
+      "type": "custom",
+      "position": {
+        "x": 285,
+        "y": 1500
+      },
+      "width": 120,
+      "height": 80,
+      "data": {
+        "package": {
+          "id": "core.fork",
+          "version": "0.1.0"
+        },
+        "name": "latent_branch",
+        "color": "#6b78b8",
+        "params": {}
+      },
+      "measured": {
+        "width": 120,
+        "height": 80
+      }
+    },
+    {
+      "id": "sample-z",
+      "type": "custom",
+      "position": {
+        "x": 102,
+        "y": 1676
+      },
+      "width": 200,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "example.vae.sampling",
+          "version": "0.1.0"
+        },
+        "name": "sample_z",
+        "color": "#8b6bb8",
+        "params": {
+          "epsilon_scale": 1
+        },
+        "wheelAdapters": [
+          "sample"
+        ]
+      },
+      "measured": {
+        "width": 200,
+        "height": 100
+      }
+    },
+    {
+      "id": "kl-loss",
+      "type": "custom",
+      "position": {
+        "x": 469,
+        "y": 2106
+      },
+      "width": 200,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "example.vae.kl-divergence",
+          "version": "0.1.0"
+        },
+        "name": "kl_loss",
+        "color": "#8b6bb8",
+        "params": {}
+      },
+      "measured": {
+        "width": 200,
+        "height": 100
+      }
+    },
+    {
+      "id": "kl-scale",
+      "type": "custom",
+      "position": {
+        "x": 479,
+        "y": 2536
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.scale",
+          "version": "0.1.0"
+        },
+        "name": "kl_scale",
+        "color": "#4779c4",
+        "params": {
+          "factor": 0.001
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "decoder",
+      "type": "subflow",
+      "position": {
+        "x": 80,
+        "y": 1872
+      },
+      "width": 244,
+      "height": 568,
+      "data": {
+        "package": {
+          "id": "core.repeat",
+          "version": "0.1.0"
+        },
+        "name": "Decoder",
+        "label": "Decoder",
+        "color": "#4779c4",
+        "params": {
+          "times": 1
+        },
+        "wheelAdapters": [
+          "forward"
+        ],
+        "isCollapsed": false,
+        "oldWidth": 244,
+        "oldHeight": 568
+      },
+      "measured": {
+        "width": 650,
+        "height": 500
+      }
+    },
+    {
+      "id": "reconstruction-loss",
+      "type": "custom",
+      "position": {
+        "x": 0,
+        "y": 2536
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.mse-loss",
+          "version": "0.1.0"
+        },
+        "name": "reconstruction_loss",
+        "color": "#b85c5c",
+        "params": {}
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "vae-loss",
+      "type": "join",
+      "position": {
+        "x": 263,
+        "y": 2732
+      },
+      "width": 164,
+      "height": 46,
+      "data": {
+        "package": {
+          "id": "core.add",
+          "version": "0.1.0"
+        },
+        "name": "vae_loss",
+        "color": "#4779c4",
+        "params": {},
+        "inputsCount": 2
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "prediction-output",
+      "type": "custom",
+      "position": {
+        "x": 244,
+        "y": 2546
+      },
+      "width": 140,
+      "height": 80,
+      "data": {
+        "package": {
+          "id": "core.output",
+          "version": "0.1.0"
+        },
+        "name": "prediction_output",
+        "color": "#4d9b72",
+        "params": {}
+      },
+      "measured": {
+        "width": 140,
+        "height": 80
+      }
+    },
+    {
+      "id": "encoder-hidden",
+      "type": "custom",
+      "parentId": "encoder",
+      "position": {
+        "x": 154,
+        "y": 52
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0"
+        },
+        "name": "encoder_hidden",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 784,
+          "out_features": 256
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "encoder-relu",
+      "type": "custom",
+      "parentId": "encoder",
+      "position": {
+        "x": 154,
+        "y": 248
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0"
+        },
+        "name": "encoder_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "encoder-latent",
+      "type": "custom",
+      "parentId": "encoder",
+      "position": {
+        "x": 154,
+        "y": 444
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0"
+        },
+        "name": "encoder_latent",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 256,
+          "out_features": 64
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "latent-params-fork",
+      "type": "custom",
+      "parentId": "encoder",
+      "position": {
+        "x": 184,
+        "y": 640
+      },
+      "width": 120,
+      "height": 80,
+      "data": {
+        "package": {
+          "id": "core.fork",
+          "version": "0.1.0"
+        },
+        "name": "latent_params_fork",
+        "color": "#6b78b8",
+        "params": {}
+      },
+      "measured": {
+        "width": 120,
+        "height": 80
+      }
+    },
+    {
+      "id": "mu",
+      "type": "custom",
+      "parentId": "encoder",
+      "position": {
+        "x": 32,
+        "y": 816
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0"
+        },
+        "name": "mu",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 64,
+          "out_features": 32
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "log-variance",
+      "type": "custom",
+      "parentId": "encoder",
+      "position": {
+        "x": 276,
+        "y": 816
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0"
+        },
+        "name": "log_variance",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 64,
+          "out_features": 32
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "latent-parameters",
+      "type": "join",
+      "parentId": "encoder",
+      "position": {
+        "x": 162,
+        "y": 1012
+      },
+      "width": 164,
+      "height": 46,
+      "data": {
+        "package": {
+          "id": "core.concat",
+          "version": "0.1.0"
+        },
+        "name": "latent_parameters",
+        "color": "#4779c4",
+        "params": {
+          "dim": -1
+        },
+        "inputsCount": 2
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "decoder-hidden",
+      "type": "custom",
+      "parentId": "decoder",
+      "position": {
+        "x": 32,
+        "y": 52
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0"
+        },
+        "name": "decoder_hidden",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 32,
+          "out_features": 256
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "decoder-relu",
+      "type": "custom",
+      "parentId": "decoder",
+      "position": {
+        "x": 32,
+        "y": 248
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0"
+        },
+        "name": "decoder_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    },
+    {
+      "id": "reconstruction",
+      "type": "custom",
+      "parentId": "decoder",
+      "position": {
+        "x": 32,
+        "y": 444
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0"
+        },
+        "name": "reconstruction",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 256,
+          "out_features": 784
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "input-flatten",
+      "source": "input",
+      "target": "flatten",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "flatten-encoder",
+      "source": "flatten",
+      "target": "encoder",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder-latent-branch",
+      "source": "encoder",
+      "target": "latent-branch",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "latent-branch-sample-z",
+      "source": "latent-branch",
+      "target": "sample-z",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "latent-branch-kl-loss",
+      "source": "latent-branch",
+      "target": "kl-loss",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "sample-z-decoder",
+      "source": "sample-z",
+      "target": "decoder",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "decoder-reconstruction-loss",
+      "source": "decoder",
+      "target": "reconstruction-loss",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "decoder-prediction-output",
+      "source": "decoder",
+      "target": "prediction-output",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "reconstruction-loss-vae-loss",
+      "source": "reconstruction-loss",
+      "target": "vae-loss",
+      "sourceHandle": "out",
+      "targetHandle": "in-0",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "kl-loss-kl-scale",
+      "source": "kl-loss",
+      "target": "kl-scale",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "kl-scale-vae-loss",
+      "source": "kl-scale",
+      "target": "vae-loss",
+      "sourceHandle": "out",
+      "targetHandle": "in-1",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder-hidden-relu",
+      "source": "encoder-hidden",
+      "target": "encoder-relu",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder-relu-latent",
+      "source": "encoder-relu",
+      "target": "encoder-latent",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "encoder-latent-fork",
+      "source": "encoder-latent",
+      "target": "latent-params-fork",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "fork-mu",
+      "source": "latent-params-fork",
+      "target": "mu",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "fork-log-variance",
+      "source": "latent-params-fork",
+      "target": "log-variance",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "mu-latent-parameters",
+      "source": "mu",
+      "target": "latent-parameters",
+      "sourceHandle": "out",
+      "targetHandle": "in-0",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "log-variance-latent-parameters",
+      "source": "log-variance",
+      "target": "latent-parameters",
+      "sourceHandle": "out",
+      "targetHandle": "in-1",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "decoder-hidden-relu",
+      "source": "decoder-hidden",
+      "target": "decoder-relu",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    },
+    {
+      "id": "decoder-relu-reconstruction",
+      "source": "decoder-relu",
+      "target": "reconstruction",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    }
+  ],
+  "layoutDirection": "vertical",
   "manifest": {
     "schemaVersion": 1,
     "id": "example.vae-mnist",
@@ -6,329 +825,16 @@
     "name": "Variational Autoencoder",
     "description": "MNIST variational autoencoder",
     "customPackages": [
-      { "id": "example.vae.sampling", "version": "0.1.0", "path": "packages/sampling" },
-      { "id": "example.vae.kl-divergence", "version": "0.1.0", "path": "packages/kl-divergence" }
+      {
+        "id": "example.vae.sampling",
+        "version": "0.1.0",
+        "path": "packages/sampling"
+      },
+      {
+        "id": "example.vae.kl-divergence",
+        "version": "0.1.0",
+        "path": "packages/kl-divergence"
+      }
     ]
-  },
-  "nodes": [
-    {
-      "id": "input",
-      "type": "custom",
-      "position": { "x": 40, "y": 120 },
-      "width": 30,
-      "height": 30,
-      "data": {
-        "package": { "id": "core.input", "version": "0.1.0", "name": "Input" },
-        "name": "Input",
-        "color": "#ffffff",
-        "params": { "shape": ["B", 28, 28], "dtype": "float32" }
-      }
-    },
-    {
-      "id": "flatten",
-      "type": "custom",
-      "position": { "x": 110, "y": 85 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.flatten", "version": "0.1.0", "name": "Flatten" },
-        "name": "flatten",
-        "color": "#a9a9a9",
-        "params": { "start_dim": 1, "end_dim": -1 }
-      }
-    },
-    {
-      "id": "encoder",
-      "type": "subflow",
-      "position": { "x": 350, "y": 30 },
-      "width": 800,
-      "height": 900,
-      "data": {
-        "package": { "id": "core.repeat", "version": "0.1.0", "name": "Repeat" },
-        "name": "Encoder",
-        "label": "Encoder",
-        "color": "#4779c4",
-        "params": { "times": 1 },
-        "wheelAdapters": ["encode"],
-        "isCollapsed": false,
-        "oldWidth": 800,
-        "oldHeight": 900
-      }
-    },
-    {
-      "id": "latent-branch",
-      "type": "custom",
-      "position": { "x": 520, "y": 980 },
-      "width": 120,
-      "height": 80,
-      "data": {
-        "package": { "id": "core.fork", "version": "0.1.0", "name": "Fork" },
-        "name": "latent_branch",
-        "color": "#6b78b8",
-        "params": {}
-      }
-    },
-    {
-      "id": "sample-z",
-      "type": "custom",
-      "position": { "x": 270, "y": 1110 },
-      "width": 200,
-      "height": 100,
-      "data": {
-        "package": { "id": "example.vae.sampling", "version": "0.1.0", "name": "Reparameterize" },
-        "name": "sample_z",
-        "color": "#8b6bb8",
-        "params": { "epsilon_scale": 1 },
-        "wheelAdapters": ["sample"]
-      }
-    },
-    {
-      "id": "kl-loss",
-      "type": "custom",
-      "position": { "x": 690, "y": 1110 },
-      "width": 200,
-      "height": 100,
-      "data": {
-        "package": { "id": "example.vae.kl-divergence", "version": "0.1.0", "name": "KL Divergence" },
-        "name": "kl_loss",
-        "color": "#8b6bb8",
-        "params": {}
-      }
-    },
-    {
-      "id": "kl-scale",
-      "type": "custom",
-      "position": { "x": 690, "y": 1290 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.scale", "version": "0.1.0", "name": "Scale" },
-        "name": "kl_scale",
-        "color": "#4779c4",
-        "params": { "factor": 0.001 }
-      }
-    },
-    {
-      "id": "decoder",
-      "type": "subflow",
-      "position": { "x": 40, "y": 1290 },
-      "width": 650,
-      "height": 500,
-      "data": {
-        "package": { "id": "core.repeat", "version": "0.1.0", "name": "Repeat" },
-        "name": "Decoder",
-        "label": "Decoder",
-        "color": "#4779c4",
-        "params": { "times": 1 },
-        "wheelAdapters": ["forward"],
-        "isCollapsed": false,
-        "oldWidth": 650,
-        "oldHeight": 500
-      }
-    },
-    {
-      "id": "reconstruction-loss",
-      "type": "custom",
-      "position": { "x": 270, "y": 1870 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.mse-loss", "version": "0.1.0", "name": "MSE Loss" },
-        "name": "reconstruction_loss",
-        "color": "#b85c5c",
-        "params": {}
-      }
-    },
-    {
-      "id": "vae-loss",
-      "type": "join",
-      "position": { "x": 690, "y": 1870 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.add", "version": "0.1.0", "name": "Add" },
-        "name": "vae_loss",
-        "color": "#4779c4",
-        "params": {},
-        "inputsCount": 2
-      }
-    },
-    {
-      "id": "prediction-output",
-      "type": "custom",
-      "position": { "x": 980, "y": 1870 },
-      "width": 140,
-      "height": 80,
-      "data": {
-        "package": { "id": "core.output", "version": "0.1.0", "name": "Output" },
-        "name": "prediction_output",
-        "color": "#4d9b72",
-        "params": {}
-      }
-    },
-    {
-      "id": "encoder-hidden",
-      "type": "custom",
-      "parentId": "encoder",
-      "position": { "x": 300, "y": 60 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.linear", "version": "0.1.0", "name": "Linear" },
-        "name": "encoder_hidden",
-        "color": "#4779c4",
-        "params": { "in_features": 784, "out_features": 256 }
-      }
-    },
-    {
-      "id": "encoder-relu",
-      "type": "custom",
-      "parentId": "encoder",
-      "position": { "x": 300, "y": 200 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.relu", "version": "0.1.0", "name": "ReLU" },
-        "name": "encoder_relu",
-        "color": "#f4a460",
-        "params": { "inplace": false }
-      }
-    },
-    {
-      "id": "encoder-latent",
-      "type": "custom",
-      "parentId": "encoder",
-      "position": { "x": 300, "y": 340 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.linear", "version": "0.1.0", "name": "Linear" },
-        "name": "encoder_latent",
-        "color": "#4779c4",
-        "params": { "in_features": 256, "out_features": 64 }
-      }
-    },
-    {
-      "id": "latent-params-fork",
-      "type": "custom",
-      "parentId": "encoder",
-      "position": { "x": 340, "y": 480 },
-      "width": 120,
-      "height": 80,
-      "data": {
-        "package": { "id": "core.fork", "version": "0.1.0", "name": "Fork" },
-        "name": "latent_params_fork",
-        "color": "#6b78b8",
-        "params": {}
-      }
-    },
-    {
-      "id": "mu",
-      "type": "custom",
-      "parentId": "encoder",
-      "position": { "x": 100, "y": 620 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.linear", "version": "0.1.0", "name": "Linear" },
-        "name": "mu",
-        "color": "#4779c4",
-        "params": { "in_features": 64, "out_features": 32 }
-      }
-    },
-    {
-      "id": "log-variance",
-      "type": "custom",
-      "parentId": "encoder",
-      "position": { "x": 520, "y": 620 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.linear", "version": "0.1.0", "name": "Linear" },
-        "name": "log_variance",
-        "color": "#4779c4",
-        "params": { "in_features": 64, "out_features": 32 }
-      }
-    },
-    {
-      "id": "latent-parameters",
-      "type": "join",
-      "parentId": "encoder",
-      "position": { "x": 300, "y": 760 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.concat", "version": "0.1.0", "name": "Concat" },
-        "name": "latent_parameters",
-        "color": "#4779c4",
-        "params": { "dim": -1 },
-        "inputsCount": 2
-      }
-    },
-    {
-      "id": "decoder-hidden",
-      "type": "custom",
-      "parentId": "decoder",
-      "position": { "x": 220, "y": 70 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.linear", "version": "0.1.0", "name": "Linear" },
-        "name": "decoder_hidden",
-        "color": "#4779c4",
-        "params": { "in_features": 32, "out_features": 256 }
-      }
-    },
-    {
-      "id": "decoder-relu",
-      "type": "custom",
-      "parentId": "decoder",
-      "position": { "x": 220, "y": 210 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.relu", "version": "0.1.0", "name": "ReLU" },
-        "name": "decoder_relu",
-        "color": "#f4a460",
-        "params": { "inplace": false }
-      }
-    },
-    {
-      "id": "reconstruction",
-      "type": "custom",
-      "parentId": "decoder",
-      "position": { "x": 220, "y": 350 },
-      "width": 180,
-      "height": 100,
-      "data": {
-        "package": { "id": "core.linear", "version": "0.1.0", "name": "Linear" },
-        "name": "reconstruction",
-        "color": "#4779c4",
-        "params": { "in_features": 256, "out_features": 784 }
-      }
-    }
-  ],
-  "edges": [
-    { "id": "input-flatten", "source": "input", "target": "flatten", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "flatten-encoder", "source": "flatten", "target": "encoder", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "encoder-latent-branch", "source": "encoder", "target": "latent-branch", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "latent-branch-sample-z", "source": "latent-branch", "target": "sample-z", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "latent-branch-kl-loss", "source": "latent-branch", "target": "kl-loss", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "sample-z-decoder", "source": "sample-z", "target": "decoder", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "decoder-reconstruction-loss", "source": "decoder", "target": "reconstruction-loss", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "decoder-prediction-output", "source": "decoder", "target": "prediction-output", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "reconstruction-loss-vae-loss", "source": "reconstruction-loss", "target": "vae-loss", "sourceHandle": "out", "targetHandle": "in-0", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "kl-loss-kl-scale", "source": "kl-loss", "target": "kl-scale", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "kl-scale-vae-loss", "source": "kl-scale", "target": "vae-loss", "sourceHandle": "out", "targetHandle": "in-1", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "encoder-hidden-relu", "source": "encoder-hidden", "target": "encoder-relu", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "encoder-relu-latent", "source": "encoder-relu", "target": "encoder-latent", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "encoder-latent-fork", "source": "encoder-latent", "target": "latent-params-fork", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "fork-mu", "source": "latent-params-fork", "target": "mu", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "fork-log-variance", "source": "latent-params-fork", "target": "log-variance", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "mu-latent-parameters", "source": "mu", "target": "latent-parameters", "sourceHandle": "out", "targetHandle": "in-0", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "log-variance-latent-parameters", "source": "log-variance", "target": "latent-parameters", "sourceHandle": "out", "targetHandle": "in-1", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "decoder-hidden-relu", "source": "decoder-hidden", "target": "decoder-relu", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } },
-    { "id": "decoder-relu-reconstruction", "source": "decoder-relu", "target": "reconstruction", "sourceHandle": "out", "targetHandle": "in", "type": "editable", "data": { "route": { "points": [] } } }
-  ],
-  "layoutDirection": "vertical"
+  }
 }
