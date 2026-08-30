@@ -107,7 +107,10 @@ claimed.
 Detailed commands, transport observations, all eleven UML mappings and exact
 blockers are recorded in [`../evidence/parity.md`](../evidence/parity.md).
 
-The startup-project dependency is now explicitly T08: the parent workflow has
-reopened T08 to implement MCP-owned create/open with an explicit `projectPath`.
-T07 must be rerun after that handoff and must not be marked complete from the
-current startup-chooser observation.
+T08 commit `17b28fb` now supplies the explicit-`projectPath` create/open
+transport and confined-root rollback. The post-T08 rerun exercised those calls,
+but the in-app Browser host was unavailable (`browsers.list()` returned `[]`),
+so activation, graph binding, autosave and reopen remain unverified. T07 stays
+blocked until a real browser tab is available for the final bridge check. The
+deferred dataset `target` payload remains unchanged until its separate
+named-batch migration is unblocked.

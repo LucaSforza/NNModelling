@@ -34,8 +34,10 @@ MCP client
   sequential tab IDs, selects an active tab and correlates pending requests.
 - `mcp-server/src/tools/` exposes narrow MCP adapters.
 - `mcp-server/src/tools/connection.ts` manages the proxy's tab selection locally.
-- `mcp-server/src/tools/remote-training.ts` bypasses browser RPC and calls
-  FastAPI through `RemoteTrainingClient`; it does not access sidebar state.
+- Selected-editor connection, configuration and submission tools route through
+  `BrowserRPCHandler` to the browser's `TrainingController`; the legacy
+  process-authenticated tools in `remote-training.ts` bypass browser RPC and
+  call FastAPI through `RemoteTrainingClient`.
 - `mcp-server/src/tools/screenshot.ts` bypasses browser RPC and captures a
   Chromium page through CDP. This is not the editor's PNG export operation.
 - Package compilation and training execution belong to the authenticated
@@ -75,6 +77,18 @@ groups, `include`/`extend` relations, prerequisite workflows or agent roles.
   the selected browser tab's paired session. Different connection identities
   do not share job ownership automatically.
 
+Training route ownership is intentionally explicit:
+
+| Route | Owner and provenance |
+|---|---|
+| Selected-editor connection/configuration/submission | MCP → `BrowserRPCHandler` → `TrainingController` → paired browser API → backend |
+| Compatibility dataset/job/status/log/event/cancel tools, including current `read_training_progress` and `download_training_wheel` | MCP → `RemoteTrainingClient` → `NNM_BACKEND_URL`/`NNM_BACKEND_TOKEN` → backend |
+
+Results must expose ownership-safe provenance when needed for disambiguation;
+bearer tokens never enter results, URLs, logs or artifacts. The progress and
+wheel tools are not selected-editor workflows until distinct browser routes are
+implemented and verified.
+
 ## Compatibility constraints
 
 - Standard handles are `in` and `out`; join targets use `in-0`, `in-1`, etc.
@@ -90,8 +104,8 @@ groups, `include`/`extend` relations, prerequisite workflows or agent roles.
 | Connect to backend | Selected-editor tools `connect_training_backend`, `get_training_connection`, `renew_training_connection` and `disconnect_training_backend` are registered; process-authenticated HTTP calls still use `NNM_BACKEND_URL` and `NNM_BACKEND_TOKEN`. |
 | Edit training parameters | `get_training_config` and `update_training_config` expose the shared typed training controller; `submit_training_job` remains an additional opaque process-authenticated operation. |
 | Launch training | `start_training` delegates to the active browser project/controller for snapshot preparation and submission. `submit_training_job` remains the low-level process-authenticated path. |
-| Monitor training | `read_training_progress` exposes bounded job/log/event cursors; `get_training_job_events` remains a compatibility stream operation. |
-| Download wheel | `download_training_wheel` exposes owned artifact retrieval with manifest/header/body digest checks and non-overwriting delivery. |
+| Monitor training | The current process-authenticated `read_training_progress` exposes bounded job/log/event cursors; the browser controller has a corresponding RPC seam, but no selected-editor MCP route is registered yet. `get_training_job_events` remains a compatibility stream operation. |
+| Download wheel | The current process-authenticated `download_training_wheel` performs owned artifact retrieval with manifest/header/body digest checks and non-overwriting delivery; selected-editor download is not registered. |
 | Add node | Browser RPC creates a package-only node in the shared diagram and accepts typed parameters, output kind and `wheelAdapters`; browser-side activation/default validation remains authoritative. |
 | Connect nodes | `connect_nodes` delegates to the shared `DiagramCore.addEdge`, preserving its graph/handle checks. |
 | Edit node parameters | `set_parameter` and `update_parameters` advertise typed JSON values and delegate conversion/validation to the browser handler and package definitions. |
@@ -138,8 +152,10 @@ from the use-case diagram.
 
 Some advertised operations are weaker than their names suggest:
 
-- `validate_connections`, `validate_parameters` and `validate_subflows` return
-  constant successful results in `BrowserRPCHandler`, without validation.
+- `validate_parameters` performs the browser's package-parameter validation.
+  `validate_connections` and `validate_subflows` return explicit
+  `supported:false` results because no standalone authoritative checks are
+  exposed; neither claims success.
 - `validate_graph` checks a subset of topology rules; it does not aggregate
   the package type engine's diagnostics. Its exactly-one-Input rule must be
   reassessed when the accepted named-batch/multiple-input transition is

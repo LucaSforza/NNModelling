@@ -12,7 +12,16 @@ least-privilege Podman/Docker controller, is defined in the
 [active implementation plan](../../plans/active/package-backend-standard/plan.md).
 
 ```text
-TrainingSidebar or MCP HTTP client
+TrainingSidebar
+  -> browser TrainingController/API
+  -> FastAPI (`converted/src/backend/app.py`)
+
+Selected-editor MCP workflow
+  -> BrowserRPCHandler -> browser TrainingController/API
+  -> FastAPI (`converted/src/backend/app.py`)
+
+Legacy MCP compatibility tools
+  -> RemoteTrainingClient (`NNM_BACKEND_URL`/`NNM_BACKEND_TOKEN`)
   -> FastAPI (`converted/src/backend/app.py`)
   -> Valkey job store and event streams
   -> JobManager priority/FIFO scheduler
@@ -47,8 +56,10 @@ and must be reassessed against current code before becoming a new plan.
 
 ## Boundaries
 
-- The frontend and optional MCP client use the same FastAPI state; MCP does not
-  duplicate jobs or scheduling.
+- The frontend and selected-editor MCP workflow share the browser's
+  `TrainingController`; legacy MCP compatibility tools use the process-configured
+  HTTP client. Neither path duplicates jobs or scheduling, and they must not be
+  silently treated as the same connection owner.
 - The API validates typed package/training data and never imports package
   Python in FastAPI.
 - The accepted target launches exactly one short-lived worker container per job
@@ -75,3 +86,14 @@ and must be reassessed against current code before becoming a new plan.
 - `front-end/src/components/TrainingSidebar.svelte`: browser workflow.
 - `front-end/src/training/api.ts`: browser REST/SSE client.
 - `mcp-server/src/remote-training.ts`: optional authenticated HTTP client.
+
+## MCP provenance
+
+Connection/configuration/submission operations are editor-scoped only when they
+traverse `BrowserRPCHandler` and the paired browser API. The current public
+`read_training_progress` and `download_training_wheel` tools still traverse
+`RemoteTrainingClient` and therefore use the process-authenticated backend
+identity. Results may report route/provenance and ownership-safe IDs, but never
+bearer tokens. A selected-editor progress/download route requires a distinct
+public operation or an explicit migration before it can replace the compatibility
+contract.

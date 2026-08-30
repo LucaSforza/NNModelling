@@ -1,7 +1,7 @@
 ---
 id: T04
 kind: task
-status: draft
+status: ready
 plan: ../plan.md
 role: frontend
 depends_on: [T03]
@@ -82,10 +82,16 @@ pnpm --dir mcp-server test
 
 Add controller/field-coverage tests alongside existing suites. In the real editor, request pairing, have the authorized operator approve it, modify every control through MCP and UI, and test sidebar reopen. Use a disposable session for revoke/expiry checks.
 
+## Handoff status
+
+The shared editor-scoped training controller and typed configuration seam are
+implemented by `39940da`. Live pairing approval, every-field round-trip and
+closed-sidebar verification remain pending. T05 owns snapshot submission; the
+legacy process-authenticated MCP tools remain a separate compatibility route.
+
 ## Required handoff
 
 Return changed files, exact checks/results, observed user-facing behavior,
 resolved assumptions, remaining blockers and affected KB statements. Keep
 credentials out of evidence. Update this task's status in its own file; the
 initiative plan owns overall status.
-

@@ -17,9 +17,10 @@ shared frontend operations; do not replace the server or duplicate the graph.
 The Visual Paradigm source is [nn.vpp](../../../../analysis/uml/nn.vpp).
 
 This is an implementation plan, not an implementation report. The functional
-requirements are accepted; the API proposals below remain draft until T01
-settles project permission handshakes, capture support, connection routing and artifact delivery. No source
-code change or training execution is implied by publishing this plan.
+requirements, ownership boundaries and safety bounds are accepted; the API
+names, result envelopes and capture adapter remain working proposals until
+public-interface verification settles them. No source code change or training
+execution is implied by publishing this plan.
 
 ## Current behavior and adaptation map
 

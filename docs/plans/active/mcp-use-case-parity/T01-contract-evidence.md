@@ -7,23 +7,24 @@ updated: 2026-08-30
 
 # T01 contract and feasibility evidence
 
-This is the T01 freeze for the accepted
-[MCP use-case constraint](../../../knowledge/uml/mcp-use-case-parity.md). It
-records the current public surface and the contracts that the implementation
-tasks must preserve. It does not claim that the proposed operations already
-exist.
+This is the T01 evidence record for the accepted
+[MCP use-case constraint](../../../knowledge/uml/mcp-use-case-parity.md). The
+UML behavior, ownership boundaries, safety bounds and failure invariants are
+agreed. Tool names, result envelopes and the capture adapter remain
+implementation choices until verified through the public interface; this
+record does not turn an unverified proposal into support.
 
 ## Evidence boundary
 
-The real `pnpm --dir mcp-server start` process was initialized over stdio and
-returned `tools/list` with **45 tools**. A successful public `tools/call` of
+The pre-T02 real `pnpm --dir mcp-server start` process was initialized over
+stdio and returned `tools/list` with **45 tools**. A successful public `tools/call` of
 `list_browser_tabs` returned `{tabs: [], activeTabId: null}`. Calls to `ping`
 and `set_parameter` returned `isError: true` with
 `{"error":{"code":"INTERNAL_ERROR","message":"No browser connected"}}`.
-The latter call supplied a numeric value to the string-advertised
-`set_parameter` field and was not rejected at the MCP boundary; this is
-evidence that the current server advertises schemas but does not parse them
-before dispatch.
+The latter call supplied a numeric value to the then string-advertised
+`set_parameter` field and was not rejected at the MCP boundary. This is a
+historical pre-T02 observation; current `server.ts` parses every call with its
+Zod schema before dispatch.
 
 Unit tests and proxy mocks are not counted as successful workflow evidence.
 The current server envelope is the same for every tool: success is one MCP
@@ -34,9 +35,9 @@ the browser RPC method returns. Remote-training output is likewise an
 undeclared backend JSON value. This absence is part of the current contract
 gap, not permission to infer a second data model.
 
-## Exact current tools/list catalog
+## Historical pre-T02 tools/list catalog
 
-The following is the 2026-08-30 catalog captured from the real server. `R` is
+The following is the 2026-08-30 pre-T02 catalog captured from the real server. `R` is
 the required input set; all other fields in a row are optional. `object` means
 the generated schema permits arbitrary JSON members, exactly as shown by
 `zod-to-json-schema`.
@@ -98,6 +99,24 @@ the only local page), writes it with an overwriting `writeFileSync`, and does
 not consult `activeTabId`. `pageId` is a DevTools target ID, not the MCP
 `tab_N` ID.
 
+## Current post-T06 tools/list snapshot
+
+The later T07 transport run observed **54 tools** after T02, T04, T05 and T06.
+The current public boundary parses Zod inputs before handlers. The modeling
+surface is package-only: `create_node` requires `package` identity, accepts
+`output` kind, typed `parameters`, presentation/default fields and
+`wheelAdapters`; `set_parameter.value` and `update_parameters.params` accept
+typed JSON values. `validate_parameters` performs the browser's parameter
+check, while `validate_connections` and `validate_subflows` return explicit
+`supported:false` results because no standalone authoritative checks are
+exposed. `format_view` is still absent, and the screenshot path remains the
+unbound URL/CDP implementation described above.
+
+The complete post-T06 transport observations, including the 54-tool count and
+public invalid-input checks, are retained in
+[`evidence/parity.md`](evidence/parity.md). This summary is the current
+contract snapshot; the table above remains historical evidence.
+
 ### Process-authenticated remote-training tools
 
 | Tool | Current input shape (`R`; bounds) | Current output shape |
@@ -114,6 +133,25 @@ not consult `activeTabId`. `pageId` is a DevTools target ID, not the MCP
 These names remain process-authenticated compatibility operations. They use
 `NNM_BACKEND_URL` and optional `NNM_BACKEND_TOKEN` in the MCP process and are
 not silently rerouted to a browser-selected connection.
+
+## Training routing and provenance
+
+Selected-editor session/configuration/submission operations use:
+
+```text
+MCP -> BrowserRPCHandler -> TrainingController -> paired browser API -> backend
+```
+
+The current `read_training_progress` and `download_training_wheel` public tools
+still use the compatibility path:
+
+```text
+MCP -> RemoteTrainingClient -> NNM_BACKEND_URL/TOKEN -> backend
+```
+
+They must not be described as selected-editor operations until distinct tools or
+browser RPC routes exist. Every future result must expose its route/provenance
+and ownership-safe identity, while never returning a bearer token.
 
 ## Sidebar field inventory and session contract
 
@@ -151,7 +189,7 @@ currently observes `disconnected`, `checking`, `pending`, `active`, `expired`,
 connected. Tokens remain in the browser-only connection store and never appear
 in MCP results, URLs, logs, artifacts or project files.
 
-The parity controller will be editor-session scoped (one controller shared by
+The parity controller is editor-session scoped (one controller shared by
 the sidebar and RPC handler), survives sidebar close, and is invalidated on
 project/tab switch or disconnect. Configuration is not added to `model.json`;
 reload persistence is not part of this freeze. Browser connection restoration
@@ -159,21 +197,21 @@ may remain browser-local, but MCP exposes only backend identity, status and
 expiry. Explicit `disconnect_training_backend({revoke:boolean})` distinguishes
 local forgetting from backend revocation.
 
-## Frozen parity operations
+## Proposed parity operations pending public verification
 
-Existing useful tools remain available. New operations use the following names
-and typed shapes; all responses use `status: "ok" | "pending"` for a
-non-error result. A protocol error is `isError: true` with a stable `error.code`,
-human-readable message and optional `retryable`/`details`. `pending` is never
-reported as success and never carries a secret.
+Existing useful tools remain available. The following names and typed shapes
+are the working proposal for implementation. The agreed requirements are the
+observable behavior, ownership, bounds and error invariants; names and the
+success envelope remain open until the public tools are routed and verified.
+`pending` is never reported as success and never carries a secret.
 
 | Workflow | Public operation and input | Observable result and failure behavior | Browser/backend seam |
 | --- | --- | --- | --- |
 | T1 | `connect_training_backend({baseUrl:string,deviceName?:string})`; `get_training_connection({})`; `renew_training_connection({})`; `disconnect_training_backend({revoke?:boolean})` | Connect/renew returns promptly with `pending`, request ID, verification code and expiry (no token); later status is `active`, `expired`, `rejected` or `error`. Invalid URL, cancellation, rejection and expiry are distinct. Missing/expired session yields `BACKEND_NOT_CONNECTED`. | Shared browser `TrainingController` over `TrainingApiClient` pairing/session routes; no change to process tools. |
 | T2 | `get_training_config({})`; `update_training_config({patch:TrainingConfigPatch})`; patch contains typed dataset selection/descriptor params, seed, optimizer, trainer, W&B, resources, priority and package suffix | Return complete canonical typed config and descriptor validation diagnostics. Unknown dataset keys, invalid enum/range/selector or stale project identity fail before mutation with `INVALID_CONFIGURATION`; no opaque Hydra override. | Shared controller used by `TrainingSidebar` and RPC; descriptor conversion stays in browser. |
 | T3 | `start_training({})` (uses active project, graph and session config; no raw job JSON) | After package runtime readiness and one frozen graph/config/resource snapshot, returns `{status:"ok",jobId,bundleRef,snapshotDigest}`. Upload failure creates no job; ambiguous submit returns `SUBMISSION_UNKNOWN` and is never blindly retried. | Browser DiagramCore/package export → existing `uploadPackageBundle` → authenticated `/jobs`; backend remains owner. |
-| T4 | `read_training_progress({jobId,eventCursor?:string,stdoutOffset?:integer>=0,stderrOffset?:integer>=0,waitMs?:integer 0..30000,maxBytes?:integer 1..262144})` | Bounded `{status:"ok",job:{state,...},metrics,stdout:{text,offset,nextOffset,reset},stderr:{...},eventCursor,nextEventCursor}`; terminal states are explicit. Timeout returns a resumable cursor, never waits for SSE EOF. Unknown job/ownership, disconnect and cursor reset are explicit errors. | Existing `/jobs/{id}`, `/logs/tail`, `/events`; incremental reader with abort on timeout/disconnect. |
-| T5 | `download_training_wheel({jobId,destinationPath?:string})` | Reads the owned manifest, verifies header and body SHA-256, then writes a local artifact and returns `{status:"ok",artifact:{kind:"wheel",path,mediaType:"application/octet-stream",bytes,sha256}}`. Max 256 MiB; default is a server-created 0600 file in its private temp artifact directory. A supplied path must be within that directory (or an explicitly configured artifact root), have a sanitized basename, and be created exclusively—existing files are `ARTIFACT_EXISTS`. Missing/malformed/mismatched digest, ownership, size or write errors fail closed. | Existing authenticated `/jobs/{id}/package`; backend snapshot/header contract remains authoritative. |
+| T4 | `read_training_progress({jobId,eventCursor?:string,stdoutOffset?:integer>=0,stderrOffset?:integer>=0,waitMs?:integer 0..30000,maxBytes?:integer 1..262144})` | Bounded `{status:"ok",job:{state,...},metrics,stdout:{text,offset,nextOffset,reset},stderr:{...},eventCursor,nextEventCursor}`; terminal states are explicit. Timeout returns a resumable cursor, never waits for SSE EOF. Unknown job/ownership, disconnect and cursor reset are explicit errors. | Current public tool is process-authenticated `RemoteTrainingClient`; a selected-editor variant is not yet routed. |
+| T5 | `download_training_wheel({jobId,destinationPath?:string})` | Reads the owned manifest, verifies header and body SHA-256, then writes a local artifact and returns `{status:"ok",artifact:{kind:"wheel",path,mediaType:"application/octet-stream",bytes,sha256}}`. Max 256 MiB; default is a server-created 0600 file in its private temp artifact directory. A supplied path must be within that directory (or an explicitly configured artifact root), have a sanitized basename, and be created exclusively—existing files are `ARTIFACT_EXISTS`. Missing/malformed/mismatched digest, ownership, size or write errors fail closed. | Current public tool is process-authenticated `RemoteTrainingClient`; selected-editor download is missing. |
 | M1 | Existing `create_node({package:{id,version,name,kind},position?:{x,y},parameters?:Record<string,unknown>,name?:string,parentId?:string})` | Returns `{status:"ok",nodeId,...}` after the browser materializes sidebar defaults and adapter/reference values. `stereotype` is removed from the release schema; callers using it get `INVALID_ARGUMENT` with migration guidance, not a second creation path. | `BrowserRPCHandler.handleCreateNode` plus browser catalog, `initialPackageParameters` and `addActivatedPackageNode`. |
 | M2 | Existing `connect_nodes({source,target,sourceHandle?,targetHandle?})` | `{status:"ok",edgeId,source,target}`; missing nodes, invalid handles, capacity and containment are truthful errors. `targetHandle` order controls joins. | `BrowserRPCHandler` → `DiagramCore.addEdge`. |
 | M3 | Existing `set_parameter({nodeId,key,value:unknown})` and `update_parameters({nodeId,params:Record<string,unknown>})` | Typed values round-trip in `{previousValue,currentValue}` / updated lists; unknown keys, wrong declared type and missing node fail before mutation. | Shared browser parameter conversion/validation, not string coercion in MCP. |
