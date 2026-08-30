@@ -8,6 +8,23 @@ export type TypeGraphSnapshot = {
   readonly edges: readonly Edge[]
 }
 
+/** Stable batch slot assigned to one top-level Input node. */
+export type GraphInputBinding = {
+  readonly nodeId: string
+  readonly name: string
+}
+
+/** One loss package's declarative external batch operand. */
+export type GraphObjectiveBinding = {
+  readonly nodeId: string
+  readonly packageId: string
+  readonly externalInputs: readonly {
+    readonly name: string
+    readonly source: string
+    readonly transform?: "flatten_batch"
+  }[]
+}
+
 export type GraphNodeResult = EditorInferenceState | {
   readonly status: "unresolved"
   readonly reason: string
@@ -23,6 +40,8 @@ export type GraphInferenceResult = {
   readonly objectiveTerminals?: readonly string[]
   readonly trainingComplete?: boolean
   readonly trainingDiagnostics?: readonly string[]
+  readonly inputBindings?: readonly GraphInputBinding[]
+  readonly objectiveBindings?: readonly GraphObjectiveBinding[]
 }
 
 export type PackageNodeData = {
@@ -30,6 +49,8 @@ export type PackageNodeData = {
   readonly params?: Readonly<Record<string, unknown>>
   /** Explicit names of wheel adapters selected for this concrete node. */
   readonly wheelAdapters?: readonly string[]
+  /** Required batch slot for a top-level Input node. */
+  readonly inputBinding?: string
 }
 
 export function selectedWheelAdapters(node: Node): readonly string[] {

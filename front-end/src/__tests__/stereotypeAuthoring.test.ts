@@ -86,17 +86,17 @@ describe("stereotype authoring domain", () => {
 
   test("gives loss packages the required structural target binding without inventing a loss", () => {
     const generated = generateStereotypePackage(request({ id: "model.loss", kind: "loss" }))
-    expect(generated.definition.objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets" }] })
+    expect(generated.definition.objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets.target" }] })
     const explicit = generateStereotypePackage(request({
       id: "model.loss.explicit",
       kind: "loss",
-      objective: { externalInputs: [{ name: "target", source: "batch.targets", transform: "flatten_batch" }] },
+      objective: { externalInputs: [{ name: "target", source: "batch.targets.target", transform: "flatten_batch" }] },
     }))
-    expect(explicit.definition.objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets", transform: "flatten_batch" }] })
+    expect(explicit.definition.objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets.target", transform: "flatten_batch" }] })
     expect(validateStereotypeAuthoringRequest(request({
       id: "model.loss",
       kind: "loss",
-      objective: { externalInputs: [{ name: "target", source: "batch.targets" }] },
+      objective: { externalInputs: [{ name: "target", source: "batch.targets.target" }] },
     })).kind).toBe("loss")
   })
 })

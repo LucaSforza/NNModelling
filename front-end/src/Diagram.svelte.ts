@@ -154,7 +154,7 @@ export class Diagram extends DiagramCore {
             centerX,
             50,
             { params: Object.fromEntries(Object.entries(input.definition.parameters).flatMap(([key, definition]) =>
-              definition.default === undefined ? [] : [[key, structuredClone(definition.default)]])) },
+              definition.default === undefined ? [] : [[key, structuredClone(definition.default)]])), inputBinding: "input" },
           );
           this._undoStack = [];
           this._redoStack = [];

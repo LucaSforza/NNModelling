@@ -2,6 +2,7 @@ import type { Node } from "@xyflow/svelte"
 import type { TypeContext } from "../type-inference"
 import { TypeSystemHost } from "../host"
 import { inputsFor, nodeParameters, packageIdentity, type GraphInferenceResult, type GraphNodeResult, type TypeGraphSnapshot } from "./types"
+import { compileGraphBindings } from "./bindings"
 
 /**
  * Schedules only the current DiagramCore snapshot. It owns no graph state and
@@ -34,6 +35,8 @@ export class PackageGraphScheduler {
       objectiveTerminals: roleInfo.objectiveTerminals,
       trainingComplete,
       trainingDiagnostics: roleInfo.diagnostics,
+      inputBindings: roleInfo.inputBindings,
+      objectiveBindings: roleInfo.objectiveBindings,
     }
   }
 
@@ -64,6 +67,7 @@ export class PackageGraphScheduler {
     const objectiveTerminals = [...objectiveIds].filter(id => !(outgoing.get(id) ?? []).some(target => objectiveIds.has(target)))
     const diagnostics: string[] = []
     const topInputs = topLevel.filter(node => kindOf(node) === "input")
+    if (topInputs.length === 0) diagnostics.push("training graph requires at least one top-level Input")
     const reachable = new Set<string>()
     const reachableQueue = topInputs.map(node => node.id)
     while (reachableQueue.length) {
@@ -72,7 +76,12 @@ export class PackageGraphScheduler {
       reachable.add(id)
       reachableQueue.push(...(outgoing.get(id) ?? []))
     }
-    if (topInputs.length !== 1) diagnostics.push(`training graph requires exactly one top-level input; found ${topInputs.length}`)
+    const bindings = compileGraphBindings(
+      topLevel,
+      (identity) => this.host.packageDefinition(identity),
+      new Map([...snapshot.nodes].map((node) => [node.id, { status: "unresolved" as const, reason: "scheduler role validation does not infer inputs" }])),
+    )
+    diagnostics.push(...bindings.diagnostics.map((diagnostic) => diagnostic.message))
     if (predictionTerminals.length !== 1) diagnostics.push(`training graph requires exactly one prediction Output terminal; found ${predictionTerminals.length}`)
     if (objectiveTerminals.length !== 1) diagnostics.push(`training graph requires exactly one objective terminal; found ${objectiveTerminals.length}`)
     for (const node of topLevel) {
@@ -86,7 +95,14 @@ export class PackageGraphScheduler {
         diagnostics.push(`objective join '${id}' has no graph operands`)
       }
     }
-    return { predictionTerminals, objectiveTerminals, diagnostics, trainingComplete: diagnostics.length === 0 && losses.length > 0 }
+    return {
+      predictionTerminals,
+      objectiveTerminals,
+      diagnostics,
+      inputBindings: bindings.inputBindings,
+      objectiveBindings: bindings.objectiveBindings,
+      trainingComplete: diagnostics.length === 0 && losses.length > 0,
+    }
   }
 
   private inferScope(

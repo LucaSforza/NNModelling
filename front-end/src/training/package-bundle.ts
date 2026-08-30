@@ -3,10 +3,17 @@ import type { PackageExportInfo, WheelAdapterValueSchema } from "../type-system/
 import type { PackageIdentity, PersistedPackageIdentity } from "../core/types"
 import { parseDefinition } from "../type-system/packages/validation"
 import type { GraphInferenceResult } from "../type-system/graph/types"
+import type { GraphInputBinding, GraphObjectiveBinding } from "../type-system/graph/types"
+import { compileGraphBindings, packageDefinitionResolver, type CompiledGraphBindings } from "../type-system/graph/bindings"
+import type { DatasetDefinition } from "../project-workspace/dataset-contract"
 import { packageKey } from "../type-system/packages/catalog"
 import { satisfies } from "../type-system/packages/semver"
 
 export type PackageBundleGraph = {
+  /** Deterministic named model inputs, sorted by slot then node ID. */
+  readonly inputBindings: readonly GraphInputBinding[]
+  /** Loss package declarations copied into the executable graph boundary. */
+  readonly objectiveBindings: readonly GraphObjectiveBinding[]
   readonly nodes: readonly {
     readonly id: string
     readonly type: string
@@ -14,6 +21,7 @@ export type PackageBundleGraph = {
     readonly params: Readonly<Record<string, unknown>>
     readonly wheelAdapters: readonly PackageBundleAdapterBinding[]
     readonly parentId: string | null
+    readonly inputBinding?: string
   }[]
   readonly edges: readonly {
     readonly id: string
@@ -56,8 +64,8 @@ export type PackageBundleV1 = {
   readonly digest: string
 }
 
-type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[] } }
-type SemanticGraph = Omit<PackageBundleGraph, "nodes"> & {
+type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[]; inputBinding?: string } }
+type SemanticGraph = Omit<PackageBundleGraph, "nodes" | "inputBindings" | "objectiveBindings"> & {
   readonly nodes: readonly (Omit<PackageBundleGraph["nodes"][number], "wheelAdapters"> & { readonly wheelAdapters: readonly string[] })[]
 }
 
@@ -67,6 +75,7 @@ export async function buildPackageBundle(
   edges: readonly Edge[],
   exports: ReadonlyMap<string, PackageExportInfo>,
   inference?: GraphInferenceResult | null,
+  dataset?: DatasetDefinition,
 ): Promise<PackageBundleV1> {
   const graphDraft = semanticGraph(nodes, edges)
   const selected = new Map<string, PackageExportInfo>()
@@ -88,7 +97,11 @@ export async function buildPackageBundle(
     }
   }
   for (const node of graphDraft.nodes) visit(node.package)
-  const graph = materializeGraph(graphDraft, selected, inference)
+  const bindings = compileGraphBindings(nodes, packageDefinitionResolver(exports), inference?.nodes, dataset)
+  if (bindings.diagnostics.length > 0) {
+    throw new Error(bindings.diagnostics.map((diagnostic) => diagnostic.message).join("; "))
+  }
+  const graph = materializeGraph(graphDraft, selected, inference, bindings)
 
   const packages = await Promise.all([...selected.values()]
     .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
@@ -117,6 +130,7 @@ function materializeGraph(
   graph: SemanticGraph,
   selected: ReadonlyMap<string, PackageExportInfo>,
   inference?: GraphInferenceResult | null,
+  bindings?: CompiledGraphBindings,
 ): PackageBundleGraph {
   const definitions = new Map<string, ReadonlyMap<string, WheelAdapterValueDefinition>>()
   for (const [key, packageInfo] of selected) {
@@ -125,6 +139,9 @@ function materializeGraph(
   }
   const nodes = graph.nodes.map((node) => ({
     ...node,
+    ...(bindings?.inputBindings.find((binding) => binding.nodeId === node.id) === undefined
+      ? {}
+      : { inputBinding: bindings.inputBindings.find((binding) => binding.nodeId === node.id)!.name }),
     wheelAdapters: node.wheelAdapters.map((name) => {
       if (!name.trim()) throw new Error(`graph node '${node.id}' has an empty wheel adapter binding`)
       const declaration = definitions.get(node.package.id)?.get(name)
@@ -132,7 +149,12 @@ function materializeGraph(
       return bindAdapter(node, name, declaration, graph.edges, inference)
     }),
   }))
-  return { ...graph, nodes }
+  return {
+    ...graph,
+    inputBindings: bindings?.inputBindings ?? [],
+    objectiveBindings: bindings?.objectiveBindings ?? [],
+    nodes,
+  }
 }
 
 type WheelAdapterValueDefinition = {
@@ -213,6 +235,7 @@ function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): Semantic
       params: (node.data?.params ?? {}) as Readonly<Record<string, unknown>>,
       wheelAdapters: [...(node.data?.wheelAdapters ?? [])].sort(),
       parentId: node.parentId ?? null,
+      ...(typeof node.data?.inputBinding === "string" ? { inputBinding: node.data.inputBinding } : {}),
     }
   }).sort((left, right) => left.id.localeCompare(right.id))
 

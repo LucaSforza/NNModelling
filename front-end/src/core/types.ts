@@ -41,6 +41,8 @@ export interface NodeConfig {
   width?: number;
   height?: number;
   params?: Record<string, unknown>;
+  /** Stable named batch slot for a top-level Input node. */
+  inputBinding?: string;
 }
 
 /** Runtime identity carried by editor nodes.

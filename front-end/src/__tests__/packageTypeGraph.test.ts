@@ -24,7 +24,7 @@ function packageNode(id: string, identity: PackageIdentity, params: Record<strin
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: identity, name: identity.name, params },
+    data: { package: identity, name: identity.name, params, ...(identity.id === "core.input" ? { inputBinding: "input" } : {}) },
   } as Node
 }
 

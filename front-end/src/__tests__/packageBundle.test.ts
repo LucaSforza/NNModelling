@@ -42,7 +42,7 @@ const layer: PackageExportInfo = {
 }
 
 function node(id: string, identity: { id: string; version: string; name: string }, parentId?: string): Node {
-  return { id, type: "custom", position: { x: 100, y: 100 }, ...(parentId ? { parentId } : {}), data: { package: identity, params: { width: 4, labels: ["x", "y"] } } }
+  return { id, type: "custom", position: { x: 100, y: 100 }, ...(parentId ? { parentId } : {}), data: { package: identity, params: { width: 4, labels: ["x", "y"] }, ...(identity.id === "core.input" ? { inputBinding: "input" } : {}) } }
 }
 
 function resourceExport(id: string, version: string, dependencies: Record<string, string>, helper: Uint8Array): PackageExportInfo {
@@ -80,9 +80,9 @@ describe("package bundle v1", () => {
   it("parses explicit objective bindings and output roles", () => {
     expect(parseDefinition({
       name: "Cross Entropy", kind: "loss",
-      objective: { externalInputs: [{ name: "target", source: "batch.targets" }] },
+      objective: { externalInputs: [{ name: "target", source: "batch.targets.target" }] },
       view: { color: "#000000", width: 80, height: 40 }, parameters: {},
-    }).objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets" }] })
+    }).objective).toEqual({ externalInputs: [{ name: "target", source: "batch.targets.target" }] })
     expect(parseDefinition({
       name: "Output", kind: "output",
       view: { color: "#000000", width: 80, height: 40 }, parameters: {},
@@ -92,16 +92,16 @@ describe("package bundle v1", () => {
   it("preserves a declared objective target adaptation", () => {
     expect(parseDefinition({
       name: "MSE", kind: "loss",
-      objective: { externalInputs: [{ name: "target", source: "batch.targets", transform: "flatten_batch" }] },
+      objective: { externalInputs: [{ name: "target", source: "batch.targets.target", transform: "flatten_batch" }] },
       view: { color: "#b85c5c", width: 180, height: 100 }, parameters: {},
     }).objective).toEqual({
-      externalInputs: [{ name: "target", source: "batch.targets", transform: "flatten_batch" }],
+      externalInputs: [{ name: "target", source: "batch.targets.target", transform: "flatten_batch" }],
     })
   })
 
   it.each([
-    [{ name: "Loss", kind: "loss", objective: { externalInputs: [{ name: "target", source: "batch.targets" }, { name: "target", source: "batch.targets" }] } }],
-    [{ name: "Loss", kind: "loss", objective: { externalInputs: [{ name: "target", source: "batch.inputs" }] } }],
+    [{ name: "Loss", kind: "loss", objective: { externalInputs: [{ name: "target", source: "batch.targets.target" }, { name: "target", source: "batch.targets.other" }] } }],
+    [{ name: "Loss", kind: "loss", objective: { externalInputs: [{ name: "target", source: "batch.inputs.tokens" }] } }],
     [{ name: "Loss", kind: "loss" }],
     [{ name: "Layer", kind: "layer", objective: { externalInputs: [] } }],
   ])("rejects invalid objective declarations", (partial) => {
@@ -137,6 +137,9 @@ describe("package bundle v1", () => {
     expect(canonicalJson(first)).toBe(canonicalJson(second))
     expect(first.digest).toMatch(/^[0-9a-f]{64}$/)
     expect(first.graph.nodes[0]?.id).toBe("input")
+    expect(first.graph.inputBindings).toEqual([{ nodeId: "input", name: "input" }])
+    expect(first.graph.objectiveBindings).toEqual([])
+    expect(first.graph.nodes[0]?.inputBinding).toBe("input")
     expect(first.graph.edges[0]).toMatchObject({ targetHandle: "in-0", sourceHandle: "out" })
     expect(first.graph.nodes.find((item) => item.id === "layer")?.wheelAdapters).toEqual([{
       name: "decode", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" },
@@ -174,7 +177,7 @@ describe("package bundle v1", () => {
       ["input", { status: "success" as const, output: { shape: ["B", 4], dtype: "float32" as const } }],
       ["layer", { status: "success" as const, output: { shape: ["B", 7], dtype: "float32" as const } }],
     ]) }
-    const bound = { ...node("input", { id: "core.input", version: "0.1.0", name: "Input" }), data: { package: { id: "core.input", version: "0.1.0", name: "Input" }, wheelAdapters: [] } }
+    const bound = { ...node("input", { id: "core.input", version: "0.1.0", name: "Input" }), data: { package: { id: "core.input", version: "0.1.0", name: "Input" }, inputBinding: "input", wheelAdapters: [] } }
     const layerNode = { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, wheelAdapters: ["decode"] } }
     await expect(buildPackageBundle([bound, layerNode], [{ id: "edge", source: "input", target: "layer", sourceHandle: "out", targetHandle: "in" }], new Map([["core.input", input], ["test.layer", layer]]), incompatible)).rejects.toThrow(
       "wheel adapter 'decode' output schema is incompatible",

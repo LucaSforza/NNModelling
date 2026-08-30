@@ -48,7 +48,7 @@ export function validateStereotypeAuthoringRequest(input: StereotypeAuthoringReq
   if (input.kind !== "loss" && input.objective !== undefined) throw new Error("only loss stereotypes may declare an objective")
 
   const objective = input.kind === "loss" && input.objective === undefined
-    ? { externalInputs: [{ name: "target", source: "batch.targets" as const }] }
+    ? { externalInputs: [{ name: "target", source: "batch.targets.target" as const }] }
     : input.objective
 
   return {

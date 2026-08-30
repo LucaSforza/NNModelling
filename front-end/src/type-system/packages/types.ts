@@ -3,9 +3,11 @@ import type { TypeContext, TypeResult } from "../type-inference"
 
 export type PackageKind = "input" | "layer" | "loss" | "join" | "subflow" | "output"
 
+export type BatchSlotSource = `batch.targets.${string}`
+
 export type ObjectiveExternalInput = {
   readonly name: string
-  readonly source: "batch.targets"
+  readonly source: BatchSlotSource
   /** Optional declarative conversion from the dataset target contract. */
   readonly transform?: "flatten_batch"
 }

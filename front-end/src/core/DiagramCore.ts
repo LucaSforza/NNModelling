@@ -70,6 +70,9 @@ function validatePackageNode(node: unknown): void {
   if (hasLegacyParameterWrapper(data.params)) {
     throw new Error("Legacy frontend parameters rejected: values must be primitive package values");
   }
+  if (data.inputBinding !== undefined && (typeof data.inputBinding !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(data.inputBinding))) {
+    throw new Error("Input binding must be a valid batch slot name");
+  }
 }
 
 /** Keep legacy display metadata readable without allowing it to resolve a package. */
@@ -284,8 +287,14 @@ export class DiagramCore {
     kind: "input" | "layer" | "loss" | "output",
     x: number,
     y: number,
-    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[] },
+    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[]; inputBinding?: string },
   ): Node {
+    const inputBinding = kind === "input" && config?.parentId === undefined
+      ? (config?.inputBinding ?? "input")
+      : config?.inputBinding;
+    if (inputBinding !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(inputBinding)) {
+      throw new Error("Input binding must be a valid batch slot name");
+    }
     this._captureUndoState();
     const finalName = config?.name?.trim() || identity.name || identity.id;
     const newNode: Node = {
@@ -300,6 +309,7 @@ export class DiagramCore {
         name: finalName,
         color: config?.color ?? "#ffffff",
         params: clonePackageParams(config?.params),
+        ...(inputBinding === undefined ? {} : { inputBinding }),
         ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
       },
     };
@@ -323,6 +333,7 @@ export class DiagramCore {
       inputsCount?: number;
       parentId?: string;
       wheelAdapters?: readonly string[];
+      inputBinding?: string;
     },
   ): Node {
     if (kind === "join") {
@@ -347,6 +358,7 @@ export class DiagramCore {
       inputsCount?: number;
       parentId?: string;
       wheelAdapters?: readonly string[];
+      inputBinding?: string;
     },
   ): Node {
     this._captureUndoState();
@@ -383,6 +395,7 @@ export class DiagramCore {
       params?: Record<string, unknown>;
       parentId?: string;
       wheelAdapters?: readonly string[];
+      inputBinding?: string;
     },
   ): Node {
     this._captureUndoState();
@@ -426,6 +439,7 @@ export class DiagramCore {
       params?: Record<string, unknown>;
       inputsCount?: number;
       wheelAdapters?: readonly string[];
+      inputBinding?: string;
     },
   ): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
@@ -435,6 +449,9 @@ export class DiagramCore {
     }
     if (hasLegacyParameterWrapper(config.params)) {
       throw new Error("package parameters must use primitive values");
+    }
+    if (config.inputBinding !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.inputBinding)) {
+      throw new Error("Input binding must be a valid batch slot name");
     }
     this._captureUndoState();
     this.nodes = this.nodes.map((candidate) => {
@@ -447,6 +464,7 @@ export class DiagramCore {
         color: config.color ?? candidate.data.color,
         params: config.params === undefined ? candidate.data.params : clonePackageParams(config.params),
         ...(config.wheelAdapters === undefined ? {} : { wheelAdapters: [...config.wheelAdapters] }),
+        ...(config.inputBinding === undefined ? {} : { inputBinding: config.inputBinding }),
         ...(kind === "join" ? { inputsCount: config.inputsCount ?? candidate.data.inputsCount ?? 2 } : {}),
       };
       return {

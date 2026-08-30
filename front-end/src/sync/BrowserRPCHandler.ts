@@ -24,6 +24,7 @@ import type { Diagram } from "../Diagram.svelte";
 import type { Node, Edge } from "@xyflow/svelte";
 import type { GraphInferenceResult } from "../type-system/graph/types";
 import { packageIdentity } from "../type-system/graph/types";
+import { compileGraphBindings } from "../type-system/graph/bindings";
 import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
 import { TrainingController } from "../training/controller";
 import type { ProjectPathPayload } from "../project-workspace/path";
@@ -603,6 +604,7 @@ export class BrowserRPCHandler {
         inputsCount: ((params.inputsCount ?? config.inputsCount) as number | undefined) ?? (metadata.definition.kind === "join" ? 2 : undefined),
         parentId: (params.parentId ?? config.parentId) as string | undefined,
         wheelAdapters: (params.wheelAdapters ?? config.wheelAdapters) as string[] | undefined,
+        inputBinding: (params.inputBinding ?? config.inputBinding) as string | undefined,
       };
       const create = () => {
         const beforeCount = this.diagram.nodes.length;
@@ -614,11 +616,13 @@ export class BrowserRPCHandler {
           name: added.data.name ?? packageSpec.name,
           type: added.type ?? "custom",
           package: added.data.package,
+          ...(typeof added.data.inputBinding === "string" ? { inputBinding: added.data.inputBinding } : {}),
         };
       };
       const activatedCreate = (this.diagram as unknown as { addActivatedPackageNode?: Function }).addActivatedPackageNode;
       if (activatedCreate) return activatedCreate.call(this.diagram, identity, metadata.definition.kind, x, y, nodeConfig).then((added: Node) => ({
         nodeId: added.id, name: added.data.name ?? packageSpec.name, type: added.type ?? "custom", package: added.data.package,
+        ...(typeof added.data.inputBinding === "string" ? { inputBinding: added.data.inputBinding } : {}),
       }));
       if (metadata.state === undefined || metadata.state === "active") return create();
       return this.diagram.activatePackage(identity).then(create);
@@ -983,11 +987,13 @@ export class BrowserRPCHandler {
     };
     const inputNodes = topLevelNodes.filter((node) => kindOf(node) === "input");
 
-    if (inputNodes.length === 0) {
-      errors.push("No Input node found. Exactly 1 Input node is required.");
-    } else if (inputNodes.length > 1) {
-      errors.push(`Found ${inputNodes.length} Input nodes. Exactly 1 Input node is required.`);
-    }
+    if (inputNodes.length === 0) errors.push("No top-level Input node found.");
+    const definitions = new Map(this.diagram.packageCatalog.map((metadata) => [
+      `${metadata.id}@${metadata.version}`,
+      metadata.definition,
+    ]));
+    const bindings = compileGraphBindings(topLevelNodes, definitions);
+    errors.push(...bindings.diagnostics.map((diagnostic) => diagnostic.message));
 
     const topLevelIds = new Set(topLevelNodes.map((node) => node.id));
     const outgoing = new Map<string, string[]>();
