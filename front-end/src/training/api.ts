@@ -1,18 +1,17 @@
 import type { PackageBundleV1 } from "./package-bundle";
+import type { DatasetDefinition, DatasetReference, DatasetSourceManifest } from "../project-workspace/dataset-contract";
 
 export interface DatasetParameter {
   name: string;
   type: string;
-  default: unknown;
   required: boolean;
+  default?: unknown;
 }
 
 export interface DatasetInfo {
-  target: string;
-  name: string;
-  doc: string;
-  parameters: DatasetParameter[];
-  num_classes: number | null;
+  reference: DatasetReference;
+  manifest: DatasetSourceManifest;
+  definition: DatasetDefinition;
 }
 
 /** Keep the submitted constructor arguments aligned with the registered schema.
@@ -25,9 +24,9 @@ export function canonicalDatasetParameters(
   values: Readonly<Record<string, string>>,
 ): Record<string, string> {
   return Object.fromEntries(
-    dataset.parameters
+  dataset.definition.parameters
       .filter((parameter) => Object.hasOwn(values, parameter.name))
-      .map((parameter) => [parameter.name, values[parameter.name]!]),
+    .map((parameter) => [parameter.name, values[parameter.name]!]),
   );
 }
 
@@ -46,6 +45,7 @@ export interface TrainingJobStatus {
   model_package: ModelPackageInfo | null;
   package_error: string | null;
   artifact_dir: string;
+  dataset: { reference: DatasetReference; parameters: Record<string, string | number | boolean> } | null;
 }
 
 export interface ModelPackageInfo {
@@ -104,9 +104,9 @@ export interface TrainingJobRequest {
   package_name?: string;
 }
 
-export interface DatasetRequest { target: string; parameters: Record<string, unknown>; }
+export interface OpaqueDatasetRequest { reference: DatasetReference; parameters: Record<string, string | number | boolean>; }
 export interface TrainingRequest {
-  dataset: DatasetRequest;
+  dataset: OpaqueDatasetRequest;
   seed: number;
   optimizer: { target: string; learning_rate: number };
   trainer: { max_epochs: number; accelerator: "auto" | "cpu" | "cuda"; patience: number; min_delta: number };
@@ -122,6 +122,15 @@ export interface PackageBundleUploadResponse {
   digest: string;
   size: number;
 }
+
+export interface DatasetArchiveUploadResponse {
+  reference: DatasetReference;
+  digest: string;
+  size: number;
+  limit: number;
+}
+
+export interface DatasetArchiveCapabilities { format: "zip"; max_bytes: number }
 
 export interface PairingGrant {
   request_id: string;
@@ -203,6 +212,19 @@ export class TrainingApiClient {
 
   listDatasets(): Promise<DatasetInfo[]> {
     return this.request("/datasets");
+  }
+
+  datasetArchiveCapabilities(): Promise<DatasetArchiveCapabilities> {
+    return this.request("/dataset-archives/capabilities");
+  }
+
+  async uploadDatasetArchive(bytes: Uint8Array): Promise<DatasetArchiveUploadResponse> {
+    const digest = await sha256Hex(bytes as Uint8Array<ArrayBuffer>);
+    return this.request("/dataset-archives", {
+      method: "POST",
+      headers: { "content-type": "application/zip", "x-nnm-sha256": digest },
+      body: bytes as BodyInit,
+    });
   }
 
   listTrainingJobs(): Promise<TrainingJobStatus[]> {

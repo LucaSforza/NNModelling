@@ -16,6 +16,8 @@ import {
 import type { Edge, Node } from "@xyflow/svelte";
 import type { Diagram } from "../Diagram.svelte";
 import { buildPackageBundle, canonicalJson, type PackageBundleV1 } from "./package-bundle";
+import { buildDatasetArchive } from "./dataset-bundle";
+import type { GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
 import type { PackageExportInfo } from "../type-system/packages/types";
 import type { GraphInferenceResult } from "../type-system/graph/types";
 import type { TrainingJobRequest, TrainingJobStatus, TrainingProgressOptions, TrainingProgressResult } from "./api";
@@ -90,6 +92,7 @@ export interface TrainingDiagramSource {
   readonly typeResult: GraphInferenceResult | null;
   readonly waitForPackageRuntime: () => Promise<void>;
   readonly packageExports: () => ReadonlyMap<string, PackageExportInfo>;
+  readonly datasetResources?: ReadonlyMap<string, GeneratedDatasetResources>;
 }
 
 export interface PreparedTrainingSubmission {
@@ -166,6 +169,8 @@ export class TrainingController {
   private connection: TrainingConnectionView = disconnectedView();
   private config: TrainingConfig = cloneConfig(DEFAULT_CONFIG);
   private datasets: DatasetInfo[] = [];
+  private projectDatasetResources = new Map<string, GeneratedDatasetResources>();
+  private projectDatasetReferences = new Map<string, DatasetInfo["reference"]>();
   private listeners = new Set<TrainingControllerListener>();
   private generation = 0;
   private pairingTimer: ReturnType<typeof setInterval> | undefined;
@@ -185,7 +190,7 @@ export class TrainingController {
     return {
       connection: { ...this.connection },
       config: cloneConfig(this.config),
-      datasets: this.datasets.map((dataset) => ({ ...dataset, parameters: dataset.parameters.map((parameter) => ({ ...parameter })) })),
+      datasets: this.datasets.map((dataset) => ({ ...dataset, definition: { ...dataset.definition, parameters: dataset.definition.parameters.map((parameter) => ({ ...parameter })) } })),
     };
   }
 
@@ -201,15 +206,25 @@ export class TrainingController {
     return this.snapshot().datasets;
   }
 
+  /** Install project-owned descriptors and their browser-readable closures. */
+  setProjectDatasets(datasets: readonly DatasetInfo[], resources: ReadonlyMap<string, GeneratedDatasetResources>): void {
+    this.projectDatasetResources = new Map(resources);
+    this.datasets = [...this.datasets.filter((dataset) => dataset.reference.kind === "builtin"), ...datasets];
+    if (!this.config.selectedDataset && this.datasets[0]) {
+      this.config = { ...this.config, selectedDataset: this.datasets[0].reference.ref, datasetParams: datasetDefaults(this.datasets[0]) };
+    }
+    this.emit();
+  }
+
   isSubmissionCurrent(generation: number): boolean {
     return this.generation === generation;
   }
 
   /** Install the browser-provided descriptor catalog and materialize defaults. */
   setDatasets(datasets: readonly DatasetInfo[]): TrainingConfig {
-    this.datasets = datasets.map((dataset) => ({ ...dataset, parameters: dataset.parameters.map((parameter) => ({ ...parameter })) }));
+    this.datasets = datasets.map((dataset) => ({ ...dataset, definition: { ...dataset.definition, parameters: dataset.definition.parameters.map((parameter) => ({ ...parameter })) } }));
     if (!this.config.selectedDataset && this.datasets[0]) {
-      this.config = { ...this.config, selectedDataset: this.datasets[0].target, datasetParams: datasetDefaults(this.datasets[0]) };
+      this.config = { ...this.config, selectedDataset: this.datasets[0].reference.ref, datasetParams: datasetDefaults(this.datasets[0]) };
     }
     this.emit();
     return this.getConfig();
@@ -407,7 +422,7 @@ export class TrainingController {
     }
     const generation = this.generation;
     const config = this.getConfig();
-    const dataset = this.datasets.find((candidate) => candidate.target === config.selectedDataset);
+    const dataset = this.datasets.find((candidate) => candidate.reference.ref === config.selectedDataset);
     if (!dataset) throw new TrainingConfigurationError("Seleziona un dataset disponibile prima di accodare il training", { field: "selectedDataset" });
     validateConfig(config, this.datasets);
 
@@ -417,10 +432,20 @@ export class TrainingController {
     const edges = diagram.edges.map((edge) => ({ ...edge }));
     const exportScope = new Map(diagram.packageExports());
     const diagramFingerprint = fingerprint(nodes, edges);
-    const bundle = await buildPackageBundle(nodes, edges, exportScope, diagram.typeResult);
+    const bundle = await buildPackageBundle(nodes, edges, exportScope, diagram.typeResult, dataset.definition);
     assertCurrent(this, generation);
     if (!sameDiagramSnapshot(diagram, diagramFingerprint, exportScope)) {
       throw new TrainingSubmissionError("Il progetto è cambiato durante la preparazione; invio annullato");
+    }
+    let datasetReference = this.projectDatasetReferences.get(dataset.reference.ref) ?? dataset.reference;
+    if (datasetReference.kind === "project" && !datasetReference.digest) {
+      const resources = this.projectDatasetResources.get(datasetReference.ref)
+        ?? ("datasetResources" in diagram ? diagram.datasetResources : undefined)?.get(datasetReference.ref);
+      if (!resources) throw new TrainingConfigurationError("Il dataset del progetto non è disponibile per l'upload", { field: "selectedDataset" });
+      const capabilities = await this.getApi().datasetArchiveCapabilities();
+      const archive = await buildDatasetArchive(resources, { maxBytes: capabilities.max_bytes });
+      datasetReference = (await this.getApi().uploadDatasetArchive(archive.bytes)).reference;
+      this.projectDatasetReferences.set(dataset.reference.ref, datasetReference);
     }
     const uploaded = await this.getApi().uploadPackageBundle(bundle);
     assertCurrent(this, generation);
@@ -431,7 +456,7 @@ export class TrainingController {
       schema_version: 1,
       network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
       training: {
-        dataset: { target: config.selectedDataset, parameters: datasetParameters(dataset, config.datasetParams) },
+        dataset: { reference: datasetReference, parameters: datasetParameters(dataset, config.datasetParams) },
         seed: config.seed,
         optimizer: { target: config.optimizerTarget, learning_rate: config.learningRate },
         trainer: { max_epochs: config.maxEpochs, accelerator: config.accelerator, patience: config.patience, min_delta: config.minDelta },
@@ -454,9 +479,9 @@ export class TrainingController {
     const datasets = await this.getApi().listDatasets();
     if (generation !== this.generation) return this.getDatasets();
     const selected = this.config.selectedDataset;
-    this.setDatasets(datasets);
+    this.setDatasets([...datasets, ...this.datasets.filter((dataset) => dataset.reference.kind === "project")]);
     if (selected) {
-      const current = datasets.find((dataset) => dataset.target === selected);
+      const current = datasets.find((dataset) => dataset.reference.ref === selected);
       if (current) {
         this.config = { ...this.config, datasetParams: mergeDatasetDefaults(current, this.config.datasetParams) };
         this.emit();
@@ -558,7 +583,7 @@ function cloneConfig(config: TrainingConfig): TrainingConfig {
 }
 
 function datasetDefaults(dataset: DatasetInfo): Record<string, unknown> {
-  return Object.fromEntries(dataset.parameters.map((parameter) => [parameter.name, parameter.default]));
+  return Object.fromEntries(dataset.definition.parameters.map((parameter) => [parameter.name, parameter.default]));
 }
 
 function mergeDatasetDefaults(dataset: DatasetInfo, values: Record<string, unknown>): Record<string, unknown> {
@@ -567,10 +592,10 @@ function mergeDatasetDefaults(dataset: DatasetInfo, values: Record<string, unkno
 
 function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]): void {
   if (config.selectedDataset) {
-    const dataset = datasets.find((candidate) => candidate.target === config.selectedDataset);
+    const dataset = datasets.find((candidate) => candidate.reference.ref === config.selectedDataset);
     if (datasets.length > 0 && !dataset) throw new TrainingConfigurationError(`Dataset sconosciuto: ${config.selectedDataset}`, { field: "selectedDataset" });
     if (dataset) {
-      const allowed = new Map(dataset.parameters.map((parameter) => [parameter.name, parameter]));
+      const allowed = new Map(dataset.definition.parameters.map((parameter) => [parameter.name, parameter]));
       const unknown = Object.keys(config.datasetParams).filter((key) => !allowed.has(key));
       if (unknown.length > 0) throw new TrainingConfigurationError(`Parametro dataset sconosciuto: ${unknown.join(", ")}`, { field: "datasetParams", keys: unknown });
       for (const [key, value] of Object.entries(config.datasetParams)) validateDatasetValue(allowed.get(key)!, value);
@@ -592,7 +617,7 @@ function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]
   if (config.packageSuffix && !/^[A-Za-z][A-Za-z0-9_]*$/.test(config.packageSuffix)) throw invalid("packageSuffix", "formato non valido");
 }
 
-function validateDatasetValue(parameter: DatasetInfo["parameters"][number], value: unknown): void {
+function validateDatasetValue(parameter: DatasetInfo["definition"]["parameters"][number], value: unknown): void {
   if (value === undefined || value === null) {
     if (parameter.required) throw invalid(`datasetParams.${parameter.name}`, "è obbligatorio");
     return;
@@ -648,8 +673,8 @@ function exportIdentity(value: PackageExportInfo): Record<string, unknown> {
   return { id: value.manifest.id, version: value.manifest.version, state: value.state, active: value.active, dependencies: value.manifest.dependencies, resolvedDependencies: value.resolvedDependencies };
 }
 
-function datasetParameters(dataset: DatasetInfo, values: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  return Object.fromEntries(dataset.parameters.filter((parameter) => Object.hasOwn(values, parameter.name)).map((parameter) => [parameter.name, values[parameter.name]]));
+function datasetParameters(dataset: DatasetInfo, values: Readonly<Record<string, unknown>>): Record<string, string | number | boolean> {
+  return Object.fromEntries(dataset.definition.parameters.filter((parameter) => Object.hasOwn(values, parameter.name)).map((parameter) => [parameter.name, values[parameter.name]])) as Record<string, string | number | boolean>;
 }
 
 function assertCurrent(controller: TrainingController, generation: number): void {
