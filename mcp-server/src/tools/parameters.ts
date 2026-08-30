@@ -27,7 +27,7 @@ export const set_parameter = {
   schema: z.object({
     nodeId: z.string().min(1),
     key: z.string().min(1),
-    value: z.string(),
+    value: z.unknown(),
   }),
 
   async handler(ctx: ServerContext, input: z.infer<typeof this.schema>) {
@@ -38,7 +38,7 @@ export const set_parameter = {
 export const update_parameters = {
   schema: z.object({
     nodeId: z.string().min(1),
-    params: z.record(z.string(), z.string()),
+    params: z.record(z.string(), z.unknown()),
   }),
 
   async handler(ctx: ServerContext, input: z.infer<typeof this.schema>) {

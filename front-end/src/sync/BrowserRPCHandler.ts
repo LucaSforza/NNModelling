@@ -24,6 +24,7 @@ import type { Diagram } from "../Diagram.svelte";
 import type { Node, Edge } from "@xyflow/svelte";
 import type { GraphInferenceResult } from "../type-system/graph/types";
 import { packageIdentity } from "../type-system/graph/types";
+import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -297,13 +298,13 @@ export class BrowserRPCHandler {
           result = this.handleValidateGraph();
           break;
         case "validate_connections":
-          result = { valid: true, errors: [], warnings: [] };
+          result = { valid: false, supported: false, errors: ["Connection validation is delegated to each connect_nodes operation."], warnings: [] };
           break;
         case "validate_parameters":
-          result = { valid: true, errors: [], warnings: [] };
+          result = this.handleValidateParameters();
           break;
         case "validate_subflows":
-          result = { valid: true, errors: [], warnings: [] };
+          result = { valid: false, supported: false, errors: ["Subflow validation is not exposed by the editor runtime."], warnings: [] };
           break;
 
         // ── Lifecycle ─────────────────────────────────────────────
@@ -515,23 +516,25 @@ export class BrowserRPCHandler {
         throw new Error(`Package name mismatch for ${packageSpec.id}: expected '${metadata.definition.name}'`);
       }
       const identity = { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name };
+      const suppliedParams = (params.parameters ?? config.params) as Record<string, unknown> | undefined;
+      if (suppliedParams && (typeof suppliedParams !== "object" || Array.isArray(suppliedParams))) {
+        throw new Error("parameters must be an object");
+      }
+      validatePackageParameterValues(metadata.definition, suppliedParams ?? {});
+      const nodeParams = initialPackageParameters(metadata.definition, suppliedParams);
+      const nodeConfig = {
+        name: (params.name ?? config.name) as string | undefined,
+        color: (params.color ?? config.color ?? metadata.definition.view.color) as string | undefined,
+        width: (params.width ?? config.width ?? metadata.definition.view.width) as number | undefined,
+        height: (params.height ?? config.height ?? metadata.definition.view.height) as number | undefined,
+        params: nodeParams,
+        inputsCount: ((params.inputsCount ?? config.inputsCount) as number | undefined) ?? (metadata.definition.kind === "join" ? 2 : undefined),
+        parentId: (params.parentId ?? config.parentId) as string | undefined,
+        wheelAdapters: (params.wheelAdapters ?? config.wheelAdapters) as string[] | undefined,
+      };
       const create = () => {
         const beforeCount = this.diagram.nodes.length;
-        this.diagram.addPackageNode(
-          identity,
-          metadata.definition.kind,
-          x,
-          y,
-          {
-            name: config.name as string | undefined,
-            color: (config.color as string | undefined) ?? metadata.definition.view.color,
-            width: (config.width as number | undefined) ?? metadata.definition.view.width,
-            height: (config.height as number | undefined) ?? metadata.definition.view.height,
-            params: (config.params as Record<string, unknown>) ?? {},
-            inputsCount: config.inputsCount as number | undefined,
-            parentId: config.parentId as string | undefined,
-          },
-        );
+        this.diagram.addPackageNode(identity, metadata.definition.kind, x, y, nodeConfig);
         const added = this.diagram.nodes[beforeCount];
         if (!added) throw new Error("Failed to create package node");
         return {
@@ -541,10 +544,12 @@ export class BrowserRPCHandler {
           package: added.data.package,
         };
       };
+      const activatedCreate = (this.diagram as unknown as { addActivatedPackageNode?: Function }).addActivatedPackageNode;
+      if (activatedCreate) return activatedCreate.call(this.diagram, identity, metadata.definition.kind, x, y, nodeConfig).then((added: Node) => ({
+        nodeId: added.id, name: added.data.name ?? packageSpec.name, type: added.type ?? "custom", package: added.data.package,
+      }));
       if (metadata.state === undefined || metadata.state === "active") return create();
-      return this.diagram.activatePackage(
-        identity,
-      ).then(create);
+      return this.diagram.activatePackage(identity).then(create);
     }
 
     throw new Error("create_node requires package {id, version, name, kind}");
@@ -673,7 +678,9 @@ export class BrowserRPCHandler {
     if (!metadata.definition.parameters[key]) throw new Error(`Unknown package parameter: ${key}`);
     const currentParams = (node.data.params as Record<string, unknown> | undefined) ?? {};
     const previousValue = currentParams[key];
-    this.updateNodeParams(node, { ...currentParams, [key]: value });
+    const nextParams = { ...currentParams, [key]: value };
+    validatePackageParameterValues(metadata.definition, nextParams);
+    this.updateNodeParams(node, nextParams);
 
     return { nodeId, key, previousValue: previousValue ?? "", currentValue: value };
   }
@@ -704,6 +711,7 @@ export class BrowserRPCHandler {
       newParams[key] = value;
     }
 
+    validatePackageParameterValues(metadata.definition, newParams);
     this.updateNodeParams(node, newParams);
 
     return { nodeId, updated, unchanged };
@@ -976,6 +984,18 @@ export class BrowserRPCHandler {
       errors,
       warnings,
     };
+  }
+
+  private handleValidateParameters(): Record<string, unknown> {
+    const result = this.diagram.typeResult ?? this.diagram.refreshTypes();
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    for (const [nodeId, state] of result.nodes) {
+      if (state.status === "error") errors.push(`${nodeId}: ${state.message}`);
+      else if (state.status === "fault") errors.push(`${nodeId}: ${state.fault.message}`);
+      else if (state.status === "unresolved") warnings.push(`${nodeId}: ${"reason" in state ? state.reason : `Missing: ${state.missingParameters.join(", ")}`}`);
+    }
+    return { valid: errors.length === 0, supported: true, errors, warnings };
   }
 
   // ── Canvas / Viewport Handlers ─────────────────────────────────────

@@ -33,6 +33,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { BrowserRPCClient } from "./browser-client.js";
 import { RemoteTrainingClient } from "./remote-training.js";
+import { z } from "zod";
+import { MCPServerError } from "./errors.js";
 
 // ── Import all tool modules ─────────────────────────────────────────────
 // Each file exports multiple named tools (e.g. create_node, delete_nodes).
@@ -70,6 +72,7 @@ export interface CreateServerOptions {
 
 interface MCPToolEntry {
   schema: Record<string, unknown>;
+  parse: (value: unknown) => Record<string, unknown>;
   handler: (ctx: ServerContext, input: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -102,6 +105,7 @@ function discoverTools(module: Record<string, unknown>): Map<string, MCPToolEntr
       const entry = value as { schema: unknown; handler: (ctx: ServerContext, input: Record<string, unknown>) => Promise<unknown> };
       tools.set(name, {
         schema: zodToJsonSchema(entry.schema as any),
+        parse: (value: unknown) => (entry.schema as z.ZodTypeAny).parse(value) as Record<string, unknown>,
         handler: entry.handler,
       });
     }
@@ -185,7 +189,16 @@ export async function createServer(
     }
 
     try {
-      const result = await tool.handler(ctx, (request.params.arguments ?? {}) as Record<string, unknown>);
+      let input: Record<string, unknown>;
+      try {
+        input = tool.parse(request.params.arguments ?? {});
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          throw new MCPServerError("INVALID_ARGUMENT", err.issues.map((issue) => `${issue.path.join(".") || "arguments"}: ${issue.message}`).join("; "));
+        }
+        throw err;
+      }
+      const result = await tool.handler(ctx, input);
 
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

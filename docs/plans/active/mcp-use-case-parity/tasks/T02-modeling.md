@@ -1,7 +1,7 @@
 ---
 id: T02
 kind: task
-status: draft
+status: blocked
 plan: ../plan.md
 role: integration
 depends_on: [T08]
@@ -79,6 +79,15 @@ No stereotype authoring, package runtime/type-language redesign, layout work or 
 
 Run from the repository root. Extend the listed tests for the new behavior;
 passing unchanged proxy mocks alone is not proof of this task.
+
+## Handoff status
+
+Active-editor modeling seams are implemented: package-only typed schemas,
+browser-side default materialization and parameter validation, activated
+package creation, join arity/default presentation fields, and truthful
+validator responses. Full parity remains blocked by T08's documented startup
+directory-picker bridge; no startup project workflow or browser fallback was
+added.
 
 ```bash
 pnpm --dir front-end exec vitest run src/__tests__/BrowserRPCPackageOnly.test.ts src/__tests__/BrowserRPCHandler.test.ts
