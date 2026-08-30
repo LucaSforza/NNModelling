@@ -1,5 +1,7 @@
 import type { ModelBundleResources } from "../type-system/editor-runtime"
 
+export * from "./dataset-contract"
+
 export type FileSystemPermissionMode = "read" | "readwrite"
 
 /** The small subset of the File System Access API used by project workspaces. */
