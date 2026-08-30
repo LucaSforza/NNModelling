@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import fs from "node:fs/promises";
 import type { ServerContext } from "../src/server";
 import type { BrowserRPCClient } from "../src/browser-client";
 
@@ -43,23 +44,41 @@ function createMockBrowser(): BrowserRPCClient {
 function createTestContext(): ServerContext {
   return {
     browser: createMockBrowser(),
-    projectRoot: "/tmp/projects",
+    projectRoot: "/tmp",
+    projectPaths: new Map(),
   };
 }
 
 describe("project tools", () => {
   it("validates and forwards an explicit project path without exposing handles", async () => {
     const ctx = createTestContext();
-    const input = { projectPath: "/tmp/projects/demo", id: "demo", version: "0.1.0", name: "Demo" };
-    const result = await projectTools.create_project.handler(ctx, input);
-    expect(ctx.browser.call).toHaveBeenCalledWith("create_project", input);
-    expect(result).toEqual({});
+    const parent = await fs.mkdtemp("/tmp/nnm-project-");
+    const input = { projectPath: `${parent}/demo`, id: "demo", version: "0.1.0", name: "Demo" };
+    try {
+      const result = await projectTools.create_project.handler(ctx, input);
+      expect(ctx.browser.call).toHaveBeenCalledWith("create_project", expect.objectContaining({ projectPath: input.projectPath, modelJson: expect.any(String), resources: expect.any(Object) }));
+      expect(result).toEqual({});
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true });
+    }
   });
 
   it("rejects paths outside the configured root before browser RPC", async () => {
     const ctx = createTestContext();
-    await expect(projectTools.open_project.handler(ctx, { projectPath: "/tmp/other/demo" })).rejects.toThrow("inside");
+    await expect(projectTools.open_project.handler({ ...ctx, projectRoot: "/tmp/projects" }, { projectPath: "/tmp/other/demo" })).rejects.toThrow("inside");
     expect(ctx.browser.call).not.toHaveBeenCalled();
+  });
+
+  it("rolls back only the directory created when activation fails", async () => {
+    const parent = await fs.mkdtemp("/tmp/nnm-project-");
+    const ctx = createTestContext();
+    (ctx.browser.call as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("activation failed"));
+    try {
+      await expect(projectTools.create_project.handler(ctx, { projectPath: `${parent}/demo`, id: "demo", version: "0.1.0", name: "Demo" })).rejects.toThrow("activation failed");
+      await expect(fs.stat(`${parent}/demo`)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true });
+    }
   });
 });
 

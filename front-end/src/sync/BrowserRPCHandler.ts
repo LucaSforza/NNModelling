@@ -26,6 +26,7 @@ import type { GraphInferenceResult } from "../type-system/graph/types";
 import { packageIdentity } from "../type-system/graph/types";
 import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
 import { TrainingController } from "../training/controller";
+import type { ProjectPathPayload } from "../project-workspace/path";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -38,7 +39,12 @@ interface RPCRequest {
 interface RPCResponse {
   id: string;
   result?: unknown;
-  error?: { message: string };
+  error?: { message: string; code?: string };
+}
+
+export interface ProjectRPCBridge {
+  create: (payload: ProjectPathPayload) => Promise<unknown>;
+  open: (payload: ProjectPathPayload) => Promise<unknown>;
 }
 
 // The WebSocket protocol defines OPEN as readyState 1. Keeping the value
@@ -102,12 +108,14 @@ export interface ViewportController {
 export class BrowserRPCHandler {
   private ws: WebSocket | null = null;
   private diagram: Diagram;
+  private diagramActive: boolean;
   private url: string;
   private reconnectDelay: number = 1000;
   private intentionalClose: boolean = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private viewport?: ViewportController;
   private training?: TrainingController;
+  private project?: ProjectRPCBridge;
 
   /**
    * @param diagram  The Diagram instance to mutate (single source of truth).
@@ -116,8 +124,9 @@ export class BrowserRPCHandler {
    * @param viewport Optional viewport controller (fitView/setCenter).
    *                 Passed from FlowCanvas.svelte via useSvelteFlow().
    */
-  constructor(diagram: Diagram, url?: string, viewport?: ViewportController, training?: TrainingController) {
-    this.diagram = diagram;
+  constructor(diagram: Diagram | undefined, url?: string, viewport?: ViewportController, training?: TrainingController, project?: ProjectRPCBridge) {
+    this.diagram = diagram as Diagram;
+    this.diagramActive = diagram !== undefined;
     this.url =
       url ??
       (import.meta.env.DEV
@@ -125,6 +134,17 @@ export class BrowserRPCHandler {
         : `ws://localhost:9339`);
     this.viewport = viewport;
     this.training = training;
+    this.project = project;
+  }
+
+  bindDiagram(diagram: Diagram | undefined): void {
+    this.diagramActive = diagram !== undefined;
+    if (diagram) this.diagram = diagram;
+  }
+
+  /** Send a fire-and-forget browser-owned notification to the MCP bridge. */
+  notify(method: string, params: Record<string, unknown>): void {
+    if (this.ws?.readyState === WEBSOCKET_OPEN) this.ws.send(JSON.stringify({ method, params }));
   }
 
   // ── Public API ───────────────────────────────────────────────────────
@@ -197,6 +217,9 @@ export class BrowserRPCHandler {
     const { id, method, params = {} } = request;
 
     try {
+      if (!this.diagramActive && method !== "create_project" && method !== "open_project" && method !== "ping") {
+        throw Object.assign(new Error("No active project; open or create a project first"), { code: "NO_ACTIVE_PROJECT" });
+      }
       let result: unknown;
 
       switch (method) {
@@ -311,6 +334,12 @@ export class BrowserRPCHandler {
           break;
 
         // ── Lifecycle ─────────────────────────────────────────────
+        case "create_project":
+          result = this.project?.create(params as unknown as ProjectPathPayload) ?? Promise.reject(Object.assign(new Error("Project path bridge is unavailable"), { code: "PROJECT_PATH_BRIDGE_UNAVAILABLE" }));
+          break;
+        case "open_project":
+          result = this.project?.open(params as unknown as ProjectPathPayload) ?? Promise.reject(Object.assign(new Error("Project path bridge is unavailable"), { code: "PROJECT_PATH_BRIDGE_UNAVAILABLE" }));
+          break;
         case "reset_diagram":
           result = this.handleResetDiagram();
           break;
@@ -358,7 +387,7 @@ export class BrowserRPCHandler {
         void result.then((resolved) => this.sendResponse({ id, result: resolved })).catch((error) => {
           this.sendResponse({
             id,
-            error: { message: error instanceof Error ? error.message : String(error) },
+            error: { message: error instanceof Error ? error.message : String(error), ...((error as { code?: string }).code ? { code: (error as { code: string }).code } : {}) },
           });
         });
         return;
@@ -367,7 +396,7 @@ export class BrowserRPCHandler {
     } catch (error) {
       this.sendResponse({
         id,
-        error: { message: error instanceof Error ? error.message : String(error) },
+        error: { message: error instanceof Error ? error.message : String(error), ...((error as { code?: string }).code ? { code: (error as { code: string }).code } : {}) },
       });
     }
   }
@@ -1083,8 +1112,9 @@ export class BrowserRPCHandler {
     return {
       status: "ok",
       uptime: performance.now() / 1000,
-      nodeCount: this.diagram.nodes.length,
-      edgeCount: this.diagram.edges.length,
+      nodeCount: this.diagramActive ? this.diagram.nodes.length : 0,
+      edgeCount: this.diagramActive ? this.diagram.edges.length : 0,
+      projectReady: this.diagramActive,
       activeTransaction: null,
     };
   }

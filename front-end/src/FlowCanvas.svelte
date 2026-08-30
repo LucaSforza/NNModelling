@@ -85,9 +85,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   export type FlowCanvasProps = {
     readonly session: ProjectWorkspaceSession;
     readonly onInitializationError?: (message: string) => void;
+    readonly rpcHandler?: BrowserRPCHandler;
+    readonly onSessionReady?: () => void;
   };
 
-  let { session, onInitializationError }: FlowCanvasProps = $props();
+  let { session, onInitializationError, rpcHandler, onSessionReady }: FlowCanvasProps = $props();
 
   // The Diagram is created only after App has obtained a writable workspace.
   // It remains the sole graph authority for the lifetime of this editor.
@@ -169,6 +171,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         if (!active) return;
         unsubscribeSave = session.writer.subscribe((status) => { saveStatus = status; });
         isSessionReady = true;
+        onSessionReady?.();
         if (isEmptyProject) persistModel();
       } catch (error) {
         if (!active) return;
@@ -208,7 +211,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let syncClient: BrowserRPCHandler;
 
   $effect(() => {
-    syncClient = new BrowserRPCHandler(diagram, undefined, { fitView, setCenter }, trainingController);
+    syncClient = rpcHandler ?? new BrowserRPCHandler(diagram, undefined, { fitView, setCenter }, trainingController);
+    if (rpcHandler) {
+      syncClient.bindDiagram(diagram);
+      return () => syncClient.bindDiagram(undefined);
+    }
     syncClient.connect();
     return () => syncClient.disconnect();
   });

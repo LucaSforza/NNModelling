@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { ServerContext } from "../server.js"
-import { validateProjectPath } from "../project-path.js"
+import { createProjectAtPath, openProjectAtPath, rollbackCreatedProject } from "../project-path.js"
 
 const projectPath = z.string().min(1).describe("Absolute canonical project directory path")
 
@@ -14,15 +14,27 @@ export const create_project = {
     description: z.string().optional(),
   }),
   async handler(ctx: ServerContext, input: { projectPath: string; id: string; version: string; name: string; description?: string }) {
-    const safePath = validateProjectPath(input.projectPath, ctx.projectRoot)
-    return ctx.browser.call("create_project", { ...input, projectPath: safePath })
+    const payload = await createProjectAtPath(input.projectPath, ctx.projectRoot, input)
+    let result: unknown
+    try {
+      result = await ctx.browser.call("create_project", payload)
+    } catch (error) {
+      await rollbackCreatedProject(payload.projectPath, ctx.projectRoot).catch(() => undefined)
+      throw error
+    }
+    const tabId = ctx.browser.getActiveTabId()
+    if (tabId) ctx.projectPaths.set(tabId, payload.projectPath)
+    return result
   },
 }
 
 export const open_project = {
   schema: z.object({ projectPath }),
   async handler(ctx: ServerContext, input: { projectPath: string }) {
-    const safePath = validateProjectPath(input.projectPath, ctx.projectRoot)
-    return ctx.browser.call("open_project", { projectPath: safePath })
+    const payload = await openProjectAtPath(input.projectPath, ctx.projectRoot)
+    const result = await ctx.browser.call("open_project", payload)
+    const tabId = ctx.browser.getActiveTabId()
+    if (tabId) ctx.projectPaths.set(tabId, payload.projectPath)
+    return result
   },
 }

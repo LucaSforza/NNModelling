@@ -231,9 +231,10 @@ MCP server requires `NNM_PROJECT_ROOT` and accepts only an absolute canonical
 child whose final directory is a lowercase model ID; traversal, root,
 outside-root and NUL-containing paths fail before browser RPC. The path is
 forwarded only as a request value and never returned as a handle or credential.
-The browser startup consumer for this path mode is not yet available, so these
-tools must report capability failure until that adapter can activate the
-browser-owned workspace and ordered writer.
+The approved path mode now reads/creates files in the confined MCP project
+root, transfers model/resources to the browser startup consumer, and receives
+only model-save notifications back; activation and ordered workspace state
+remain browser-owned.
 
 The MCP request may therefore return `pending` with
 `reason:"user_gesture_required"` and a bounded retry hint. A visible browser

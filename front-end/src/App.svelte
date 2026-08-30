@@ -17,11 +17,21 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import ProjectStart from "./components/ProjectStart.svelte";
   import TrainingLogWindow from "./components/TrainingLogWindow.svelte";
   import type { ProjectWorkspaceSession } from "./project-workspace";
+  import { createPathProjectSession, type ProjectPathPayload } from "./project-workspace/path";
+  import { BrowserRPCHandler, type ProjectRPCBridge } from "./sync/BrowserRPCHandler";
   import "@xyflow/svelte/dist/style.css";
 
   const trainingLogJobId = new URL(window.location.href).searchParams.get("training-log");
   let workspaceSession = $state<ProjectWorkspaceSession | null>(null);
   let workspaceError = $state<string | null>(null);
+  let readyWaiter: { resolve: () => void; reject: (error: Error) => void; previous: ProjectWorkspaceSession | null } | undefined;
+
+  const projectBridge: ProjectRPCBridge = {
+    create: (payload) => activatePathProject(payload),
+    open: (payload) => activatePathProject(payload),
+  };
+  const rpcHandler = new BrowserRPCHandler(undefined, undefined, undefined, undefined, projectBridge);
+  rpcHandler.connect();
 
   function handleWorkspaceOpen(session: ProjectWorkspaceSession): void {
     workspaceError = null;
@@ -29,8 +39,40 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   function handleWorkspaceError(message: string): void {
-    workspaceSession = null;
+    const waiter = readyWaiter;
+    readyWaiter = undefined;
+    if (waiter) {
+      workspaceSession = waiter.previous;
+      waiter.reject(new Error(message));
+    } else {
+      workspaceSession = null;
+    }
     workspaceError = message;
+  }
+
+  async function activatePathProject(payload: ProjectPathPayload): Promise<Record<string, unknown>> {
+    const previous = workspaceSession;
+    const session = createPathProjectSession(payload, async (modelJson) => {
+      // BrowserRPCHandler sends this notification through the same selected
+      // connection; the MCP owner persists it to the already validated path.
+      rpcHandler.notify("project_save", { projectPath: payload.projectPath, modelJson });
+    });
+    workspaceError = null;
+    readyWaiter = { previous, resolve: () => undefined, reject: () => undefined };
+    const ready = new Promise<void>((resolve, reject) => {
+      readyWaiter = { previous, resolve, reject };
+    });
+    workspaceSession = session;
+    try {
+      await ready;
+      const manifest = JSON.parse(payload.modelJson).manifest as { id: string; version: string; name: string };
+      return { status: "ok", project: { id: manifest.id, version: manifest.version, name: manifest.name }, resourceCount: Object.keys(payload.resources).length };
+    } catch (error) {
+      workspaceSession = previous;
+      throw error;
+    } finally {
+      if (readyWaiter?.previous === previous) readyWaiter = undefined;
+    }
   }
 </script>
 
@@ -43,7 +85,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         style="height: 100vh; width: 100vw; overflow: hidden; background: #f8f8f8;"
       >
         <SvelteFlowProvider>
-          <FlowCanvas session={workspaceSession} onInitializationError={handleWorkspaceError} />
+          <FlowCanvas session={workspaceSession} rpcHandler={rpcHandler} onSessionReady={() => readyWaiter?.resolve()} onInitializationError={handleWorkspaceError} />
         </SvelteFlowProvider>
       </div>
     {/key}

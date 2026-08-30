@@ -149,11 +149,12 @@ M6 includes two proposed operations, `create_project` and `open_project`.
 Creation accepts an explicit `projectPath` plus the UI form's `id`, `version`,
 `name` and optional `description`, with identical defaults/validation. The MCP
 path is canonical, absolute and confined to the configured project root;
-collision rejection, initialization, activation and ordered writes remain
-browser-owned. Opening loads the chosen project's model and declared resources
-through the same service used by the UI. Do not replace this with
-`import_diagram` or `reset_diagram`, and do not expose handles or paths in
-results.
+collision rejection and initialization are performed by the confined,
+user-authorized MCP path bridge; activation and ordered writes remain
+browser-owned (the bridge persists only model-save notifications). Opening
+loads the chosen project's model and declared resources through the same
+service used by the UI. Do not replace this with `import_diagram` or
+`reset_diagram`, and do not expose handles or paths in results.
 
 T01 must resolve how the selected browser tab accepts project requests before
 an editor/DiagramCore is mounted. T08 owns that application-shell bridge;

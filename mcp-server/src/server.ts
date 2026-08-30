@@ -51,6 +51,7 @@ import * as connectionTools from "./tools/connection.js";
 import * as screenshotTools from "./tools/screenshot.js";
 import * as remoteTrainingTools from "./tools/remote-training.js";
 import * as projectTools from "./tools/project.js";
+import { saveProjectModel } from "./project-path.js";
 
 // ── ServerContext ───────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ export interface ServerContext {
   browser: BrowserRPCClient;
   remoteTraining?: RemoteTrainingClient;
   projectRoot?: string;
+  projectPaths: Map<string, string>;
 }
 
 export interface CreateServerOptions {
@@ -138,7 +140,18 @@ export async function createServer(
     browser,
     remoteTraining: new RemoteTrainingClient(options.backendUrl),
     projectRoot: options.projectRoot,
+    projectPaths: new Map(),
   };
+  browser.onNotification((tabId, method, params) => {
+    if (method !== "project_save") return;
+    const projectPath = params.projectPath;
+    const modelJson = params.modelJson;
+    if (typeof projectPath !== "string" || typeof modelJson !== "string") return;
+    if (ctx.projectPaths.get(tabId) !== projectPath) return;
+    void saveProjectModel(projectPath, ctx.projectRoot, modelJson).catch((error) => {
+      console.error(`[nnmodelling-mcp] project save failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
 
   // ── Step 4: Create MCP Server instance ──────────────────────────────
   const server = new Server(

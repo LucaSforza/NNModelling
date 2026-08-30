@@ -1,7 +1,7 @@
 ---
 id: T08
 kind: task
-status: blocked
+status: ready
 plan: ../plan.md
 role: integration
 depends_on: [T01]
@@ -116,12 +116,13 @@ The explicit MCP path mode is lexically confined by the MCP server to
 canonical path whose final directory is a lowercase model ID; the root itself,
 relative paths, traversal, NUL bytes and paths outside the root are rejected.
 The browser still owns project activation, resource loading and ordered
-autosave; project handles and credentials never enter RPC results.
+autosave. The MCP owner persists only the model file through a narrow save
+notification; project handles and credentials never enter RPC results.
 
-The graphical picker remains a separate UI path. The MCP transport and
-server-side path boundary are implemented, but the browser-host startup bridge
-that consumes an explicit path and activates the project before `DiagramCore`
-mounts is not available in this host. Until that adapter exists, path requests
-must remain a truthful capability error rather than claiming activation or
-silently switching to an unapproved filesystem owner. No project workflow
-success claim is made.
+The graphical picker remains a separate UI path. MCP path requests are read or
+created exclusively under the configured root, transferred as model/resources
+to the browser startup bridge, and report success only after the editor's
+session-ready callback. Existing projects are never overwritten; create
+rollback removes only a directory created by that request. The server-owned
+path exception is limited to this explicit user-authorized workflow and does
+not expose general remote filesystem access.
