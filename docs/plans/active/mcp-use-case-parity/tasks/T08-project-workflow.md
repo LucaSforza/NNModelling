@@ -1,7 +1,7 @@
 ---
 id: T08
 kind: task
-status: draft
+status: blocked
 plan: ../plan.md
 role: integration
 depends_on: [T01]
@@ -105,3 +105,17 @@ Compare with UI New/Open and verify error cases without touching unrelated proje
 Return changed files, exact checks/results, UI/MCP parity observations, permission
 limitations and affected KB statements. Keep paths/handles and credentials out
 of protocol evidence. Report blockers instead of substituting server filesystem access.
+
+## Blocker
+
+T08 cannot be completed on the current host without a supported startup bridge
+for the browser's writable directory picker. The existing RPC handler is
+constructed only by `FlowCanvas` after a `Diagram` exists, while the startup
+chooser intentionally constructs no editor or handler. Calling
+`showDirectoryPicker({mode: "readwrite"})` from an MCP WebSocket callback is not
+a user gesture in supported browsers, and the current host exposes no
+user-gesture handoff or bounded request/resume operation that can complete the
+picker and return to the same selected tab. Implementing a server-side path
+loader or inventing a host API would violate T01's accepted ownership and
+permission boundary. The task remains blocked until that browser-host adapter
+is supplied; no project workflow or protocol success claim is made here.
