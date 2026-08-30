@@ -146,20 +146,22 @@ MCP tools -> selected-tab BrowserRPCHandler
 ### Project creation and opening
 
 M6 includes two proposed operations, `create_project` and `open_project`.
-Creation accepts the UI form's `id`, `version`, `name` and optional
-`description`, with identical defaults/validation. Reuse browser parent
-selection, collision rejection, initialization, activation and ordered writes;
-opening loads the chosen project's model and declared resources through the
-same service used by the UI. Do not replace this with `import_diagram`,
-`reset_diagram` or a new server-side filesystem implementation.
+Creation accepts an explicit `projectPath` plus the UI form's `id`, `version`,
+`name` and optional `description`, with identical defaults/validation. The MCP
+path is canonical, absolute and confined to the configured project root;
+collision rejection, initialization, activation and ordered writes remain
+browser-owned. Opening loads the chosen project's model and declared resources
+through the same service used by the UI. Do not replace this with
+`import_diagram` or `reset_diagram`, and do not expose handles or paths in
+results.
 
 T01 must resolve how the selected browser tab accepts project requests before
 an editor/DiagramCore is mounted. T08 owns that application-shell bridge;
-graph tools remain unavailable until project activation succeeds. Resolve the
-browser user-gesture/permission handshake explicitly: handles stay private to
-the browser, required interaction is observable, cancellation/denial is not
-success, and a failed open/switch preserves the previous project. No invented
-path-to-handle conversion or permission bypass is allowed.
+graph tools remain unavailable until project activation succeeds. Picker UI
+remains available for graphical use, while MCP path mode avoids picker gesture
+requirements. Cancellation/denial is not success, and a failed open/switch
+preserves the previous project. No path-to-handle conversion or permission
+bypass is allowed.
 
 ### Modeling and capture
 

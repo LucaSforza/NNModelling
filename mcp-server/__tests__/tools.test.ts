@@ -23,6 +23,7 @@ import * as inspectionTools from "../src/tools/inspection";
 import * as lifecycleTools from "../src/tools/lifecycle";
 import * as validationTools from "../src/tools/validation";
 import * as connectionTools from "../src/tools/connection";
+import * as projectTools from "../src/tools/project";
 
 // ── Test Helper ─────────────────────────────────────────────────────────
 
@@ -42,8 +43,25 @@ function createMockBrowser(): BrowserRPCClient {
 function createTestContext(): ServerContext {
   return {
     browser: createMockBrowser(),
+    projectRoot: "/tmp/projects",
   };
 }
+
+describe("project tools", () => {
+  it("validates and forwards an explicit project path without exposing handles", async () => {
+    const ctx = createTestContext();
+    const input = { projectPath: "/tmp/projects/demo", id: "demo", version: "0.1.0", name: "Demo" };
+    const result = await projectTools.create_project.handler(ctx, input);
+    expect(ctx.browser.call).toHaveBeenCalledWith("create_project", input);
+    expect(result).toEqual({});
+  });
+
+  it("rejects paths outside the configured root before browser RPC", async () => {
+    const ctx = createTestContext();
+    await expect(projectTools.open_project.handler(ctx, { projectPath: "/tmp/other/demo" })).rejects.toThrow("inside");
+    expect(ctx.browser.call).not.toHaveBeenCalled();
+  });
+});
 
 // ── Graph Tools ─────────────────────────────────────────────────────────
 

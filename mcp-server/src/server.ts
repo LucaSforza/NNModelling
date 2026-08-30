@@ -50,6 +50,7 @@ import * as lifecycleTools from "./tools/lifecycle.js";
 import * as connectionTools from "./tools/connection.js";
 import * as screenshotTools from "./tools/screenshot.js";
 import * as remoteTrainingTools from "./tools/remote-training.js";
+import * as projectTools from "./tools/project.js";
 
 // ── ServerContext ───────────────────────────────────────────────────────
 
@@ -61,11 +62,13 @@ import * as remoteTrainingTools from "./tools/remote-training.js";
 export interface ServerContext {
   browser: BrowserRPCClient;
   remoteTraining?: RemoteTrainingClient;
+  projectRoot?: string;
 }
 
 export interface CreateServerOptions {
   wsPort?: number;
   backendUrl?: string;
+  projectRoot?: string;
 }
 
 // ── Internal Types ──────────────────────────────────────────────────────
@@ -134,6 +137,7 @@ export async function createServer(
   const ctx: ServerContext = {
     browser,
     remoteTraining: new RemoteTrainingClient(options.backendUrl),
+    projectRoot: options.projectRoot,
   };
 
   // ── Step 4: Create MCP Server instance ──────────────────────────────
@@ -159,6 +163,7 @@ export async function createServer(
     connectionTools,
     screenshotTools,
     remoteTrainingTools,
+    projectTools,
   ] as Record<string, unknown>[];
 
   for (const module of allToolModules) {

@@ -57,17 +57,19 @@ filesystem access, credential/handle export or replacing File System Access.
 ## Work
 
 1. Add public-interface regression tests for create/open, with an initial tab
-   that has not mounted an editor. Specify truthful not-ready behavior for graph tools.
+   that has not mounted an editor. The MCP path mode accepts an explicit
+   canonical `projectPath`; picker UI remains available for graphical use.
+   Specify truthful not-ready behavior for graph tools.
 2. Reuse or extract the existing UI form-to-project operation. Creation takes
    `id`, `version`, `name` and optional `description` with the UI defaults and
    validation; MCP does not require callers to manufacture `model.json`.
 3. Wire project requests through the application shell before DiagramCore
    exists, then bind graph requests to the successfully activated editor.
    Preserve selected-tab identity and invalidate stale work during switches.
-4. Execute parent/existing-directory selection through the browser adapter and
-   T01's supported permission handshake. Surface pending user interaction,
-   cancellation, denial and unsupported capability separately; report success
-   only after project activation, not merely after opening a picker.
+4. Execute explicit `projectPath` selection through the configured local project
+   root. Reject relative/traversal/root paths, invalid model-directory names,
+   collisions and malformed projects before mutation. Keep the browser adapter
+   authoritative for activation and autosave; never return a filesystem handle.
 5. Use the shared project resource loader and ordered writer. Creation rejects
    collisions; failed create/open/switch preserves the prior valid state and
    only rolls back files proven created by that operation.
@@ -78,6 +80,7 @@ filesystem access, credential/handle export or replacing File System Access.
 ## Acceptance criteria
 
 - [ ] New/Open works through public MCP from startup, with supported user permission steps explicit.
+- [ ] MCP New/Open accepts an explicit canonical `projectPath` confined to the configured project root.
 - [ ] Creation matches every UI form parameter, default and validation rule.
 - [ ] Opening activates the same project/resource scope and autosave behavior as the UI.
 - [ ] Collision, cancellation, denial and malformed project do not overwrite data or report success.
@@ -106,16 +109,19 @@ Return changed files, exact checks/results, UI/MCP parity observations, permissi
 limitations and affected KB statements. Keep paths/handles and credentials out
 of protocol evidence. Report blockers instead of substituting server filesystem access.
 
-## Blocker
+## Path-mode safety and remaining integration gate
 
-T08 cannot be completed on the current host without a supported startup bridge
-for the browser's writable directory picker. The existing RPC handler is
-constructed only by `FlowCanvas` after a `Diagram` exists, while the startup
-chooser intentionally constructs no editor or handler. Calling
-`showDirectoryPicker({mode: "readwrite"})` from an MCP WebSocket callback is not
-a user gesture in supported browsers, and the current host exposes no
-user-gesture handoff or bounded request/resume operation that can complete the
-picker and return to the same selected tab. Implementing a server-side path
-loader or inventing a host API would violate T01's accepted ownership and
-permission boundary. The task remains blocked until that browser-host adapter
-is supplied; no project workflow or protocol success claim is made here.
+The explicit MCP path mode is lexically confined by the MCP server to
+`NNM_PROJECT_ROOT` (the configured project root). It requires an absolute,
+canonical path whose final directory is a lowercase model ID; the root itself,
+relative paths, traversal, NUL bytes and paths outside the root are rejected.
+The browser still owns project activation, resource loading and ordered
+autosave; project handles and credentials never enter RPC results.
+
+The graphical picker remains a separate UI path. The MCP transport and
+server-side path boundary are implemented, but the browser-host startup bridge
+that consumes an explicit path and activates the project before `DiagramCore`
+mounts is not available in this host. Until that adapter exists, path requests
+must remain a truthful capability error rather than claiming activation or
+silently switching to an unapproved filesystem owner. No project workflow
+success claim is made.

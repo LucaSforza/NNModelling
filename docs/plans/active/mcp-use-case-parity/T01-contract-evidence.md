@@ -179,7 +179,7 @@ reported as success and never carries a secret.
 | M3 | Existing `set_parameter({nodeId,key,value:unknown})` and `update_parameters({nodeId,params:Record<string,unknown>})` | Typed values round-trip in `{previousValue,currentValue}` / updated lists; unknown keys, wrong declared type and missing node fail before mutation. | Shared browser parameter conversion/validation, not string coercion in MCP. |
 | M4 | New `format_view({direction:"horizontal"|"vertical"})` | `{status:"ok",direction,layoutVersion}` only after `diagram.autoLayout(direction)` and visible render settle; missing active editor returns `NO_ACTIVE_PROJECT`. | New thin RPC case over the editor's `Disponi` operation. |
 | M5 | Existing `capture_screenshot({fullPage?:boolean,hoverNodeId?:string,layoutDirection?:"horizontal"|"vertical",destinationPath?:string})` | Must invoke layout/readiness first and return a verified PNG artifact with path, byte count and SHA-256. Capture errors, missing tab, render timeout and artifact collision are explicit. | Requires the capture binding in the next section; no URL-only selection. |
-| M6 | New `create_project({id:string,version:string,name:string,description?:string})`; `open_project({})` | Uses exact UI fields/defaults: version defaults to `0.1.0`, description optional/empty, ID/version/name required; model ID is lowercase alphanumeric with `.`/`-`, version semver. Returns `pending` when a user gesture/permission is required, then `{status:"ok",project:{id,version,name},resourceCount}` after activation. Cancellation, unsupported API, denial, invalid project and collision preserve startup/previous project and never claim open. | Startup shell invokes `ProjectWorkspaceAdapter.newProject/openProject`; handles stay browser-only; editor mounts only after session and model scope are ready. |
+| M6 | New `create_project({projectPath:string,id:string,version:string,name:string,description?:string})`; `open_project({projectPath:string})` | Uses exact UI fields/defaults: version defaults to `0.1.0`, description optional/empty, ID/version/name required; model ID is lowercase alphanumeric with `.`/`-`, version semver. MCP path mode requires an absolute canonical path inside configured `NNM_PROJECT_ROOT`; root, traversal, invalid directory names and collisions are rejected before mutation. Returns `{status:"ok",project:{id,version,name},resourceCount}` only after activation. Cancellation, unsupported API, denial, invalid project and collision preserve startup/previous project and never claim open. | MCP validates the path then forwards it as an opaque request; browser remains responsible for activation/resource scope/autosave and never returns handles. Picker UI remains the graphical fallback. |
 
 `format_view` and `capture_screenshot` share one render-readiness timeout of 10
 seconds. `start_training` has a 30-second package preparation/upload handoff
@@ -225,6 +225,15 @@ failure. The startup chooser must remain visible until this operation returns
 success. Opening reuses `openProjectWorkspace`, reads all declared resources,
 and activates the same scope; it is not `import_diagram` or a server-side
 filesystem loader.
+
+The explicit MCP path decision adds `projectPath` to both New and Open. The
+MCP server requires `NNM_PROJECT_ROOT` and accepts only an absolute canonical
+child whose final directory is a lowercase model ID; traversal, root,
+outside-root and NUL-containing paths fail before browser RPC. The path is
+forwarded only as a request value and never returned as a handle or credential.
+The browser startup consumer for this path mode is not yet available, so these
+tools must report capability failure until that adapter can activate the
+browser-owned workspace and ordered writer.
 
 The MCP request may therefore return `pending` with
 `reason:"user_gesture_required"` and a bounded retry hint. A visible browser
