@@ -102,3 +102,44 @@ No source implementation was changed for this verification slice. The only
 remaining acceptance blockers are host-provided startup project activation,
 selected-tab capture binding/DevTools availability, and an explicitly
 authorized backend session plus fixture-owned completed job/wheel.
+
+## Post-T08 rerun (2026-08-30)
+
+This section is appended after T08 commit `17b28fb`; the initial run above is
+historical and is not overwritten. The MCP server was restarted with
+`NNM_PROJECT_ROOT=/tmp/nnm-t07-project-root` and the real stdio transport
+returned **56 tools**. The catalog delta is the two public project tools:
+
+```text
+create_project({projectPath:string, id:string, version?:string="0.1.0", name:string, description?:string})
+open_project({projectPath:string})
+```
+
+`projectPath` is advertised as required and absolute/canonical; `id`,
+`version`, and `name` mirror the creation form. The complete `tools/list`
+payload also retained the T02–T06 operations and typed/bounded schemas.
+
+The confined root was created at `/tmp/nnm-t07-project-root`. Public calls over
+the actual transport produced these observations:
+
+| Call | Result |
+| --- | --- |
+| `create_project({projectPath:"/tmp/nnm-t07-project-root/demo",id:"demo",name:"T07 demo"})` | Candidate files were created, then the browser bridge returned `INTERNAL_ERROR: No browser connected`; rollback was confirmed because `demo` was absent afterward. |
+| `open_project({projectPath:"/tmp/nnm-t07-project-root/missing"})` | `PROJECT_NOT_FOUND`; no mutation. |
+| `create_project({projectPath:"/tmp/outside/demo",...})` | `PROJECT_PATH_OUTSIDE_ROOT`; no mutation. |
+| `get_graph({})` | `INTERNAL_ERROR: No browser connected`; truthful pre-editor behavior preserved. |
+| `list_browser_tabs({})` | success `{tabs:[],activeTabId:null}`. |
+
+The in-app Browser runtime was unavailable during this rerun (`browsers.list()`
+returned `[]`), so the startup bridge could not be observed through a real
+browser tab. Therefore activation, visible project name, DiagramCore binding,
+M1–M3 mutations, autosave notification and reopen remain unverified. The
+transport-level create rollback and path confinement are verified, but are not
+substitutes for the required browser activation evidence.
+
+Training remained intentionally unsubmitted. No authorized backend session,
+examples-fixture job, or completed wheel was available. Consequently T1–T5,
+progress streaming, digest verification, clean `uv` installation and public
+`Model` prediction remain explicit authorization/environment gates. M4/M5 also
+remain blocked: the catalog still has no `format_view`, and no supported
+selected-MCP-tab screenshot binding or DevTools endpoint was available.

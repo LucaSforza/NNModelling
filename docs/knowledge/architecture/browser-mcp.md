@@ -111,7 +111,7 @@ implemented and verified.
 | Edit node parameters | `set_parameter` and `update_parameters` advertise typed JSON values and delegate conversion/validation to the browser handler and package definitions. |
 | Format view | `FlowCanvas` calls `diagram.autoLayout` for horizontal/vertical **Disponi**. No MCP tool or browser RPC case exposes it. `fit_view`, `center_view` and `move_nodes` are not equivalent. |
 | Screenshot | CDP capture supports optional reload and output-handle hover. It neither performs layout nor waits for the editor's layout/render completion, so it does not enforce the required layout-before-capture workflow. |
-| Open a project | The browser has writable project creation/opening through `ProjectWorkspaceAdapter`; MCP still exposes no equivalent startup project workflow. `import_diagram`/`reset_diagram` are not project creation/opening and do not establish directory permissions or activate the complete project resource scope. |
+| Open a project | MCP exposes `create_project({projectPath,id,version,name,description})` and `open_project({projectPath})` through a confined `NNM_PROJECT_ROOT`; the server prepares/loads bytes and the browser bridge owns activation and model-save notifications. A live browser tab is still required before activation; `import_diagram`/`reset_diagram` remain distinct operations. |
 
 ### Implementation evidence
 
