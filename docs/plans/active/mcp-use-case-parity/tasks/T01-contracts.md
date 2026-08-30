@@ -1,7 +1,7 @@
 ---
 id: T01
 kind: task
-status: draft
+status: ready
 plan: ../plan.md
 role: architecture
 depends_on: []
@@ -52,11 +52,11 @@ No product implementation, new transport, backend changes or unapproved tool ret
 
 ## Acceptance criteria
 
-- [ ] Every UML ID has a named public workflow, observable output and failure behavior.
-- [ ] M6 has a feasible startup and permission flow; creation uses the UI's exact fields/defaults/validation and opening reuses its resource activation path.
-- [ ] Capture feasibility, artifact transport and connection compatibility are resolved or explicitly block their owning task.
-- [ ] The accepted UML and extra-tool preservation rule remain unchanged.
-- [ ] No changes outside the declared write scope.
+- [x] Every UML ID has a named public workflow, observable output and failure behavior; see [T01 contract evidence](../T01-contract-evidence.md).
+- [x] M6 has a feasible startup and permission flow; creation uses the UI's exact fields/defaults/validation and opening reuses its resource activation path.
+- [x] Capture feasibility, artifact transport and connection compatibility are resolved; the missing selected-page host binding explicitly blocks T03.
+- [x] The accepted UML and extra-tool preservation rule remain unchanged.
+- [x] No changes outside the declared write scope.
 
 ## Validation
 
@@ -76,3 +76,9 @@ Return changed files, exact checks/results, observed user-facing behavior,
 resolved assumptions, remaining blockers and affected KB statements. Keep
 credentials out of evidence. Update this task's status in its own file; the
 initiative plan owns overall status.
+
+Evidence and decisions are recorded in
+[`../T01-contract-evidence.md`](../T01-contract-evidence.md). T03 is blocked
+until the host supplies a supported adapter binding browser capture to the
+RPC-selected tab; this is an explicit integration gate, not a claim of capture
+support.
