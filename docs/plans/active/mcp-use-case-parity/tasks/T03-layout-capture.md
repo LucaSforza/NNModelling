@@ -1,7 +1,7 @@
 ---
 id: T03
 kind: task
-status: draft
+status: blocked
 plan: ../plan.md
 role: integration
 depends_on: [T02]
@@ -86,10 +86,41 @@ pnpm --dir mcp-server test
 
 Use two disposable editor tabs, distinct diagrams and deliberately scrambled positions. Invoke public MCP format/capture for each direction, inspect resulting images, and compare with the actual Disponi button. Follow the repository browser skill; do not use an unsupported browser fallback.
 
+## Handoff status
+
+T03 is blocked by the T01 capture-feasibility gate. The current implementation
+has the editor's `DiagramCore.autoLayout(direction)` seam and focused geometry
+coverage, while the MCP screenshot path still discovers a Chromium page by URL
+and captures it through an independent DevTools connection. It does not receive
+or verify the selected MCP `tab_N` identity, so implementing layout-before-
+capture now could produce an image from the wrong tab and would violate the
+accepted selected-page contract.
+
+Current checks:
+
+```text
+pnpm --dir front-end exec vitest run src/__tests__/layout.test.ts src/__tests__/BrowserRPCHandler.test.ts — passed (2 files, 13 tests)
+pnpm --dir mcp-server exec vitest run __tests__/screenshot.test.ts — interrupted after the host run did not complete; no result is claimed
+```
+
+No source or test implementation changes were made. The two-tab feasibility
+evidence and required adapter contract are recorded in
+`../T01-contract-evidence.md`.
+
+## Blocker
+
+T03 cannot safely start until the host supplies a supported capture adapter that
+binds an MCP-selected browser tab (or an opaque capture binding from the same
+browser session) to PNG bytes and metadata for that exact page. The adapter
+must be callable from the MCP process without external CDP and reject stale,
+disconnected or non-selected tabs. URL matching, a second page lookup, canvas
+PNG export and an invented host API are not acceptable substitutes. Once this
+authority exists, T03 can perform the required two-tab, both-direction,
+layout-readiness and hover regression checks.
+
 ## Required handoff
 
 Return changed files, exact checks/results, observed user-facing behavior,
 resolved assumptions, remaining blockers and affected KB statements. Keep
 credentials out of evidence. Update this task's status in its own file; the
 initiative plan owns overall status.
-
