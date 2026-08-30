@@ -6,7 +6,6 @@
     TrainingApiClient,
     canCancelTrainingJob,
     type DatasetInfo,
-    type DatasetParameter,
     type PairingGrant,
     type TrainingJobLogs,
     type TrainingJobStatus,
@@ -73,7 +72,7 @@
   let refreshGate = new RefreshGate();
 
   let selectedDatasetInfo = $derived(
-    datasets.find((dataset) => dataset.target === selectedDataset) ?? null,
+    datasets.find((dataset) => dataset.reference.ref === selectedDataset) ?? null,
   );
 
   onMount(() => {
@@ -179,13 +178,13 @@
   }
 
   function selectDataset(dataset: DatasetInfo) {
-    selectedDataset = dataset.target;
-    const defaults = Object.fromEntries(dataset.parameters.map((parameter) => [parameter.name, parameter.default]));
+    selectedDataset = dataset.reference.ref;
+    const defaults = Object.fromEntries(dataset.definition.parameters.map((parameter) => [parameter.name, parameter.default]));
     datasetParams = Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, String(value ?? "")]));
     try { controller.updateConfig({ selectedDataset, datasetParams: defaults }); } catch (error) { handleConnectionError(error); }
   }
 
-  function setDatasetParameter(parameter: DatasetParameter, event: Event) {
+  function setDatasetParameter(parameter: DatasetInfo["definition"]["parameters"][number], event: Event) {
     const value = (event.currentTarget as HTMLInputElement).value;
     datasetParams = { ...datasetParams, [parameter.name]: value };
     syncConfigFromDraft();
@@ -198,7 +197,7 @@
   function syncConfigFromDraft(): void {
     const typedDatasetParams = Object.fromEntries(
       Object.entries(datasetParams).map(([key, value]) => {
-        const parameter = selectedDatasetInfo?.parameters.find((candidate) => candidate.name === key);
+        const parameter = selectedDatasetInfo?.definition.parameters.find((candidate) => candidate.name === key);
         return [key, parameter ? coerce(value, parameter.type) : value];
       }),
     );
@@ -420,21 +419,21 @@
   {#if connectionState === "active"}
     <section>
       <h3>Dataset</h3>
-      <label>Classe Python
+      <label>Dataset
         <select value={selectedDataset} onchange={(event) => {
-          const target = datasets.find((item) => item.target === (event.currentTarget as HTMLSelectElement).value);
+          const target = datasets.find((item) => item.reference.ref === (event.currentTarget as HTMLSelectElement).value);
           if (target) selectDataset(target);
         }}>
-          {#each datasets as dataset (dataset.target)}
-            <option value={dataset.target}>{dataset.name}</option>
+          {#each datasets as dataset (dataset.reference.ref)}
+            <option value={dataset.reference.ref}>{dataset.definition.name}</option>
           {/each}
         </select>
       </label>
       {#if selectedDatasetInfo}
-        {#if selectedDatasetInfo.num_classes !== null}
-          <small>Classi rilevate dal dataset: {selectedDatasetInfo.num_classes}</small>
+        {#if selectedDatasetInfo.definition.classes}
+          <small>Classi rilevate dal dataset: {selectedDatasetInfo.definition.classes.count}</small>
         {/if}
-        {#each selectedDatasetInfo.parameters as parameter (parameter.name)}
+        {#each selectedDatasetInfo.definition.parameters as parameter (parameter.name)}
           <label>{parameter.name}
             <input value={datasetParams[parameter.name] ?? ""} oninput={(event) => setDatasetParameter(parameter, event)} />
           </label>

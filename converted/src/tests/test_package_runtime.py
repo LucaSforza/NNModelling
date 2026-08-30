@@ -61,7 +61,7 @@ def build(parameters, context: BuildContext, services: NoServices):
     return torch.nn.CrossEntropyLoss()
 """
     package = _package("demo.cross-entropy", source, definition={
-        "kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets"}]}
+        "kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets.target"}]}
     })
     output_source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
     output = _package("demo.output", output_source, definition={"kind": "output"})
@@ -327,9 +327,6 @@ def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
 def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
     """The package ResNet is an executable ten-class MNIST classifier."""
     root = Path(__file__).parents[3]
-    from package_worker import _load_dataset_class
-
-    assert _load_dataset_class("dataset.mnist.MNISTDataset").__name__ == "MNISTDataset"
     diagram = json.loads((root / "examples/diagrams/package/models/resnet/model.json").read_text())
     assert diagram["manifest"]["customPackages"] == []
     package_ids = sorted({node["data"]["package"]["id"] for node in diagram["nodes"]})
@@ -375,7 +372,7 @@ def _role_packages(*, binding: dict[str, Any] | None = None) -> tuple[dict[str, 
     loss = _package(
         "demo.loss",
         loss_source,
-        definition={"kind": "loss", "objective": {"externalInputs": [binding or {"name": "reference", "source": "batch.targets"}]}},
+        definition={"kind": "loss", "objective": {"externalInputs": [binding or {"name": "reference", "source": "batch.targets.target"}]}},
     )
     output = _package("demo.output", output_source, definition={"kind": "output"})
     return loss, output
@@ -686,7 +683,7 @@ def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> Non
     loss = _package(
         "demo.loss-with-empty-selection",
         "import torch\ndef build(parameters, context, services): return torch.nn.MSELoss()\n",
-        definition={"kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets"}]}},
+        definition={"kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets.target"}]}},
     )
     output = _package("demo.output-with-empty-selection", "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n", definition={"kind": "output"})
     graph = {"nodes": [
@@ -707,7 +704,7 @@ def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> Non
     ("binding", "message"),
     [
         ({"name": "reference", "source": "batch.inputs"}, "binding source"),
-        ({"name": "reference", "source": "batch.targets"}, ""),
+        ({"name": "reference", "source": "batch.targets.target"}, ""),
     ],
 )
 def test_objective_bindings_are_named_and_source_driven(binding: dict[str, Any], message: str) -> None:
@@ -725,8 +722,8 @@ def test_duplicate_objective_binding_names_are_rejected() -> None:
     loss["files"]["stereotype.json"] = _file(json.dumps({
         "kind": "loss",
         "objective": {"externalInputs": [
-            {"name": "reference", "source": "batch.targets"},
-            {"name": "reference", "source": "batch.targets"},
+            {"name": "reference", "source": "batch.targets.target"},
+            {"name": "reference", "source": "batch.targets.target"},
         ]},
     }))
     with pytest.raises(PackageValidationError, match="duplicate or invalid"):

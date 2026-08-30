@@ -156,6 +156,11 @@ def create_app(
         dataset_root,
         max_archive_bytes=int(os.getenv("NNM_DATASET_MAX_ARCHIVE_BYTES", "67108864")),
     )
+    if hasattr(app.state.manager, "dataset_store"):
+        # Upload and submission must share one authenticated, digest-addressed
+        # archive store; otherwise a project reference could not be resolved by
+        # the scheduler after the upload response.
+        app.state.manager.dataset_store = app.state.dataset_store
     app.state.auth = auth_service or _auth_from_environment(in_memory=injected_manager is not None)
     app.state.admin_token = admin_token if admin_token is not None else _read_admin_token()
 

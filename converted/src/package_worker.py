@@ -12,6 +12,8 @@ import torch
 from safetensors.torch import save_file
 
 from package_runtime import CompiledPrograms, compile_package_graph
+from dataset.contracts import DatasetDefinition, normalize_training_batch
+from training.datasets import resolve_dataset
 
 
 def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
@@ -48,11 +50,9 @@ def train(model: CompiledPrograms, request: dict[str, Any], artifacts_path: Path
 
     training = _normalized_training(_training_config(request))
     _validate_training_support(training)
-    dataset_config = training.get("dataset", {})
-    target = str(dataset_config["target"])
-    dataset_class = _load_dataset_class(target)
-    dataset = dataset_class(**_dataset_parameters(target, dataset_config["parameters"]))
-    train_loader, validation_loader, _ = dataset.division()
+    dataset, definition, reference, parameters = resolve_dataset(training)
+    _validate_graph_bindings(request.get("package", {}), definition)
+    train_loader, validation_loader = _dataset_loaders(dataset)
 
     device = _training_device(training["trainer"]["accelerator"])
     model.to(device)
@@ -68,9 +68,10 @@ def train(model: CompiledPrograms, request: dict[str, Any], artifacts_path: Path
     for epoch in range(max_epochs):
         total = 0.0
         batches = 0
-        for inputs, targets in train_loader:
+        for raw_batch in train_loader:
+            batch = normalize_training_batch(raw_batch).to(device)
             optimizer.zero_grad(set_to_none=True)
-            loss = model.objective(inputs.to(device), targets.to(device))
+            loss = model.objective(batch.inputs, batch.targets)
             if not torch.isfinite(loss):
                 raise RuntimeError("package training produced a non-finite loss")
             loss.backward()
@@ -102,7 +103,7 @@ def train(model: CompiledPrograms, request: dict[str, Any], artifacts_path: Path
         raise RuntimeError("compiled package graph has no trainable state")
     save_file(tensors, str(artifacts_path / "weights.safetensors"))
     summary = {
-        "dataset": target,
+        "dataset": {"reference": reference.model_dump(mode="json"), "parameters": parameters},
         "epochs": len(history),
         "history": history,
         "config": training,
@@ -147,13 +148,13 @@ def _normalized_training(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("training must be an object")
     dataset = raw.get("dataset")
-    if not isinstance(dataset, dict) or not isinstance(dataset.get("target"), str):
-        raise ValueError("training.dataset.target is required")
+    if not isinstance(dataset, dict) or not isinstance(dataset.get("reference"), dict):
+        raise ValueError("training.dataset.reference is required")
     parameters = dict(dataset.get("parameters", {}))
     if any(name in raw for name in ("batch_size", "num_workers", "train_size")):
         raise ValueError("loader settings belong in training.dataset.parameters")
     result = dict(raw)
-    result["dataset"] = {"target": dataset["target"], "parameters": parameters}
+    result["dataset"] = {"reference": dict(dataset["reference"]), "parameters": parameters}
     result["optimizer"] = dict(raw.get("optimizer", {}))
     result["trainer"] = dict(raw.get("trainer", {}))
     result["trainer"].setdefault("max_epochs", 20)
@@ -184,18 +185,6 @@ def _training_device(accelerator: str) -> torch.device:
     return torch.device("cuda" if accelerator == "cuda" else "cpu")
 
 
-def _load_dataset_class(target: str) -> type[Any]:
-    from backend.dataset_registry import _dataset_class
-
-    return _dataset_class(target)
-
-
-def _dataset_parameters(target: str, raw: Any) -> dict[str, Any]:
-    from backend.dataset_registry import validate_dataset_parameters
-
-    return validate_dataset_parameters(target, raw)
-
-
 def _optimizer(model: torch.nn.Module, config: Any) -> torch.optim.Optimizer:
     config = config if isinstance(config, dict) else {}
     name = str(config.get("target", "Adam")).rsplit(".", 1)[-1]
@@ -211,11 +200,52 @@ def _evaluate(model: CompiledPrograms, loader: Any, device: torch.device) -> flo
     model.eval()
     total = 0.0
     batches = 0
-    for inputs, targets in loader:
-        total += float(model.objective(inputs.to(device), targets.to(device)))
+    for raw_batch in loader:
+        batch = normalize_training_batch(raw_batch).to(device)
+        total += float(model.objective(batch.inputs, batch.targets))
         batches += 1
     model.train()
     return total / max(1, batches)
+
+
+def _validate_graph_bindings(package: Any, definition: DatasetDefinition) -> None:
+    """Reject graph/dataset slot mismatches before the first epoch."""
+    graph = package.get("graph") if isinstance(package, dict) else None
+    if not isinstance(graph, dict):
+        raise ValueError("package graph is required")
+    input_bindings = graph.get("inputBindings", [])
+    if not isinstance(input_bindings, list):
+        raise ValueError("package graph inputBindings must be a list")
+    for binding in input_bindings:
+        if not isinstance(binding, dict) or not isinstance(binding.get("name"), str):
+            raise ValueError("package graph contains an invalid input binding")
+        if binding["name"] not in definition.batch.inputs:
+            raise ValueError(f"dataset is missing input slot: {binding['name']}")
+    objective_bindings = graph.get("objectiveBindings", [])
+    if not isinstance(objective_bindings, list):
+        raise ValueError("package graph objectiveBindings must be a list")
+    for objective in objective_bindings:
+        if not isinstance(objective, dict):
+            raise ValueError("package graph contains an invalid objective binding")
+        for binding in objective.get("externalInputs", []):
+            source = binding.get("source") if isinstance(binding, dict) else None
+            if not isinstance(source, str) or not source.startswith("batch.targets."):
+                raise ValueError("objective binding source is invalid")
+            slot = source.removeprefix("batch.targets.")
+            if slot not in definition.batch.targets:
+                raise ValueError(f"dataset is missing target slot: {slot}")
+
+
+def _dataset_loaders(dataset: Any) -> tuple[Any, Any]:
+    division = dataset.division()
+    if isinstance(division, dict):
+        try:
+            return division["train"], division["validation"]
+        except KeyError as exc:
+            raise ValueError("dataset division must provide train and validation loaders") from exc
+    if isinstance(division, tuple) and len(division) >= 2:
+        return division[0], division[1]
+    raise ValueError("dataset division must provide named train and validation loaders")
 
 
 def main() -> None:

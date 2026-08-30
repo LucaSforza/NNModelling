@@ -14,7 +14,7 @@ import pytest
 import torch
 from safetensors.torch import load_file, save_file
 
-from model_package.adapters import adapter_spec_for_dataset
+from model_package.adapters import adapter_spec_from_definition
 from model_package.exporter import _architecture_fingerprint, build_model_wheel
 from package_runtime.compiler import compile_package_graph
 
@@ -24,10 +24,17 @@ CORE = ROOT / "stereotype-packages" / "core"
 VAE_PACKAGES = ROOT / "examples" / "diagrams" / "package" / "models" / "variational-autoencoder" / "packages"
 
 
-def test_dataset_adapter_uses_registered_target() -> None:
-    """Dataset adapter metadata comes from the trusted dataset catalog."""
+def test_dataset_adapter_uses_declarative_definition() -> None:
+    """Dataset adapter metadata comes from the immutable dataset definition."""
 
-    assert adapter_spec_for_dataset("dataset.mnist.MNISTDataset") == {
+    assert adapter_spec_from_definition({"inferenceAdapter": {
+        "kind": "image",
+        "version": 1,
+        "channels": 1,
+        "size": [28, 28],
+        "mean": [0.1307],
+        "std": [0.3081],
+    }}) == {
         "kind": "image",
         "version": 1,
         "channels": 1,
@@ -37,9 +44,9 @@ def test_dataset_adapter_uses_registered_target() -> None:
     }
 
 
-def test_dataset_adapter_rejects_unregistered_target() -> None:
-    with pytest.raises(ValueError, match="not registered"):
-        adapter_spec_for_dataset("not.trusted.Dataset")
+def test_dataset_adapter_rejects_non_declarative_value() -> None:
+    with pytest.raises(TypeError, match="must be an object"):
+        adapter_spec_from_definition({"inferenceAdapter": "not-a-target"})
 
 
 def _package(package_id: str) -> dict[str, object]:

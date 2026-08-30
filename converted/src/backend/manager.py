@@ -18,8 +18,11 @@ from backend.executors import ContainerExecutor, Executor
 from backend.models import JobStatus, JobSubmission, ResourceRequest
 from backend.package_store import PackageStore
 from backend.store import JobStore, ValkeyJobStore, utc_now
-from model_package.adapters import adapter_spec_for_dataset
 from model_package.exporter import build_model_wheel
+from model_package.adapters import adapter_spec_from_definition
+from dataset.contracts import DatasetReference
+from backend.dataset_registry import resolve_dataset
+from backend.dataset_store import DatasetArchiveStore
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
@@ -63,6 +66,7 @@ class JobManager:
         *,
         package_snapshot_dir: str | Path | None = None,
         package_store: PackageStore | None = None,
+        dataset_store: DatasetArchiveStore | None = None,
     ) -> None:
         self.store = store
         self.artifact_root = Path(artifact_root).resolve()
@@ -77,6 +81,7 @@ class JobManager:
             Path(package_snapshot_dir) if package_snapshot_dir is not None else None
         )
         self.package_store = package_store or PackageStore(self.artifact_root / "packages")
+        self.dataset_store = dataset_store or DatasetArchiveStore(self.artifact_root / "datasets")
         self._active: dict[str, tuple[Executor, dict[str, Any]]] = {}
         self._round_robin_cursor = 0
         self._lock = threading.RLock()
@@ -175,7 +180,6 @@ class JobManager:
             )
         job_id = str(uuid.uuid4())
         created_at = utc_now()
-        payload = submission.model_dump(mode="json")
         # Resolve and validate the immutable bundle before creating any job
         # directory.  In particular, validation must never load or execute
         # package Python in the FastAPI process.
@@ -187,6 +191,21 @@ class JobManager:
             raise ValueError("package graph does not match the uploaded bundle")
         artifact_dir = self.artifact_root / job_id
         artifact_dir.mkdir(parents=True, exist_ok=False)
+        dataset_dir: Path | None = None
+        dataset_reference = submission.training.dataset.reference
+        if dataset_reference.kind == "project":
+            submission.training.dataset.parameters = self.dataset_store.validate_parameters(
+                dataset_reference,
+                submission.training.dataset.parameters,
+                owner_connection_id=owner_connection_id,
+            )
+            dataset_dir = artifact_dir / "dataset"
+            self.dataset_store.extract(
+                dataset_reference,
+                owner_connection_id=owner_connection_id,
+                destination=dataset_dir,
+            )
+        payload = submission.model_dump(mode="json")
         payload["id"] = job_id
         payload["created_at"] = created_at
         payload["artifact_dir"] = str(artifact_dir)
@@ -210,6 +229,8 @@ class JobManager:
             "model_package": None,
             "package_error": None,
             "artifact_dir": str(artifact_dir),
+            "dataset": submission.training.dataset.model_dump(mode="json"),
+            "dataset_dir": str(dataset_dir) if dataset_dir is not None else None,
             "owner_connection_id": owner_connection_id,
             "resources": submission.resources.model_dump(mode="json"),
             "submission": payload,
@@ -620,8 +641,18 @@ class JobManager:
         package_name = job["submission"].get("package_name") or f"nnm_job_{job_id.replace('-', '')}"
         try:
             package = json.loads((artifact_dir / "package.json").read_text(encoding="utf-8"))
-            dataset_target = job["submission"]["training"]["dataset"]["target"]
-            input_adapter = adapter_spec_for_dataset(dataset_target)
+            dataset = DatasetReference.model_validate(job["submission"]["training"]["dataset"]["reference"])
+            if dataset.kind == "builtin":
+                definition = resolve_dataset(dataset).definition
+            else:
+                definition = self.dataset_store.metadata(
+                    dataset,
+                    owner_connection_id=job["owner_connection_id"],
+                )["definition"]
+            if isinstance(definition, dict):
+                input_adapter = adapter_spec_from_definition(definition)
+            else:
+                input_adapter = adapter_spec_from_definition(definition.model_dump(mode="json"))
             build_model_wheel(
                 artifact_dir,
                 package_name=package_name,

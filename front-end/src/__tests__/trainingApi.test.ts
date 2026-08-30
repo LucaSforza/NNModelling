@@ -9,15 +9,13 @@ afterEach(() => {
 describe("training job actions", () => {
   it("submits only parameters from the current dataset schema", () => {
     const dataset = {
-      target: "dataset.autoencoder_mnist.AutoencoderMNIST",
-      name: "AutoencoderMNIST",
-      doc: "",
-      num_classes: null,
-      parameters: [
+      reference: { kind: "builtin", id: "builtin.autoencoder-mnist", version: "1.0.0", ref: "builtin_autoencoder_mnist" },
+      manifest: { schemaVersion: 1, id: "builtin.autoencoder-mnist", version: "1.0.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
+      definition: { schemaVersion: 1, id: "builtin.autoencoder-mnist", version: "1.0.0", name: "AutoencoderMNIST", parameters: [
         { name: "batch_size", type: "int", default: 32, required: false },
         { name: "num_workers", type: "int", default: 0, required: false },
         { name: "train_size", type: "float", default: 0.8, required: false },
-      ],
+      ], batch: { inputs: { image: { shape: ["B", 1, 28, 28], dtype: "float32" } }, targets: { reconstruction: { shape: ["B", 1, 28, 28], dtype: "float32" } } } },
     };
 
     expect(canonicalDatasetParameters(dataset, {

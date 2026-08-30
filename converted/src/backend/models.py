@@ -269,6 +269,7 @@ class JobStatus(BaseModel):
     model_package: ModelPackageInfo | None = None
     package_error: str | None = None
     artifact_dir: str
+    dataset: OpaqueDatasetRequest | None = None
 
 
 class PairingRequestInput(BaseModel):

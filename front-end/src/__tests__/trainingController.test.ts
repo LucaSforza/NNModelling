@@ -3,22 +3,20 @@ import { TrainingController, TrainingConfigurationError } from "../training/cont
 import type { DatasetInfo } from "../training/api";
 
 const dataset: DatasetInfo = {
-  target: "dataset.example.MNIST",
-  name: "MNIST",
-  doc: "",
-  num_classes: 10,
-  parameters: [
+  reference: { kind: "builtin", id: "builtin.mnist", version: "1.0.0", ref: "builtin_mnist" },
+  manifest: { schemaVersion: 1, id: "builtin.mnist", version: "1.0.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
+  definition: { schemaVersion: 1, id: "builtin.mnist", version: "1.0.0", name: "MNIST", parameters: [
     { name: "batch_size", type: "int", default: 32, required: false },
     { name: "shuffle", type: "bool", default: true, required: false },
-  ],
+  ], batch: { inputs: { image: { shape: ["B", 1], dtype: "float32" } }, targets: { label: { shape: ["B"], dtype: "int64" } } } },
 };
 
 describe("TrainingController", () => {
   it("keeps a typed configuration and rejects invalid patches atomically", () => {
     const controller = new TrainingController();
     controller.setDatasets([dataset]);
-    controller.updateConfig({ selectedDataset: dataset.target, datasetParams: { batch_size: 64 } });
-    expect(controller.getConfig()).toMatchObject({ selectedDataset: dataset.target, datasetParams: { batch_size: 64, shuffle: true } });
+    controller.updateConfig({ selectedDataset: dataset.reference.ref, datasetParams: { batch_size: 64 } });
+    expect(controller.getConfig()).toMatchObject({ selectedDataset: dataset.reference.ref, datasetParams: { batch_size: 64, shuffle: true } });
 
     expect(() => controller.updateConfig({ datasetParams: { batch_size: "64" } })).toThrow(TrainingConfigurationError);
     expect(controller.getConfig().datasetParams.batch_size).toBe(64);
