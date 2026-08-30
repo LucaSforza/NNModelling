@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
+from dataset.contracts import DatasetReference
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -64,6 +65,26 @@ class PackageBundleInfo(BaseModel):
     bundle_ref: str
     digest: str
     size: int = Field(ge=0)
+
+
+class DatasetArchiveInfo(BaseModel):
+    """Opaque result of one complete project dataset archive upload."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference: DatasetReference
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=0)
+    limit: int = Field(gt=0)
+
+
+class DatasetArchiveCapabilities(BaseModel):
+    """Backend-advertised limits for the deliberately bounded upload path."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    format: Literal["zip"] = "zip"
+    max_bytes: int = Field(gt=0)
 
 
 class ResourceRequest(BaseModel):
