@@ -297,6 +297,32 @@ reuse the process token or silently switch ownership. Existing additional
 inspection, graph, subflow, selection, import/export/reset, tab, viewport and
 low-level training tools remain available even when absent from the UML.
 
+## Legacy-removal audit (2026-08-30)
+
+The current `server.ts` registry discovers 56 tools from the twelve tool
+modules (`graph`, `parameters`, `selection`, `canvas`, `validation`,
+`conversion`, `inspection`, `lifecycle`, `connection`, `screenshot`,
+`remote-training` and `project`). No removal is safe in this parity slice:
+
+- The ten `remote-training` process-authenticated tools (including
+  `submit_training_job`, `read_training_progress` and
+  `download_training_wheel`) are explicitly retained compatibility contracts;
+  they remain routed through `NNM_BACKEND_URL`/`NNM_BACKEND_TOKEN` and must not
+  be silently changed to selected-editor ownership.
+- The seven selected-editor training tools are the new controller surface, but
+  they do not replace the process-authenticated operations above.
+- The remaining browser tools, including `import_diagram`, `export_diagram`,
+  `reset_diagram`, `create_subflow`, viewport/selection operations and
+  inspection/validation operations, are explicitly retained additional
+  capabilities. `capture_screenshot` remains the required M5 operation even
+  while its selected-tab adapter is blocked.
+
+The audit therefore makes no source or test deletions. The only confirmed
+legacy behavior is the rejected `stereotype` creation shape, which is already
+removed from the public Zod schema with an `INVALID_ARGUMENT` migration error;
+the compatibility and additional-tool contracts above prevent broader cleanup
+until an explicit retirement decision is accepted.
+
 ## Affected knowledge statements
 
 - The [browser-MCP architecture](../../../knowledge/architecture/browser-mcp.md)
