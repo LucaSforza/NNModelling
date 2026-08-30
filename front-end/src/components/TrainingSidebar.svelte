@@ -4,29 +4,20 @@
   import {
     BackendApiError,
     TrainingApiClient,
-    canonicalDatasetParameters,
     canCancelTrainingJob,
     type DatasetInfo,
     type DatasetParameter,
     type PairingGrant,
-    type SessionInfo,
     type TrainingJobLogs,
-    type TrainingJobRequest,
     type TrainingJobStatus,
   } from "../training/api";
-  import {
-    forgetBackendConnection,
-    loadBackendConnection,
-    normalizeBackendUrl,
-    saveBackendConnection,
-    type SavedBackendConnection,
-  } from "../training/connection";
+  import { TrainingController, type TrainingControllerSnapshot } from "../training/controller";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
-  import { buildPackageBundle } from "../training/package-bundle";
 
   interface Props {
     diagram: Diagram;
+    controller: TrainingController;
     onClose: () => void;
   }
 
@@ -39,7 +30,7 @@
     | "rejected"
     | "error";
 
-  let { diagram, onClose }: Props = $props();
+  let { diagram, controller, onClose }: Props = $props();
 
   let datasets = $state.raw<DatasetInfo[]>([]);
   let jobs = $state.raw<TrainingJobStatus[]>([]);
@@ -49,7 +40,7 @@
   );
   let deviceName = $state("");
   let connectionState = $state<ConnectionState>("disconnected");
-  let session = $state.raw<SessionInfo | null>(null);
+  let session = $state.raw<{ expires_at: string | null; device_name: string | null } | null>(null);
   let pairing = $state.raw<PairingGrant | null>(null);
   let selectedDataset = $state("");
   let datasetParams = $state<Record<string, string>>({});
@@ -77,9 +68,7 @@
   let errorMessage = $state("");
   let successMessage = $state("");
   let api: TrainingApiClient | null = null;
-  let savedConnection: SavedBackendConnection | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
-  let pairingTimer: ReturnType<typeof setInterval> | undefined;
   let eventAbort: AbortController | null = null;
   let refreshGate = new RefreshGate();
 
@@ -88,64 +77,60 @@
   );
 
   onMount(() => {
-    void restoreConnection();
-    return cleanup;
+    const unsubscribe = controller.subscribe(applyControllerSnapshot);
+    void controller.restore();
+    return () => {
+      unsubscribe();
+      eventAbort?.abort();
+      eventAbort = null;
+    };
   });
 
   function cleanup() {
     refreshGate.invalidate();
     if (refreshTimer) clearInterval(refreshTimer);
-    if (pairingTimer) clearInterval(pairingTimer);
     refreshTimer = undefined;
-    pairingTimer = undefined;
     eventAbort?.abort();
     eventAbort = null;
   }
 
-  async function restoreConnection() {
-    const restored = loadBackendConnection();
-    if (!restored) return;
-    savedConnection = restored;
-    backendUrl = restored.baseUrl;
-    deviceName = restored.deviceName ?? "";
-    api = new TrainingApiClient(restored.baseUrl, restored.token);
-    connectionState = "checking";
-    try {
-      if (restored.requestId) {
-        pairing = {
-          request_id: restored.requestId,
-          connection_id: restored.connectionId,
-          token: restored.token,
-          verification_code: restored.verificationCode ?? "",
-          expires_at: "",
-        };
-        const restoredState = await checkPairing();
-        if (restoredState === "pending") startPairingTimer();
-      } else {
-        await activate(await api.getSession());
-      }
-    } catch (error) {
-      handleConnectionError(error);
+  function applyControllerSnapshot(snapshot: TrainingControllerSnapshot): void {
+    const wasActive = connectionState === "active";
+    const view = snapshot.connection;
+    connectionState = view.status;
+    backendUrl = view.baseUrl ?? backendUrl;
+    deviceName = view.deviceName ?? "";
+    session = view.sessionExpiresAt ? { device_name: view.deviceName, expires_at: view.sessionExpiresAt } : null;
+    pairing = view.requestId && view.verificationCode ? {
+      request_id: view.requestId, connection_id: view.connectionId ?? "", token: "", verification_code: view.verificationCode, expires_at: view.expiresAt ?? "",
+    } : null;
+    datasets = snapshot.datasets;
+    api = view.status === "active" ? controller.getApi() : null;
+    errorMessage = view.error ?? "";
+    const config = snapshot.config;
+    selectedDataset = config.selectedDataset;
+    datasetParams = Object.fromEntries(Object.entries(config.datasetParams).map(([key, value]) => [key, String(value ?? "")]));
+    seed = String(config.seed); optimizerTarget = config.optimizerTarget; learningRate = String(config.learningRate);
+    maxEpochs = String(config.maxEpochs); accelerator = config.accelerator; patience = String(config.patience); minDelta = String(config.minDelta);
+    wandbProject = config.wandbProject; wandbMode = config.wandbMode; cpu = String(config.cpu); memoryGb = String(config.memoryGb); gpu = String(config.gpu);
+    gpuMemoryGb = config.gpuMemoryGb === undefined ? "" : String(config.gpuMemoryGb); gpuType = config.gpuType ?? ""; node = config.node ?? "";
+    priority = String(config.priority); packageSuffix = config.packageSuffix ?? "";
+    if (view.status === "active" && !wasActive) {
+      void loadDatasets();
+      void refreshJobs();
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = setInterval(() => void refreshJobs(), 3000);
+    } else if (view.status !== "active" && wasActive) {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = undefined;
     }
   }
 
   async function connect() {
-    cleanup();
     errorMessage = "";
     successMessage = "";
-    connectionState = "checking";
     try {
-      const normalized = normalizeBackendUrl(backendUrl);
-      const publicApi = new TrainingApiClient(normalized);
-      await publicApi.health();
-      const grant = await publicApi.createPairing(deviceName.trim() || null);
-      backendUrl = normalized;
-      pairing = grant;
-      savedConnection = connectionFromGrant(grant);
-      saveBackendConnection(savedConnection);
-      api = new TrainingApiClient(normalized, grant.token);
-      connectionState = "pending";
-      startPairingTimer();
+      await controller.connect(backendUrl, deviceName);
     } catch (error) {
       connectionState = "error";
       errorMessage = errorText(error);
@@ -153,92 +138,30 @@
   }
 
   async function renew() {
-    if (!api || !savedConnection) return;
     errorMessage = "";
-    connectionState = "checking";
     try {
-      const grant = await api.createRenewal();
-      pairing = grant;
-      savedConnection = connectionFromGrant(grant);
-      saveBackendConnection(savedConnection);
-      connectionState = "pending";
-      startPairingTimer();
+      await controller.renew();
     } catch (error) {
       handleConnectionError(error);
     }
-  }
-
-  function startPairingTimer() {
-    if (pairingTimer) clearInterval(pairingTimer);
-    pairingTimer = setInterval(() => void checkPairing(), 1500);
-  }
-
-  async function checkPairing(): Promise<ConnectionState> {
-    if (!api || !pairing || !savedConnection) return connectionState;
-    try {
-      const status = await api.getPairingStatus(pairing.request_id);
-      if (status.status === "approved") {
-        if (pairingTimer) clearInterval(pairingTimer);
-        pairingTimer = undefined;
-        savedConnection = { ...savedConnection, requestId: null, verificationCode: null };
-        saveBackendConnection(savedConnection);
-        pairing = null;
-        await activate(await api.getSession());
-      } else if (status.status === "rejected" || status.status === "expired") {
-        if (pairingTimer) clearInterval(pairingTimer);
-        pairingTimer = undefined;
-        connectionState = status.status === "rejected" ? "rejected" : "expired";
-      } else {
-        connectionState = "pending";
-      }
-    } catch (error) {
-      handleConnectionError(error);
-    }
-    return connectionState;
-  }
-
-  async function activate(currentSession: SessionInfo) {
-    refreshGate.invalidate();
-    connectionState = "active";
-    session = currentSession;
-    errorMessage = "";
-    await Promise.all([loadDatasets(), refreshJobs()]);
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(() => void refreshJobs(), 3000);
   }
 
   function forget() {
-    cleanup();
-    if (savedConnection) forgetBackendConnection(savedConnection.baseUrl);
-    api = null;
-    savedConnection = null;
-    pairing = null;
-    session = null;
-    datasets = [];
-    jobs = [];
-    connectionState = "disconnected";
-    errorMessage = "";
-    successMessage = "";
+    void controller.disconnect(false);
   }
 
   async function revokeAndForget() {
     if (!api || !confirm("Revocare questa connessione sul backend?")) return;
     try {
-      await api.revokeSession();
+      await controller.disconnect(true);
     } catch (error) {
       errorMessage = errorText(error);
-    } finally {
-      forget();
     }
   }
 
   async function loadDatasets() {
-    try {
-      datasets = await requireApi().listDatasets();
-      if (!selectedDataset && datasets.length > 0) selectDataset(datasets[0]);
-    } catch (error) {
-      handleConnectionError(error);
-    }
+    datasets = controller.getDatasets();
+    if (!selectedDataset && datasets.length > 0) selectDataset(datasets[0]);
   }
 
   async function refreshJobs() {
@@ -257,62 +180,49 @@
 
   function selectDataset(dataset: DatasetInfo) {
     selectedDataset = dataset.target;
-    datasetParams = Object.fromEntries(
-      dataset.parameters.map((parameter) => [parameter.name, String(parameter.default ?? "")]),
-    );
+    const defaults = Object.fromEntries(dataset.parameters.map((parameter) => [parameter.name, parameter.default]));
+    datasetParams = Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, String(value ?? "")]));
+    try { controller.updateConfig({ selectedDataset, datasetParams: defaults }); } catch (error) { handleConnectionError(error); }
   }
 
   function setDatasetParameter(parameter: DatasetParameter, event: Event) {
     const value = (event.currentTarget as HTMLInputElement).value;
     datasetParams = { ...datasetParams, [parameter.name]: value };
+    syncConfigFromDraft();
+  }
+
+  $effect(() => {
+    if (connectionState === "active") syncConfigFromDraft();
+  });
+
+  function syncConfigFromDraft(): void {
+    const typedDatasetParams = Object.fromEntries(
+      Object.entries(datasetParams).map(([key, value]) => {
+        const parameter = selectedDatasetInfo?.parameters.find((candidate) => candidate.name === key);
+        return [key, parameter ? coerce(value, parameter.type) : value];
+      }),
+    );
+    try {
+      controller.updateConfig({ selectedDataset, datasetParams: typedDatasetParams, seed: coerce(seed, "int"), optimizerTarget,
+        learningRate: coerce(learningRate, "float"), maxEpochs: coerce(maxEpochs, "int"), accelerator,
+        patience: coerce(patience, "int"), minDelta: coerce(minDelta, "float"), wandbProject, wandbMode,
+        cpu: coerce(cpu, "int"), memoryGb: coerce(memoryGb, "float"), gpu: coerce(gpu, "int"),
+        gpuMemoryGb: gpuMemoryGb ? coerce(gpuMemoryGb, "float") : undefined, gpuType: gpuType || undefined,
+        node: node || undefined, priority: coerce(priority, "int"), packageSuffix: packageSuffix || undefined });
+    } catch {
+      // Text inputs can be temporarily incomplete; submit/MCP validation reports the error.
+    }
   }
 
   function coerce(value: string, type: "int"): number;
   function coerce(value: string, type: "float"): number;
   function coerce(value: string, type: "bool"): boolean;
+  function coerce(value: string, type: string): number | boolean | string;
   function coerce(value: string, type: string): number | boolean | string {
     if (type === "int") return Number.parseInt(value, 10);
     if (type === "float") return Number.parseFloat(value);
     if (type === "bool") return value === "true";
     return value;
-  }
-
-  async function buildRequest(): Promise<TrainingJobRequest> {
-    if (!selectedDataset) throw new Error("Seleziona un dataset prima di accodare il training");
-    await diagram.waitForPackageRuntime();
-    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, diagram.packageExports(), diagram.typeResult);
-    const uploaded = await requireApi().uploadPackageBundle(bundle);
-    return {
-      schema_version: 1,
-      network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
-      training: {
-        dataset: {
-          target: selectedDataset,
-          parameters: selectedDatasetInfo
-            ? canonicalDatasetParameters(selectedDatasetInfo, datasetParams)
-            : {},
-        },
-        seed: coerce(seed, "int"),
-        optimizer: { target: optimizerTarget, learning_rate: coerce(learningRate, "float") },
-        trainer: {
-          max_epochs: coerce(maxEpochs, "int"),
-          accelerator,
-          patience: coerce(patience, "int"),
-          min_delta: coerce(minDelta, "float"),
-        },
-        wandb: { project: wandbProject, mode: wandbMode },
-      },
-      resources: {
-        cpu: coerce(cpu, "int"),
-        memory_gb: coerce(memoryGb, "int"),
-        gpu: coerce(gpu, "int"),
-        ...(gpuMemoryGb ? { gpu_memory_gb: coerce(gpuMemoryGb, "int") } : {}),
-        ...(gpuType ? { gpu_type: gpuType } : {}),
-        ...(node ? { node } : {}),
-      },
-      priority: coerce(priority, "int") as number,
-      ...(packageSuffix ? { package_name: `nnm_${packageSuffix}` } : {}),
-    };
   }
 
   async function submit() {
@@ -324,7 +234,8 @@
       ? openWaitingWindow("In attesa che W&B inizializzi la run…")
       : null;
     try {
-      const job = await requireApi().submitTrainingJob(await buildRequest());
+      const submission = await controller.submitTraining(diagram);
+      const job = submission.job;
       successMessage = `Job ${job.id} accodato.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);
@@ -430,18 +341,6 @@
   function requireApi(): TrainingApiClient {
     if (!api) throw new Error("Collega prima un backend");
     return api;
-  }
-
-  function connectionFromGrant(grant: PairingGrant): SavedBackendConnection {
-    return {
-      version: 1,
-      baseUrl: backendUrl,
-      token: grant.token,
-      connectionId: grant.connection_id,
-      requestId: grant.request_id,
-      verificationCode: grant.verification_code,
-      deviceName: deviceName.trim() || null,
-    };
   }
 
   function handleConnectionError(error: unknown) {

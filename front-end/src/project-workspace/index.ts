@@ -404,3 +404,4 @@ function isNotFoundError(cause: unknown): boolean {
 }
 
 export * from "./authoring"
+export * from "./path"

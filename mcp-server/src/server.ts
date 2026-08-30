@@ -33,6 +33,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { BrowserRPCClient } from "./browser-client.js";
 import { RemoteTrainingClient } from "./remote-training.js";
+import { z } from "zod";
+import { MCPServerError } from "./errors.js";
 
 // ── Import all tool modules ─────────────────────────────────────────────
 // Each file exports multiple named tools (e.g. create_node, delete_nodes).
@@ -48,6 +50,8 @@ import * as lifecycleTools from "./tools/lifecycle.js";
 import * as connectionTools from "./tools/connection.js";
 import * as screenshotTools from "./tools/screenshot.js";
 import * as remoteTrainingTools from "./tools/remote-training.js";
+import * as projectTools from "./tools/project.js";
+import { saveProjectModel } from "./project-path.js";
 
 // ── ServerContext ───────────────────────────────────────────────────────
 
@@ -59,17 +63,21 @@ import * as remoteTrainingTools from "./tools/remote-training.js";
 export interface ServerContext {
   browser: BrowserRPCClient;
   remoteTraining?: RemoteTrainingClient;
+  projectRoot?: string;
+  projectPaths: Map<string, string>;
 }
 
 export interface CreateServerOptions {
   wsPort?: number;
   backendUrl?: string;
+  projectRoot?: string;
 }
 
 // ── Internal Types ──────────────────────────────────────────────────────
 
 interface MCPToolEntry {
   schema: Record<string, unknown>;
+  parse: (value: unknown) => Record<string, unknown>;
   handler: (ctx: ServerContext, input: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -102,6 +110,7 @@ function discoverTools(module: Record<string, unknown>): Map<string, MCPToolEntr
       const entry = value as { schema: unknown; handler: (ctx: ServerContext, input: Record<string, unknown>) => Promise<unknown> };
       tools.set(name, {
         schema: zodToJsonSchema(entry.schema as any),
+        parse: (value: unknown) => (entry.schema as z.ZodTypeAny).parse(value) as Record<string, unknown>,
         handler: entry.handler,
       });
     }
@@ -130,7 +139,19 @@ export async function createServer(
   const ctx: ServerContext = {
     browser,
     remoteTraining: new RemoteTrainingClient(options.backendUrl),
+    projectRoot: options.projectRoot,
+    projectPaths: new Map(),
   };
+  browser.onNotification((tabId, method, params) => {
+    if (method !== "project_save") return;
+    const projectPath = params.projectPath;
+    const modelJson = params.modelJson;
+    if (typeof projectPath !== "string" || typeof modelJson !== "string") return;
+    if (ctx.projectPaths.get(tabId) !== projectPath) return;
+    void saveProjectModel(projectPath, ctx.projectRoot, modelJson).catch((error) => {
+      console.error(`[nnmodelling-mcp] project save failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
 
   // ── Step 4: Create MCP Server instance ──────────────────────────────
   const server = new Server(
@@ -155,6 +176,7 @@ export async function createServer(
     connectionTools,
     screenshotTools,
     remoteTrainingTools,
+    projectTools,
   ] as Record<string, unknown>[];
 
   for (const module of allToolModules) {
@@ -185,7 +207,16 @@ export async function createServer(
     }
 
     try {
-      const result = await tool.handler(ctx, (request.params.arguments ?? {}) as Record<string, unknown>);
+      let input: Record<string, unknown>;
+      try {
+        input = tool.parse(request.params.arguments ?? {});
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          throw new MCPServerError("INVALID_ARGUMENT", err.issues.map((issue) => `${issue.path.join(".") || "arguments"}: ${issue.message}`).join("; "));
+        }
+        throw err;
+      }
+      const result = await tool.handler(ctx, input);
 
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

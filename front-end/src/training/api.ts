@@ -73,6 +73,28 @@ export interface TrainingLogChunk {
   reset: boolean;
 }
 
+export interface TrainingProgressOptions {
+  eventCursor?: string;
+  stdoutOffset?: number;
+  stderrOffset?: number;
+  waitMs?: number;
+  maxBytes?: number;
+  signal?: AbortSignal;
+}
+
+export interface TrainingProgressResult {
+  status: "ok";
+  job: TrainingJobStatus;
+  metrics: Record<string, unknown>;
+  diagnostics: string[];
+  events: Record<string, unknown>[];
+  stdout: TrainingLogChunk & { nextOffset: number };
+  stderr: TrainingLogChunk & { nextOffset: number };
+  eventCursor: string | null;
+  nextEventCursor: string | null;
+  timedOut: boolean;
+}
+
 export interface TrainingJobRequest {
   schema_version: number;
   network: { format: "package"; value: { bundle_ref: string; graph: PackageBundleV1["graph"] } };
@@ -231,6 +253,95 @@ export class TrainingApiClient {
       stderr_after: String(stderrAfter),
     });
     return this.request(`/jobs/${encodeURIComponent(jobId)}/logs/tail?${query}`);
+  }
+
+  /** Read one bounded progress window; the event and log cursors are independent. */
+  async readTrainingProgress(jobId: string, options: TrainingProgressOptions = {}): Promise<TrainingProgressResult> {
+    const stdoutOffset = boundedInteger(options.stdoutOffset ?? 0, 0, "stdoutOffset");
+    const stderrOffset = boundedInteger(options.stderrOffset ?? 0, 0, "stderrOffset");
+    const waitMs = boundedInteger(options.waitMs ?? 0, 0, "waitMs", 30000);
+    const maxBytes = boundedInteger(options.maxBytes ?? 262144, 1, "maxBytes", 262144);
+    const eventCursor = options.eventCursor;
+    if (eventCursor !== undefined && eventCursor.length === 0) throw new BackendApiError(400, "invalid_event_cursor", "Il cursore eventi non può essere vuoto");
+
+    const controller = new AbortController();
+    const abort = () => controller.abort(options.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    options.signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), waitMs);
+    try {
+      const [job, logs] = await Promise.all([
+        this.getTrainingJob(jobId),
+        this.tailTrainingJobLogs(jobId, stdoutOffset, stderrOffset),
+      ]);
+      const eventResult = await this.readEventWindow(jobId, eventCursor, waitMs, maxBytes, controller.signal);
+      return {
+        status: "ok",
+        job,
+        metrics: eventResult.metrics,
+        diagnostics: eventResult.diagnostics,
+        events: eventResult.events,
+        stdout: { ...logs.stdout, nextOffset: logs.stdout.offset },
+        stderr: { ...logs.stderr, nextOffset: logs.stderr.offset },
+        eventCursor: eventCursor ?? null,
+        nextEventCursor: eventResult.nextEventCursor,
+        timedOut: eventResult.timedOut,
+      };
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+    }
+  }
+
+  private async readEventWindow(jobId: string, cursor: string | undefined, waitMs: number, maxBytes: number, signal: AbortSignal): Promise<{
+    events: Record<string, unknown>[];
+    metrics: Record<string, unknown>;
+    diagnostics: string[];
+    nextEventCursor: string | null;
+    timedOut: boolean;
+  }> {
+    const query = cursor ? `?after=${encodeURIComponent(cursor)}` : "";
+    const headers = this.authHeaders();
+    headers.set("accept", "text/event-stream");
+    if (cursor) headers.set("last-event-id", cursor);
+    const events: Record<string, unknown>[] = [];
+    let nextEventCursor = cursor ?? null;
+    const metrics: Record<string, unknown> = {};
+    const diagnostics: string[] = [];
+    try {
+      const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/events${query}`, { headers, signal });
+      if (!response.ok) throw await responseError(response);
+      if (!response.body) throw new BackendApiError(502, "events_stream_missing", "Il backend non ha restituito uno stream eventi");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = new SseParser();
+      let bytes = 0;
+      try {
+        while (true) {
+          const item = await reader.read();
+          if (item.done) break;
+          bytes += item.value.byteLength;
+          if (bytes > maxBytes) throw new BackendApiError(413, "progress_too_large", "La finestra di progress supera il limite di byte");
+          for (const message of parser.push(decoder.decode(item.value, { stream: true }))) {
+            if (message.id) nextEventCursor = message.id;
+            const event = JSON.parse(message.data) as Record<string, unknown>;
+            events.push(event);
+            collectProgress(event, metrics, diagnostics);
+          }
+        }
+        for (const message of parser.push(decoder.decode())) {
+          if (message.id) nextEventCursor = message.id;
+          const event = JSON.parse(message.data) as Record<string, unknown>;
+          events.push(event);
+          collectProgress(event, metrics, diagnostics);
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      return { events, metrics, diagnostics, nextEventCursor, timedOut: false };
+    } catch (error) {
+      if (isTimeoutAbort(error, signal)) return { events, metrics, diagnostics, nextEventCursor, timedOut: true };
+      throw error;
+    }
   }
 
   /**
@@ -436,4 +547,24 @@ function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void
       reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
     }, { once: true });
   });
+}
+
+function boundedInteger(value: number, minimum: number, field: string, maximum = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new BackendApiError(400, `invalid_${field}`, `${field} deve essere un intero tra ${minimum} e ${maximum}`);
+  }
+  return value;
+}
+
+function isTimeoutAbort(error: unknown, signal: AbortSignal): boolean {
+  return signal.aborted && (signal.reason instanceof DOMException && signal.reason.name === "TimeoutError");
+}
+
+function collectProgress(event: Record<string, unknown>, metrics: Record<string, unknown>, diagnostics: string[]): void {
+  const eventMetrics = event.metrics;
+  if (eventMetrics && typeof eventMetrics === "object" && !Array.isArray(eventMetrics)) Object.assign(metrics, eventMetrics);
+  if (typeof event.error === "string") diagnostics.push(event.error);
+  if (typeof event.diagnostic === "string") diagnostics.push(event.diagnostic);
+  const packageError = event.package_error;
+  if (typeof packageError === "string") diagnostics.push(packageError);
 }

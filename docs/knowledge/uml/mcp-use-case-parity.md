@@ -12,12 +12,16 @@ The MCP interface must expose the agent-facing modeling and training workflows
 below, not merely a collection of low-level graph and HTTP operations. This is
 an accepted functional constraint, not a claim that the server already
 implements it. The [browser-backed MCP architecture](../architecture/browser-mcp.md)
-describes actual implementation and gaps separately. Implementation is not
-commissioned by recording this decision; no implementation plan is attached yet.
+describes actual implementation and gaps separately. The
+[adaptation plan](../../plans/active/mcp-use-case-parity/plan.md) maps these
+requirements to implementation tasks and verification gates; its existence does
+not mean the server already satisfies this constraint.
 
 The diagram preserves the user-supplied use cases, associations, extension and
 notes. `Agent` is the single primary actor. The two groups are capability areas,
 not separate agent roles, permission levels, or execution processes.
+The actor is directly associated with every use case, including Screenshot
+and Open a project; these associations coexist with the layout extension.
 
 ## Accepted diagram
 
@@ -41,6 +45,7 @@ flowchart LR
         M3(["Modificare parametri nodi"])
         M4(["Formattare la vista"])
         M5(["Screenshot<br/>─────────────<br/>extension points<br/>Formattare la vista"])
+        M6(["Aprire un progetto"])
 
         M4 -. "«extend»" .-> M5
     end
@@ -55,16 +60,21 @@ flowchart LR
     A --- M2
     A --- M3
     A --- M4
+    A --- M5
+    A --- M6
 
-    N1["«note»<br/>Deve essere possibile modificare ogni<br/>parametro del training visualizzato nella sidebar."]
+    N1["«note»<br/>Every training parameter shown in the sidebar<br/>must be editable through MCP."]
 
-    N2["«note»<br/>Il nodo va creato compilando i parametri dello stereotipo.<br/>La creazione deve essere identica all'operazione nel browser:<br/>selezionare lo stereotipo dalla sidebar e premere Crea."]
+    N2["«note»<br/>Create a node by filling in its stereotype parameters.<br/>Creation must behave exactly like selecting the stereotype<br/>in the browser sidebar and clicking Create."]
 
-    N3["«note»<br/>Usare l'operazione del pulsante Disponi per<br/>assegnare ai nodi una disposizione standard.<br/>Eseguirla PRIMA dello screenshot del browser.<br/>Supportare disposizione orizzontale e verticale."]
+    N3["«note»<br/>Use the editor's Arrange (Disponi) operation<br/>to place nodes in a standard layout.<br/>Run it BEFORE capturing the browser screenshot.<br/>Support both horizontal and vertical layouts."]
+
+    N4["«note»<br/>The MCP server must create a new project<br/>or open an existing one.<br/>Project creation must use the same parameters and behavior<br/>as the graphical interface, sharing as much code as possible."]
 
     T2 -.- N1
     M1 -.- N2
     M4 -.- N3
+    M6 -.- N4
 ```
 
 ## Required observable behavior
@@ -81,12 +91,47 @@ flowchart LR
 | M3 | Edit node parameters | Read and change stereotype parameter values without losing their declared types or the editor's semantics. |
 | M4 | Format view | Apply the editor's **Disponi** auto-layout in either horizontal or vertical direction. Panning, zooming, fitting the viewport, or manually guessing node coordinates are not equivalent. |
 | M5 | Screenshot | Capture the browser diagram after the required layout has been applied and rendered. |
+| M6 | Open a project | Create a new project or open an existing one through the browser's shared project workflow. Creation exposes the same form parameters, defaults, validation and behavior as the UI; opening activates the same writable project and resource scope. |
 
 The original `«extend»` relation is retained faithfully. Its note explicitly
 requires layout **before** screenshot; this ordering is the acceptance rule,
 not permission to silently skip layout. A future UML notation cleanup must not
 weaken that rule. These are use-case relationships, not a prescribed one-tool-
 per-oval API or a call graph.
+
+## Thin proxy and shared browser logic
+
+The MCP server is a small proxy to the browser, not a second implementation of
+the editor. Maximize reuse of the browser's domain code: UI actions and MCP
+requests must reach the same project, node, parameter, layout and training
+operations wherever those behaviors already exist. Extract a narrow shared
+operation when needed instead of copying its logic into a tool handler.
+
+The server should primarily adapt tool inputs/outputs, route requests and
+report transport errors. Protocol validation belongs at that boundary; domain
+defaults, validation and workflow behavior belong to the shared browser
+services. Browser-only capabilities stay behind their existing adapters, and
+training execution stays on the backend. Code sharing must not introduce a
+second graph, filesystem owner or scheduler into MCP.
+
+## Project creation and opening
+
+The single use case M6 includes both **New project** and **Open project**. New
+project accepts the UI's `id`, `version`, `name` and optional `description`,
+using the same defaults and validation rather than accepting an unrelated raw
+model JSON contract. Its parent-directory selection, child creation and
+collision handling follow the
+[project-workspace decision](../decisions/project-workspaces-and-stereotype-authoring.md).
+Opening reads the existing project's model and declared resources, activates
+the same scope and retains the normal ordered autosave behavior.
+
+Directory permission, cancellation, invalid project and existing-directory
+errors must remain visible. Browser filesystem handles stay in the browser;
+they are not MCP payloads or backend inputs. If the browser requires a user
+gesture or permission grant, expose that required interaction without claiming
+the project is already open or bypassing the permission boundary. The exact
+tool/permission handshake remains an API design choice, not permission to make
+a second server-side project loader.
 
 ## Preserved boundaries
 
@@ -106,12 +151,13 @@ per-oval API or a call graph.
 ## Verification and unresolved API choices
 
 Acceptance requires exercising each use case through the public MCP interface,
-comparing node creation/parameter values with the sidebar, checking both layout
+creating and reopening projects through the same UI domain behavior, comparing
+node creation/parameter values with the sidebar, checking both layout
 directions and the resulting screenshot, and completing an authorized training
 job through wheel retrieval. A registered tool or passing proxy mock is not
 proof of end-to-end parity.
 
-Tool names, grouping, configuration persistence, connection routing and the
+Tool names, grouping, project permission handshakes, configuration persistence, connection routing and the
 wheel delivery representation remain implementation design choices. They must
 be settled without changing the required user-visible behavior or introducing
 a second authority for browser/backend state.

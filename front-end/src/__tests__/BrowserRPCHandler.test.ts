@@ -61,3 +61,21 @@ describe("BrowserRPCHandler package diagnostics", () => {
     expect(sent[0]?.result).toMatchObject({ nodeId: "created", package: { id: "vendor.layer", version: "1.0.0" } })
   })
 })
+
+describe("BrowserRPCHandler startup project bridge", () => {
+  test("routes path payloads before an editor exists and reports graph readiness truthfully", async () => {
+    const sent: Array<Record<string, unknown>> = []
+    const payload = { projectPath: "/projects/demo", modelJson: "{}", resources: {} }
+    const handler: any = new BrowserRPCHandler(undefined, "ws://test", undefined, undefined, {
+      open: async (value: unknown) => ({ status: "ok", project: value }),
+      create: async () => ({ status: "ok" }),
+    })
+    handler.ws = { readyState: 1, send(payloadText: string) { sent.push(JSON.parse(payloadText)) } }
+    handler.handleMessage({ data: JSON.stringify({ id: "open", method: "open_project", params: payload }) })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(sent[0]?.result).toMatchObject({ status: "ok", project: payload })
+
+    handler.handleMessage({ data: JSON.stringify({ id: "graph", method: "get_graph", params: {} }) })
+    expect(sent[1]?.error).toMatchObject({ code: "NO_ACTIVE_PROJECT" })
+  })
+})

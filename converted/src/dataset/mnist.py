@@ -48,7 +48,7 @@ class MNISTDataset(Dataset):
             "std": [0.3081],
         }
 
-    def __init__(self, batch_size=32, num_workers=0, train_size=0.8) -> None:
+    def __init__(self, batch_size: int = 32, num_workers: int = 0, train_size: float = 0.8) -> None:
         super().__init__()
 
         self.transform = transforms.Compose(
