@@ -1,0 +1,450 @@
+import {
+  BackendApiError,
+  TrainingApiClient,
+  type DatasetInfo,
+  type PairingGrant,
+  type SessionInfo,
+} from "./api";
+import {
+  forgetBackendConnection,
+  loadBackendConnection,
+  normalizeBackendUrl,
+  saveBackendConnection,
+  type ConnectionStorage,
+  type SavedBackendConnection,
+} from "./connection";
+
+export type TrainingConnectionState =
+  | "disconnected"
+  | "checking"
+  | "pending"
+  | "active"
+  | "expired"
+  | "rejected"
+  | "error";
+
+export interface TrainingConnectionView {
+  status: TrainingConnectionState;
+  baseUrl: string | null;
+  deviceName: string | null;
+  requestId: string | null;
+  connectionId: string | null;
+  verificationCode: string | null;
+  expiresAt: string | null;
+  sessionExpiresAt: string | null;
+  error: string | null;
+}
+
+export interface TrainingConfig {
+  selectedDataset: string;
+  datasetParams: Record<string, unknown>;
+  seed: number;
+  optimizerTarget: string;
+  learningRate: number;
+  maxEpochs: number;
+  accelerator: "auto" | "cpu" | "cuda";
+  patience: number;
+  minDelta: number;
+  wandbProject: string;
+  wandbMode: "disabled" | "offline" | "online";
+  cpu: number;
+  memoryGb: number;
+  gpu: number;
+  gpuMemoryGb?: number;
+  gpuType?: string;
+  node?: string;
+  priority: number;
+  packageSuffix?: string;
+}
+
+export type TrainingConfigPatch = Partial<TrainingConfig>;
+
+export class TrainingConfigurationError extends Error {
+  readonly code = "INVALID_CONFIGURATION";
+
+  constructor(message: string, readonly details?: Record<string, unknown>) {
+    super(message);
+    this.name = "TrainingConfigurationError";
+  }
+}
+
+export interface TrainingControllerSnapshot {
+  connection: TrainingConnectionView;
+  config: TrainingConfig;
+  datasets: DatasetInfo[];
+}
+
+export type TrainingControllerListener = (snapshot: TrainingControllerSnapshot) => void;
+
+export interface TrainingControllerOptions {
+  storage?: ConnectionStorage;
+  apiFactory?: (baseUrl: string, token?: string | null) => TrainingApiClient;
+}
+
+const DEFAULT_CONFIG: TrainingConfig = {
+  selectedDataset: "",
+  datasetParams: {},
+  seed: 42,
+  optimizerTarget: "torch.optim.Adam",
+  learningRate: 0.001,
+  maxEpochs: 20,
+  accelerator: "auto",
+  patience: 3,
+  minDelta: 0,
+  wandbProject: "NeuralNetworks",
+  wandbMode: "disabled",
+  cpu: 4,
+  memoryGb: 8,
+  gpu: 0,
+  priority: 0,
+};
+
+const CONFIG_KEYS = new Set(Object.keys(DEFAULT_CONFIG).concat([
+  "gpuMemoryGb", "gpuType", "node", "packageSuffix",
+]));
+
+/**
+ * Project-scoped owner of the browser training session and its configuration.
+ * The sidebar is only a view: closing it must not tear down this controller.
+ */
+export class TrainingController {
+  private readonly storage?: ConnectionStorage;
+  private readonly apiFactory: (baseUrl: string, token?: string | null) => TrainingApiClient;
+  private api: TrainingApiClient | null = null;
+  private savedConnection: SavedBackendConnection | null = null;
+  private pairing: PairingGrant | null = null;
+  private connection: TrainingConnectionView = disconnectedView();
+  private config: TrainingConfig = cloneConfig(DEFAULT_CONFIG);
+  private datasets: DatasetInfo[] = [];
+  private listeners = new Set<TrainingControllerListener>();
+  private generation = 0;
+  private pairingTimer: ReturnType<typeof setInterval> | undefined;
+
+  constructor(options: TrainingControllerOptions = {}) {
+    this.storage = options.storage;
+    this.apiFactory = options.apiFactory ?? ((baseUrl, token) => new TrainingApiClient(baseUrl, token));
+  }
+
+  subscribe(listener: TrainingControllerListener): () => void {
+    this.listeners.add(listener);
+    listener(this.snapshot());
+    return () => this.listeners.delete(listener);
+  }
+
+  snapshot(): TrainingControllerSnapshot {
+    return {
+      connection: { ...this.connection },
+      config: cloneConfig(this.config),
+      datasets: this.datasets.map((dataset) => ({ ...dataset, parameters: dataset.parameters.map((parameter) => ({ ...parameter })) })),
+    };
+  }
+
+  getConnection(): TrainingConnectionView {
+    return { ...this.connection };
+  }
+
+  getConfig(): TrainingConfig {
+    return cloneConfig(this.config);
+  }
+
+  getDatasets(): DatasetInfo[] {
+    return this.snapshot().datasets;
+  }
+
+  /** Install the browser-provided descriptor catalog and materialize defaults. */
+  setDatasets(datasets: readonly DatasetInfo[]): TrainingConfig {
+    this.datasets = datasets.map((dataset) => ({ ...dataset, parameters: dataset.parameters.map((parameter) => ({ ...parameter })) }));
+    if (!this.config.selectedDataset && this.datasets[0]) {
+      this.config = { ...this.config, selectedDataset: this.datasets[0].target, datasetParams: datasetDefaults(this.datasets[0]) };
+    }
+    this.emit();
+    return this.getConfig();
+  }
+
+  /** Browser-only access for the sidebar's existing job and bundle actions. */
+  getApi(): TrainingApiClient {
+    if (!this.api) throw new BackendApiError(401, "missing_token", "La connessione non ha un token");
+    return this.api;
+  }
+
+  async restore(): Promise<void> {
+    const restored = loadBackendConnection(this.storage);
+    if (!restored) return;
+    this.savedConnection = restored;
+    this.api = this.apiFactory(restored.baseUrl, restored.token);
+    this.connection = {
+      ...this.connection,
+      status: "checking",
+      baseUrl: restored.baseUrl,
+      deviceName: restored.deviceName,
+      connectionId: restored.connectionId,
+    };
+    this.emit();
+    try {
+      if (restored.requestId) {
+        this.pairing = {
+          request_id: restored.requestId,
+          connection_id: restored.connectionId,
+          token: restored.token,
+          verification_code: restored.verificationCode ?? "",
+          expires_at: "",
+        };
+        await this.checkPairing();
+      } else {
+        await this.activate(await this.api.getSession());
+      }
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  async connect(baseUrl: string, deviceName = ""): Promise<TrainingConnectionView> {
+    this.invalidate();
+    this.connection = { ...disconnectedView(), status: "checking" };
+    this.emit();
+    try {
+      const normalized = normalizeBackendUrl(baseUrl);
+      const publicApi = this.apiFactory(normalized);
+      await publicApi.health();
+      const grant = await publicApi.createPairing(deviceName.trim() || null);
+      this.api = this.apiFactory(normalized, grant.token);
+      this.pairing = grant;
+      this.savedConnection = connectionFromGrant(grant, normalized, deviceName);
+      saveBackendConnection(this.savedConnection, this.storage);
+      this.connection = pendingView(this.savedConnection, grant);
+      this.startPairingTimer();
+      this.emit();
+      return this.getConnection();
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async renew(): Promise<TrainingConnectionView> {
+    if (!this.api || !this.savedConnection) throw new BackendApiError(401, "missing_token", "La connessione non ha un token");
+    this.invalidate();
+    this.connection = { ...this.connection, status: "checking", error: null };
+    this.emit();
+    try {
+      const grant = await this.api.createRenewal();
+      this.pairing = grant;
+      this.savedConnection = connectionFromGrant(grant, this.savedConnection.baseUrl, this.savedConnection.deviceName ?? "");
+      saveBackendConnection(this.savedConnection, this.storage);
+      this.connection = pendingView(this.savedConnection, grant);
+      this.startPairingTimer();
+      this.emit();
+      return this.getConnection();
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async disconnect(revoke = false): Promise<TrainingConnectionView> {
+    const api = this.api;
+    this.invalidate();
+    try {
+      if (revoke && api) await api.revokeSession();
+    } finally {
+      if (this.savedConnection) forgetBackendConnection(this.savedConnection.baseUrl, this.storage);
+      this.api = null;
+      this.savedConnection = null;
+      this.pairing = null;
+      this.datasets = [];
+      this.connection = disconnectedView();
+      this.emit();
+    }
+    return this.getConnection();
+  }
+
+  updateConfig(patch: TrainingConfigPatch): TrainingConfig {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+      throw new TrainingConfigurationError("La patch della configurazione deve essere un oggetto");
+    }
+    const unknown = Object.keys(patch).filter((key) => !CONFIG_KEYS.has(key));
+    if (unknown.length > 0) {
+      throw new TrainingConfigurationError(`Campo di configurazione sconosciuto: ${unknown.join(", ")}`, { fields: unknown });
+    }
+    const normalizedPatch = { ...patch } as Record<string, unknown>;
+    for (const key of ["gpuMemoryGb", "gpuType", "node", "packageSuffix"]) {
+      if (normalizedPatch[key] === null) normalizedPatch[key] = undefined;
+    }
+    const next = { ...this.config, ...normalizedPatch, datasetParams: patch.datasetParams === undefined
+      ? { ...this.config.datasetParams }
+      : { ...this.config.datasetParams, ...(patch.datasetParams as Record<string, unknown>) } } as TrainingConfig;
+    validateConfig(next, this.datasets);
+    if (JSON.stringify(next) === JSON.stringify(this.config)) return this.getConfig();
+    this.config = next;
+    this.emit();
+    return this.getConfig();
+  }
+
+  async refreshDatasets(): Promise<DatasetInfo[]> {
+    const generation = this.generation;
+    const datasets = await this.getApi().listDatasets();
+    if (generation !== this.generation) return this.getDatasets();
+    const selected = this.config.selectedDataset;
+    this.setDatasets(datasets);
+    if (selected) {
+      const current = datasets.find((dataset) => dataset.target === selected);
+      if (current) {
+        this.config = { ...this.config, datasetParams: mergeDatasetDefaults(current, this.config.datasetParams) };
+        this.emit();
+      }
+    }
+    return this.getDatasets();
+  }
+
+  private async checkPairing(): Promise<void> {
+    if (!this.api || !this.pairing || !this.savedConnection) return;
+    const generation = this.generation;
+    const status = await this.api.getPairingStatus(this.pairing.request_id);
+    if (generation !== this.generation) return;
+    if (status.status === "approved") {
+      this.stopPairingTimer();
+      this.pairing = null;
+      this.savedConnection = { ...this.savedConnection, requestId: null, verificationCode: null };
+      saveBackendConnection(this.savedConnection, this.storage);
+      await this.activate(await this.api.getSession());
+    } else if (status.status === "rejected" || status.status === "expired") {
+      this.stopPairingTimer();
+      this.connection = { ...this.connection, status: status.status, expiresAt: status.expires_at, sessionExpiresAt: status.session_expires_at, error: null };
+      this.emit();
+    } else {
+      this.connection = { ...this.connection, status: "pending", expiresAt: status.expires_at, error: null };
+      this.emit();
+    }
+  }
+
+  private async activate(session: SessionInfo): Promise<void> {
+    if (!this.api) return;
+    this.connection = {
+      ...this.connection,
+      status: "active",
+      expiresAt: session.expires_at,
+      sessionExpiresAt: session.expires_at,
+      error: null,
+    };
+    this.emit();
+    await this.refreshDatasets();
+  }
+
+  private startPairingTimer(): void {
+    this.stopPairingTimer();
+    this.pairingTimer = setInterval(() => void this.checkPairing().catch((error) => this.handleError(error)), 1500);
+  }
+
+  private stopPairingTimer(): void {
+    if (this.pairingTimer) clearInterval(this.pairingTimer);
+    this.pairingTimer = undefined;
+  }
+
+  private invalidate(): void {
+    this.generation += 1;
+    this.stopPairingTimer();
+  }
+
+  private handleError(error: unknown): void {
+    const status = error instanceof BackendApiError && error.code === "session_expired"
+      ? "expired"
+      : error instanceof BackendApiError && error.code === "session_revoked" ? "rejected" : "error";
+    this.connection = { ...this.connection, status, error: error instanceof Error ? error.message : String(error) };
+    this.emit();
+  }
+
+  private emit(): void {
+    const snapshot = this.snapshot();
+    for (const listener of this.listeners) listener(snapshot);
+  }
+}
+
+function disconnectedView(): TrainingConnectionView {
+  return { status: "disconnected", baseUrl: null, deviceName: null, requestId: null, connectionId: null, verificationCode: null, expiresAt: null, sessionExpiresAt: null, error: null };
+}
+
+function pendingView(connection: SavedBackendConnection, grant: PairingGrant): TrainingConnectionView {
+  return {
+    status: "pending",
+    baseUrl: connection.baseUrl,
+    deviceName: connection.deviceName,
+    requestId: grant.request_id,
+    connectionId: grant.connection_id,
+    verificationCode: grant.verification_code,
+    expiresAt: grant.expires_at,
+    sessionExpiresAt: null,
+    error: null,
+  };
+}
+
+function connectionFromGrant(grant: PairingGrant, baseUrl: string, deviceName: string): SavedBackendConnection {
+  return { version: 1, baseUrl, token: grant.token, connectionId: grant.connection_id, requestId: grant.request_id, verificationCode: grant.verification_code, deviceName: deviceName.trim() || null };
+}
+
+function cloneConfig(config: TrainingConfig): TrainingConfig {
+  return { ...config, datasetParams: { ...config.datasetParams } };
+}
+
+function datasetDefaults(dataset: DatasetInfo): Record<string, unknown> {
+  return Object.fromEntries(dataset.parameters.map((parameter) => [parameter.name, parameter.default]));
+}
+
+function mergeDatasetDefaults(dataset: DatasetInfo, values: Record<string, unknown>): Record<string, unknown> {
+  return { ...datasetDefaults(dataset), ...values };
+}
+
+function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]): void {
+  if (config.selectedDataset) {
+    const dataset = datasets.find((candidate) => candidate.target === config.selectedDataset);
+    if (datasets.length > 0 && !dataset) throw new TrainingConfigurationError(`Dataset sconosciuto: ${config.selectedDataset}`, { field: "selectedDataset" });
+    if (dataset) {
+      const allowed = new Map(dataset.parameters.map((parameter) => [parameter.name, parameter]));
+      const unknown = Object.keys(config.datasetParams).filter((key) => !allowed.has(key));
+      if (unknown.length > 0) throw new TrainingConfigurationError(`Parametro dataset sconosciuto: ${unknown.join(", ")}`, { field: "datasetParams", keys: unknown });
+      for (const [key, value] of Object.entries(config.datasetParams)) validateDatasetValue(allowed.get(key)!, value);
+    }
+  }
+  integer(config.seed, "seed");
+  if (!config.optimizerTarget.trim()) throw invalid("optimizerTarget", "deve essere valorizzato");
+  positive(config.learningRate, "learningRate");
+  integerAtLeast(config.maxEpochs, "maxEpochs", 1);
+  if (!["auto", "cpu", "cuda"].includes(config.accelerator)) throw invalid("accelerator", "valore non supportato");
+  integerAtLeast(config.patience, "patience", 0);
+  nonNegative(config.minDelta, "minDelta");
+  if (!["disabled", "offline", "online"].includes(config.wandbMode)) throw invalid("wandbMode", "valore non supportato");
+  integerAtLeast(config.cpu, "cpu", 0);
+  positive(config.memoryGb, "memoryGb");
+  integerAtLeast(config.gpu, "gpu", 0);
+  if (config.gpuMemoryGb !== undefined) positive(config.gpuMemoryGb, "gpuMemoryGb");
+  integer(config.priority, "priority");
+  if (config.packageSuffix && !/^[A-Za-z][A-Za-z0-9_]*$/.test(config.packageSuffix)) throw invalid("packageSuffix", "formato non valido");
+}
+
+function validateDatasetValue(parameter: DatasetInfo["parameters"][number], value: unknown): void {
+  if (value === undefined || value === null) {
+    if (parameter.required) throw invalid(`datasetParams.${parameter.name}`, "è obbligatorio");
+    return;
+  }
+  const type = parameter.type.toLowerCase();
+  if ((type === "int" || type === "integer") && (!Number.isInteger(value))) throw invalid(`datasetParams.${parameter.name}`, "deve essere un intero");
+  if ((type === "float" || type === "number") && (typeof value !== "number" || !Number.isFinite(value))) throw invalid(`datasetParams.${parameter.name}`, "deve essere un numero");
+  if ((type === "bool" || type === "boolean") && typeof value !== "boolean") throw invalid(`datasetParams.${parameter.name}`, "deve essere booleano");
+  if ((type === "string" || type === "str") && typeof value !== "string") throw invalid(`datasetParams.${parameter.name}`, "deve essere testo");
+}
+
+function integer(value: number, field: string): void {
+  if (!Number.isInteger(value)) throw invalid(field, "deve essere un intero");
+}
+function integerAtLeast(value: number, field: string, minimum: number): void {
+  integer(value, field);
+  if (value < minimum) throw invalid(field, `deve essere almeno ${minimum}`);
+}
+function positive(value: number, field: string): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw invalid(field, "deve essere positivo");
+}
+function nonNegative(value: number, field: string): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw invalid(field, "non può essere negativo");
+}
+function invalid(field: string, message: string): TrainingConfigurationError {
+  return new TrainingConfigurationError(`${field}: ${message}`, { field });
+}

@@ -80,3 +80,48 @@ export const cancel_training_job = {
     return client(ctx).cancelJob(input.jobId);
   },
 };
+
+// Editor-scoped training session operations. These deliberately use browser
+// RPC: pairing and configuration belong to the selected editor, while the
+// legacy process-authenticated tools above remain available for compatibility.
+export const connect_training_backend = {
+  schema: z.object({ baseUrl: z.string().min(1), deviceName: z.string().max(80).optional() }),
+  async handler(ctx: ServerContext, input: { baseUrl: string; deviceName?: string }) {
+    return ctx.browser.call("connect_training_backend", input);
+  },
+};
+
+export const get_training_connection = {
+  schema: z.object({}),
+  async handler(ctx: ServerContext) {
+    return ctx.browser.call("get_training_connection", {});
+  },
+};
+
+export const renew_training_connection = {
+  schema: z.object({}),
+  async handler(ctx: ServerContext) {
+    return ctx.browser.call("renew_training_connection", {});
+  },
+};
+
+export const disconnect_training_backend = {
+  schema: z.object({ revoke: z.boolean().optional().default(false) }),
+  async handler(ctx: ServerContext, input: { revoke?: boolean }) {
+    return ctx.browser.call("disconnect_training_backend", input);
+  },
+};
+
+export const get_training_config = {
+  schema: z.object({}),
+  async handler(ctx: ServerContext) {
+    return ctx.browser.call("get_training_config", {});
+  },
+};
+
+export const update_training_config = {
+  schema: z.object({ patch: z.record(z.unknown()) }),
+  async handler(ctx: ServerContext, input: { patch: Record<string, unknown> }) {
+    return ctx.browser.call("update_training_config", input);
+  },
+};

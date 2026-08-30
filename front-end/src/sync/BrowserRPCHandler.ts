@@ -25,6 +25,7 @@ import type { Node, Edge } from "@xyflow/svelte";
 import type { GraphInferenceResult } from "../type-system/graph/types";
 import { packageIdentity } from "../type-system/graph/types";
 import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
+import { TrainingController } from "../training/controller";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ export class BrowserRPCHandler {
   private intentionalClose: boolean = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private viewport?: ViewportController;
+  private training?: TrainingController;
 
   /**
    * @param diagram  The Diagram instance to mutate (single source of truth).
@@ -114,7 +116,7 @@ export class BrowserRPCHandler {
    * @param viewport Optional viewport controller (fitView/setCenter).
    *                 Passed from FlowCanvas.svelte via useSvelteFlow().
    */
-  constructor(diagram: Diagram, url?: string, viewport?: ViewportController) {
+  constructor(diagram: Diagram, url?: string, viewport?: ViewportController, training?: TrainingController) {
     this.diagram = diagram;
     this.url =
       url ??
@@ -122,6 +124,7 @@ export class BrowserRPCHandler {
         ? `ws://${window.location.host}/ws`
         : `ws://localhost:9339`);
     this.viewport = viewport;
+    this.training = training;
   }
 
   // ── Public API ───────────────────────────────────────────────────────
@@ -315,6 +318,26 @@ export class BrowserRPCHandler {
           result = this.handlePing();
           break;
 
+        // ── Training session/configuration ───────────────────────
+        case "connect_training_backend":
+          result = this.requireTraining().connect(params.baseUrl as string, params.deviceName as string | undefined);
+          break;
+        case "get_training_connection":
+          result = this.requireTraining().getConnection();
+          break;
+        case "renew_training_connection":
+          result = this.requireTraining().renew();
+          break;
+        case "disconnect_training_backend":
+          result = this.requireTraining().disconnect(params.revoke === true);
+          break;
+        case "get_training_config":
+          result = { status: "ok", config: this.requireTraining().getConfig(), datasets: this.requireTraining().getDatasets() };
+          break;
+        case "update_training_config":
+          result = { status: "ok", config: this.requireTraining().updateConfig((params.patch ?? {}) as Record<string, unknown>) };
+          break;
+
         default:
           throw new Error(`Unknown method: ${method}`);
       }
@@ -335,6 +358,11 @@ export class BrowserRPCHandler {
         error: { message: error instanceof Error ? error.message : String(error) },
       });
     }
+  }
+
+  private requireTraining(): TrainingController {
+    if (!this.training) throw new Error("Training controller unavailable for this editor");
+    return this.training;
   }
 
   // ── Reconnection (exponential backoff) ───────────────────────────────
