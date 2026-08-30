@@ -25,7 +25,7 @@ describe("project path boundary", () => {
   test("opens the VAE fixture as UTF-8 while preserving binary resources", async () => {
     const fixturePath = fileURLToPath(new URL("../../examples/diagrams/package/models/variational-autoencoder", import.meta.url))
     const parent = await fs.mkdtemp(path.join(os.tmpdir(), "nnm-project-"))
-    const projectPath = path.join(parent, "example.vae-mnist")
+    const projectPath = path.join(parent, "variational-autoencoder")
     await fs.cp(fixturePath, projectPath, { recursive: true })
     const binary = Uint8Array.from([0, 1, 127, 128, 255])
     await fs.writeFile(path.join(projectPath, "weights.bin"), binary)

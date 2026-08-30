@@ -75,10 +75,7 @@ export async function openProjectAtPath(projectPath: string, projectRoot: string
   await readFiles(safePath, "", resources, { bytes: 0 })
   const model = resources["model.json"]
   if (!model) throw new MCPServerError("MALFORMED_PROJECT", "project directory does not contain model.json")
-  let parsed: unknown
-  try { parsed = JSON.parse(model.data) } catch { throw new MCPServerError("MALFORMED_PROJECT", "model.json is not valid JSON") }
-  const manifest = (parsed as { manifest?: { id?: unknown } }).manifest
-  if (manifest?.id !== path.basename(safePath)) throw new MCPServerError("MALFORMED_PROJECT", "model manifest id does not match project directory")
+  try { JSON.parse(model.data) } catch { throw new MCPServerError("MALFORMED_PROJECT", "model.json is not valid JSON") }
   return { projectPath: safePath, modelJson: model.data, resources }
 }
 
