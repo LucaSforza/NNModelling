@@ -25,6 +25,10 @@ behavior as a second supported contract or append narrative history.
 Durable architectural decisions should be added under `decisions/` and linked
 from the affected contract. Historical reasoning belongs under `docs/archive/`.
 
+UML:
+
+- [MCP use-case parity with the editor](uml/mcp-use-case-parity.md) — accepted functional constraint; implementation gaps are tracked separately.
+
 Current decisions:
 
 - [Package type-system cutover](decisions/stereotype-type-system-migration.md)
