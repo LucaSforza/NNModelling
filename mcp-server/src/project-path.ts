@@ -107,7 +107,10 @@ async function readFiles(
       const bytes = await fs.readFile(path.join(directory, entry.name))
       size.bytes += bytes.byteLength
       if (size.bytes > 8 * 1024 * 1024) throw new MCPServerError("PROJECT_TOO_LARGE", "project resources exceed 8 MiB")
-      resources[relative.split(path.sep).join("/")] = { encoding: "base64", data: bytes.toString("base64") }
+      const resourcePath = relative.split(path.sep).join("/")
+      resources[resourcePath] = resourcePath === "model.json"
+        ? { encoding: "utf8", data: bytes.toString("utf8") }
+        : { encoding: "base64", data: bytes.toString("base64") }
     }
   }
 }
