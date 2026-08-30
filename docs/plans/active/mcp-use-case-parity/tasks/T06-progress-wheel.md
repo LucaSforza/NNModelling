@@ -1,7 +1,7 @@
 ---
 id: T06
 kind: task
-status: draft
+status: ready
 plan: ../plan.md
 role: integration
 depends_on: [T05]
@@ -80,6 +80,14 @@ pnpm --dir front-end check
 pnpm --dir mcp-server test
 ```
 
+## Implementation handoff
+
+The bounded progress and verified wheel paths are implemented. End-to-end
+monitoring and wheel retrieval against a T05-owned running job remain an
+external verification gate: no authorized live job/session was available in
+this worktree. The implementation deliberately does not manufacture a token,
+job, or artifact to satisfy that gate.
+
 Monitor T05's authorized job before completion, then retrieve its wheel through MCP and independently verify the digest. Use test-owned sessions/artifacts for negative cases. Artifact installation and public Model smoke testing are required in T07.
 
 ## Required handoff
@@ -88,4 +96,3 @@ Return changed files, exact checks/results, observed user-facing behavior,
 resolved assumptions, remaining blockers and affected KB statements. Keep
 credentials out of evidence. Update this task's status in its own file; the
 initiative plan owns overall status.
-

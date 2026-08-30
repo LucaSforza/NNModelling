@@ -73,6 +73,28 @@ export const get_training_job_events = {
   },
 };
 
+/** Return a bounded progress window; event and stdout/stderr cursors are independent. */
+export const read_training_progress = {
+  schema: z.object({
+    jobId: z.string().min(1),
+    eventCursor: z.string().min(1).optional(),
+    stdoutOffset: z.number().int().min(0).optional(),
+    stderrOffset: z.number().int().min(0).optional(),
+    waitMs: z.number().int().min(0).max(30000).optional(),
+    maxBytes: z.number().int().min(1).max(262144).optional(),
+  }),
+  async handler(ctx: ServerContext, input: { jobId: string; eventCursor?: string; stdoutOffset?: number; stderrOffset?: number; waitMs?: number; maxBytes?: number }) {
+    return client(ctx).readProgress(input.jobId, input);
+  },
+};
+
+export const download_training_wheel = {
+  schema: z.object({ jobId: z.string().min(1), destinationPath: z.string().min(1).optional() }),
+  async handler(ctx: ServerContext, input: { jobId: string; destinationPath?: string }) {
+    return client(ctx).downloadWheel(input.jobId, input.destinationPath);
+  },
+};
+
 export const cancel_training_job = {
   schema: z.object({ jobId: z.string().min(1) }),
 

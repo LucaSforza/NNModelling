@@ -340,6 +340,15 @@ export class BrowserRPCHandler {
         case "start_training":
           result = this.requireTraining().submitTraining(this.diagram);
           break;
+        case "read_training_progress":
+          result = this.requireTraining().readTrainingProgress(params.jobId as string, {
+            eventCursor: params.eventCursor as string | undefined,
+            stdoutOffset: params.stdoutOffset as number | undefined,
+            stderrOffset: params.stderrOffset as number | undefined,
+            waitMs: params.waitMs as number | undefined,
+            maxBytes: params.maxBytes as number | undefined,
+          });
+          break;
 
         default:
           throw new Error(`Unknown method: ${method}`);

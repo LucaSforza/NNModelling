@@ -18,7 +18,7 @@ import type { Diagram } from "../Diagram.svelte";
 import { buildPackageBundle, canonicalJson, type PackageBundleV1 } from "./package-bundle";
 import type { PackageExportInfo } from "../type-system/packages/types";
 import type { GraphInferenceResult } from "../type-system/graph/types";
-import type { TrainingJobRequest, TrainingJobStatus } from "./api";
+import type { TrainingJobRequest, TrainingJobStatus, TrainingProgressOptions, TrainingProgressResult } from "./api";
 
 export type TrainingConnectionState =
   | "disconnected"
@@ -209,6 +209,14 @@ export class TrainingController {
   getApi(): TrainingApiClient {
     if (!this.api) throw new BackendApiError(401, "missing_token", "La connessione non ha un token");
     return this.api;
+  }
+
+  /** Read one bounded, resumable progress window for the paired owner. */
+  readTrainingProgress(jobId: string, options: TrainingProgressOptions = {}): Promise<TrainingProgressResult> {
+    if (this.connection.status !== "active") {
+      return Promise.reject(new BackendApiError(401, "backend_not_connected", "Il backend di training non è connesso"));
+    }
+    return this.getApi().readTrainingProgress(jobId, options);
   }
 
   async restore(): Promise<void> {
