@@ -20,12 +20,10 @@ import { DiagramCore } from "./core/DiagramCore";
 import type { LayoutDirection } from "./layout/autoLayout";
 import type { GraphInferenceResult } from "./type-system/graph/types";
 import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
-import type { InstallResult, LocalPackageFile } from "./type-system/packages/install/installer";
-import { IndexedDbInstalledPackageStore } from "./type-system/packages/installed/store";
-import type { ModelBundleResources, PackageCatalogMetadata } from "./type-system/editor-runtime";
+import type { ModelBundleResources, PackageCatalogMetadata, PreparedModelScope } from "./type-system/editor-runtime";
 import type { PackageExportInfo } from "./type-system/packages/types";
-import type { PackageKey } from "./type-system/packages/types";
 import type { PackageIdentity } from "./core/types";
+import type { DiagramCoreSnapshot } from "./core/types";
 import {
   PackageRuntimeDiagnosticCollection,
   packageDiagnosticIdentity,
@@ -45,7 +43,6 @@ export class Diagram extends DiagramCore {
   public packageRuntimeReady = $state(false);
   public packageRuntimeDiagnostics: PackageRuntimeDiagnostic[] = $state.raw([]);
   private packageTypeRuntime: EditorTypeSystemRuntime | null = null;
-  private packageStore: IndexedDbInstalledPackageStore | undefined;
   private readonly packageRuntimeReadyPromise: Promise<void>;
   private readonly diagnosticCollection = new PackageRuntimeDiagnosticCollection();
 
@@ -129,8 +126,7 @@ export class Diagram extends DiagramCore {
 
   private async initializePackageTypes(): Promise<void> {
     try {
-      this.packageStore = typeof indexedDB === "undefined" ? undefined : await IndexedDbInstalledPackageStore.open();
-      this.packageTypeRuntime = await EditorTypeSystemRuntime.create({ store: this.packageStore });
+      this.packageTypeRuntime = await EditorTypeSystemRuntime.create();
       this.syncPackageCatalog();
       this.packageRuntimeReady = this.packageTypeRuntime.isReady();
       this.syncRuntimeDiagnostics();
@@ -205,39 +201,6 @@ export class Diagram extends DiagramCore {
     return this.addPackageNode(identity, kind, x, y, config);
   }
 
-  /** Persist an installer result, activate its exact package, and refresh metadata. */
-  public async installPackage(result: Extract<InstallResult, { status: "installed" | "already-installed" }>): Promise<void> {
-    await this.packageRuntimeReadyPromise;
-    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
-    await this.packageTypeRuntime.install(result);
-    this.syncPackageCatalog();
-    await this.activatePackage({ ...result.activationRequest, name: result.package.id });
-  }
-
-  /** Install, persist, and activate a package selected by the visible manager. */
-  public async installLocalPackage(files: readonly LocalPackageFile[]): Promise<InstallResult> {
-    await this.packageRuntimeReadyPromise;
-    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
-    const result = await this.packageTypeRuntime.installLocalPackage(files);
-    this.syncPackageCatalog();
-    this.syncRuntimeDiagnostics();
-    this.refreshTypes();
-    return result;
-  }
-
-  public async removePackage(key: PackageKey): Promise<void> {
-    await this.packageRuntimeReadyPromise;
-    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
-    const referenced = this.nodes.flatMap((node) => {
-      const identity = node.data?.package as { id?: unknown; version?: unknown } | undefined;
-      return typeof identity?.id === "string" && typeof identity.version === "string"
-        ? [`${identity.id}@${identity.version}` as PackageKey] : [];
-    });
-    await this.packageTypeRuntime.remove(key, referenced);
-    this.syncPackageCatalog();
-    this.refreshTypes();
-  }
-
   public get packageActivationStates() {
     return this.packageTypeRuntime?.activationStates() ?? [];
   }
@@ -246,6 +209,43 @@ export class Diagram extends DiagramCore {
   public packageExports(): ReadonlyMap<string, PackageExportInfo> {
     if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
     return this.packageTypeRuntime.packageExports();
+  }
+
+  /** Prepare a package scope without mutating the graph or active runtime. */
+  public async prepareProjectScope(
+    modelJson: string,
+    modelBundle: ModelBundleResources,
+  ): Promise<{ readonly snapshot: DiagramCoreSnapshot; readonly scope: PreparedModelScope }> {
+    const snapshot = this.parseProjectJson(modelJson);
+    if (!snapshot) throw new Error("project JSON is invalid");
+    await this.packageRuntimeReadyPromise;
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    const graphIdentities = snapshot.nodes.flatMap((node) => {
+      const identity = node.data?.package as { id?: unknown; version?: unknown; name?: unknown } | undefined;
+      return typeof identity?.id === "string" && typeof identity.version === "string"
+        ? [{ id: identity.id, version: identity.version, ...(typeof identity.name === "string" ? { name: identity.name } : {}) }]
+        : [];
+    });
+    const scope = await this.packageTypeRuntime.prepareModelScope(snapshot.manifest, modelBundle, graphIdentities);
+    return { snapshot, scope };
+  }
+
+  /** Commit one already-prepared scope through DiagramCore and refresh UI state. */
+  public async commitPreparedProjectScope(prepared: { readonly snapshot: DiagramCoreSnapshot; readonly scope: PreparedModelScope }): Promise<void> {
+    await this.packageRuntimeReadyPromise;
+    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
+    this.commitProject(prepared.snapshot);
+    await this.packageTypeRuntime.commitModelScope(prepared.scope);
+    this.diagnosticCollection.clear();
+    this.syncPackageCatalog();
+    this.syncRuntimeDiagnostics();
+    this.refreshTypes();
+  }
+
+  /** Restore a previously committed project after a failed authoring commit. */
+  public async restoreProjectScope(modelJson: string, modelBundle: ModelBundleResources): Promise<void> {
+    const prepared = await this.prepareProjectScope(modelJson, modelBundle);
+    await this.commitPreparedProjectScope(prepared);
   }
 
   private syncPackageCatalog(): void {

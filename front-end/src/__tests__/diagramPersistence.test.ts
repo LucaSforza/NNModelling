@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import { DiagramCore } from "../core/DiagramCore"
 import { parseModelManifest, type Edge, type ModelManifest, type Node } from "../core/types"
+import { ProjectModelWriter } from "../project-workspace"
 
 class MemoryDiagram extends DiagramCore {
   public nodes: Node[] = []
@@ -103,5 +104,26 @@ describe("canonical package project persistence", () => {
       manifest: resnetManifest,
     }))).toBe(false)
     expect(diagram.nodes).toEqual([])
+  })
+
+  test("persists every accepted graph callback in order through one writer", async () => {
+    const writes: string[] = []
+    const writer = new ProjectModelWriter(async (modelJson) => {
+      writes.push(modelJson)
+    })
+    const diagram = new MemoryDiagram()
+    const unsubscribe = diagram.onGraphChanged(() => {
+      void writer.save(diagram.exportToJson())
+    })
+
+    diagram.modelManifest = resnetManifest
+    diagram.addPackageModule({ id: "core.input", version: "0.1.0", name: "Input" }, "input", 0, 0)
+    diagram.addPackageModule({ id: "core.output", version: "0.1.0", name: "Output" }, "output", 20, 0)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    unsubscribe()
+
+    expect(writes).toHaveLength(2)
+    expect(JSON.parse(writes.at(-1)!).nodes).toHaveLength(2)
+    expect(writer.status).toMatchObject({ state: "saved", latestSavedVersion: 2 })
   })
 })

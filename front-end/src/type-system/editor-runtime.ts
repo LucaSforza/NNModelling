@@ -3,8 +3,6 @@ import { PackageGraphScheduler } from "./graph/scheduler"
 import { TypeSystemHost, type ActivePackageMetadata, type PackageSelection } from "./host"
 import { bundledCoreRecords } from "./bundled/catalog"
 import { PackageCatalog, packageKey, packageRecordKey } from "./packages/catalog"
-import type { InstalledPackageStore } from "./packages/installed/store"
-import { installLocalPackage, type InstallResult, type LocalPackageFile } from "./packages/install/installer"
 import type { InstalledPackageRecord, PackageExportInfo, PackageKey, PackageSource } from "./packages/types"
 import { parseModelManifest, type ModelManifest, type PackageIdentity } from "../core/types"
 import { parseDefinition, parseManifest } from "./packages/validation"
@@ -133,7 +131,7 @@ export class PackageActivationCoordinator {
 }
 
 export type EditorTypeSystemRuntimeOptions = {
-  readonly store?: InstalledPackageStore
+  /** Legacy input is accepted for callers migrating from the installer, but is never activated. */
   readonly external?: readonly InstalledPackageRecord[]
   /** Test/integration seam for a precomputed bundled catalog. */
   readonly bundled?: readonly InstalledPackageRecord[]
@@ -158,7 +156,6 @@ export class EditorTypeSystemRuntime {
     private scheduler: PackageGraphScheduler,
     private catalog: PackageCatalog,
     private readonly bundled: readonly InstalledPackageRecord[],
-    private readonly store?: InstalledPackageStore,
     private coordinator = new PackageActivationCoordinator(host, catalog),
   ) {}
 
@@ -170,7 +167,7 @@ export class EditorTypeSystemRuntime {
     const catalog = PackageCatalog.composeModel(bundled, [])
     const selections: PackageSelection[] = catalog.records().map((record) => ({ resources: record.resources }))
     const host = await TypeSystemHost.create(selections)
-    const runtime = new EditorTypeSystemRuntime(host, new PackageGraphScheduler(host), catalog, bundled, options.store)
+    const runtime = new EditorTypeSystemRuntime(host, new PackageGraphScheduler(host), catalog, bundled)
     await runtime.bootstrap()
     return runtime
   }
@@ -275,51 +272,12 @@ export class EditorTypeSystemRuntime {
     return scope
   }
 
-  /** Consume T05's post-persistence result and make the package immediately usable. */
-  async install(result: Extract<InstallResult, { status: "installed" | "already-installed" }>): Promise<PackageActivationStatus> {
-    if (this.store) await this.store.put(result.record)
-    const external = [...this.catalog.records().filter((record) => "source" in record && record.source === "external" && record.key !== result.key), result.record]
-    await this.rebuild(external.filter((record): record is InstalledPackageRecord => "source" in record))
-    return this.activate(result.activationRequest, { retry: true })
-  }
-
-  /** Install and activate one browser-selected package directory. */
-  async installLocalPackage(files: readonly LocalPackageFile[]): Promise<InstallResult> {
-    const result = await installLocalPackage(files, { catalog: this.catalog, store: this.store })
-    if (result.status !== "rejected") await this.install(result)
-    return result
-  }
-
-  async remove(key: PackageKey, referencedKeys: readonly PackageKey[] = []): Promise<void> {
-    const record = this.catalog.getExact(key)
-    if (!record || !("source" in record) || record.source !== "external") throw new Error(`package '${key}' cannot be removed`)
-    if (this.coordinator.status(key)?.state === "active") throw new Error(`package '${key}' is active and cannot be removed during this session`)
-    if (referencedKeys.includes(key)) throw new Error(`package '${key}' is referenced by the current diagram`)
-    const externalRecords = this.catalog.records().filter((candidate): candidate is InstalledPackageRecord => "key" in candidate && candidate.source === "external")
-    const dependent = externalRecords.find((candidate) => Object.values(candidate.resolvedDependencies).includes(key))
-    if (dependent) throw new Error(`package '${key}' is required by installed package '${dependent.key}'`)
-    const next = this.catalog.records().filter((candidate) => packageRecordKey(candidate as InstalledPackageRecord) !== key).filter((candidate): candidate is InstalledPackageRecord => "key" in candidate)
-    if (this.store) await this.store.delete(key)
-    await this.rebuild(next)
-  }
-
   async dispose(): Promise<void> { await this.coordinator.dispose(); await this.host.dispose() }
 
   private async bootstrap(): Promise<void> {
     await Promise.allSettled(this.bundled.map((record) => this.activate({ id: record.manifest.id, version: record.manifest.version }, { retry: true })))
   }
 
-  private async rebuild(external: readonly InstalledPackageRecord[]): Promise<void> {
-    const nextCatalog = PackageCatalog.composeModel(this.bundled, [])
-    const nextHost = await TypeSystemHost.create(nextCatalog.records().map((record) => ({ resources: record.resources })))
-    const previousHost = this.host
-    this.host = nextHost
-    this.catalog = nextCatalog
-    this.scheduler = new PackageGraphScheduler(nextHost)
-    this.coordinator = new PackageActivationCoordinator(nextHost, nextCatalog)
-    await this.bootstrap()
-    await previousHost.dispose()
-  }
 }
 
 /**
