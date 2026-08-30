@@ -337,6 +337,9 @@ export class BrowserRPCHandler {
         case "update_training_config":
           result = { status: "ok", config: this.requireTraining().updateConfig((params.patch ?? {}) as Record<string, unknown>) };
           break;
+        case "start_training":
+          result = this.requireTraining().submitTraining(this.diagram);
+          break;
 
         default:
           throw new Error(`Unknown method: ${method}`);

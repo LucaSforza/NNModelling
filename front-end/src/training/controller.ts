@@ -13,6 +13,12 @@ import {
   type ConnectionStorage,
   type SavedBackendConnection,
 } from "./connection";
+import type { Edge, Node } from "@xyflow/svelte";
+import type { Diagram } from "../Diagram.svelte";
+import { buildPackageBundle, canonicalJson, type PackageBundleV1 } from "./package-bundle";
+import type { PackageExportInfo } from "../type-system/packages/types";
+import type { GraphInferenceResult } from "../type-system/graph/types";
+import type { TrainingJobRequest, TrainingJobStatus } from "./api";
 
 export type TrainingConnectionState =
   | "disconnected"
@@ -66,6 +72,40 @@ export class TrainingConfigurationError extends Error {
     super(message);
     this.name = "TrainingConfigurationError";
   }
+}
+
+export class TrainingSubmissionError extends Error {
+  readonly code = "SUBMISSION_UNKNOWN";
+
+  constructor(message: string, readonly details?: Record<string, unknown>) {
+    super(message);
+    this.name = "TrainingSubmissionError";
+  }
+}
+
+/** The browser-owned data needed to prepare one immutable training snapshot. */
+export interface TrainingDiagramSource {
+  readonly nodes: readonly Node[];
+  readonly edges: readonly Edge[];
+  readonly typeResult: GraphInferenceResult | null;
+  readonly waitForPackageRuntime: () => Promise<void>;
+  readonly packageExports: () => ReadonlyMap<string, PackageExportInfo>;
+}
+
+export interface PreparedTrainingSubmission {
+  readonly request: TrainingJobRequest;
+  readonly bundle: PackageBundleV1;
+  readonly bundleRef: string;
+  readonly snapshotDigest: string;
+}
+
+export interface TrainingSubmissionResult {
+  readonly status: "ok";
+  readonly jobId: string;
+  readonly bundleRef: string;
+  readonly bundleDigest: string;
+  readonly snapshotDigest: string;
+  readonly job: TrainingJobStatus;
 }
 
 export interface TrainingControllerSnapshot {
@@ -149,6 +189,10 @@ export class TrainingController {
 
   getDatasets(): DatasetInfo[] {
     return this.snapshot().datasets;
+  }
+
+  isSubmissionCurrent(generation: number): boolean {
+    return this.generation === generation;
   }
 
   /** Install the browser-provided descriptor catalog and materialize defaults. */
@@ -276,8 +320,92 @@ export class TrainingController {
     validateConfig(next, this.datasets);
     if (JSON.stringify(next) === JSON.stringify(this.config)) return this.getConfig();
     this.config = next;
+    // Configuration is part of the pending submission snapshot. Any change
+    // invalidates preparation that is waiting on runtime or upload I/O.
+    this.generation += 1;
     this.emit();
     return this.getConfig();
+  }
+
+  /** Build, upload and submit using the same path as the training sidebar. */
+  async submitTraining(diagram: Diagram | TrainingDiagramSource): Promise<TrainingSubmissionResult> {
+    const prepared = await this.prepareTrainingSubmission(diagram);
+    let job: TrainingJobStatus;
+    try {
+      job = await this.getApi().submitTrainingJob(prepared.request);
+    } catch (error) {
+      // A network/5xx response may have been accepted by the backend. Never
+      // retry it implicitly, since that could queue a duplicate job.
+      if (error instanceof BackendApiError && error.status < 500) throw error;
+      throw new TrainingSubmissionError(
+        "La richiesta di training potrebbe essere stata accettata; non verrà ritentata automaticamente",
+        { cause: error instanceof Error ? error.message : String(error) },
+      );
+    }
+    if (this.generation !== prepared.generation || !sameDiagramSnapshot(diagram, prepared.diagramFingerprint, prepared.exportScope)) {
+      throw new TrainingSubmissionError("Il progetto o la configurazione sono cambiati durante l'invio; nessun risultato è affidabile");
+    }
+    return {
+      status: "ok",
+      jobId: job.id,
+      bundleRef: prepared.uploaded.bundle_ref,
+      bundleDigest: prepared.bundle.digest,
+      snapshotDigest: prepared.snapshotDigest,
+      job,
+    };
+  }
+
+  private async prepareTrainingSubmission(diagram: Diagram | TrainingDiagramSource): Promise<PreparedTrainingSubmission & {
+    readonly generation: number;
+    readonly diagramFingerprint: string;
+    readonly exportScope: ReadonlyMap<string, PackageExportInfo>;
+    readonly uploaded: { bundle_ref: string; digest: string; size: number };
+  }> {
+    if (this.connection.status !== "active") {
+      throw new BackendApiError(401, "backend_not_connected", "Il backend di training non è connesso");
+    }
+    const generation = this.generation;
+    const config = this.getConfig();
+    const dataset = this.datasets.find((candidate) => candidate.target === config.selectedDataset);
+    if (!dataset) throw new TrainingConfigurationError("Seleziona un dataset disponibile prima di accodare il training", { field: "selectedDataset" });
+    validateConfig(config, this.datasets);
+
+    await diagram.waitForPackageRuntime();
+    assertCurrent(this, generation);
+    const nodes = diagram.nodes.map((node) => snapshotNode(node));
+    const edges = diagram.edges.map((edge) => ({ ...edge }));
+    const exportScope = new Map(diagram.packageExports());
+    const diagramFingerprint = fingerprint(nodes, edges);
+    const bundle = await buildPackageBundle(nodes, edges, exportScope, diagram.typeResult);
+    assertCurrent(this, generation);
+    if (!sameDiagramSnapshot(diagram, diagramFingerprint, exportScope)) {
+      throw new TrainingSubmissionError("Il progetto è cambiato durante la preparazione; invio annullato");
+    }
+    const uploaded = await this.getApi().uploadPackageBundle(bundle);
+    assertCurrent(this, generation);
+    if (!sameDiagramSnapshot(diagram, diagramFingerprint, exportScope)) {
+      throw new TrainingSubmissionError("Il progetto è cambiato durante il caricamento; nessun job è stato creato");
+    }
+    const request: TrainingJobRequest = {
+      schema_version: 1,
+      network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
+      training: {
+        dataset: { target: config.selectedDataset, parameters: datasetParameters(dataset, config.datasetParams) },
+        seed: config.seed,
+        optimizer: { target: config.optimizerTarget, learning_rate: config.learningRate },
+        trainer: { max_epochs: config.maxEpochs, accelerator: config.accelerator, patience: config.patience, min_delta: config.minDelta },
+        wandb: { project: config.wandbProject, mode: config.wandbMode },
+      },
+      resources: {
+        cpu: config.cpu, memory_gb: config.memoryGb, gpu: config.gpu,
+        ...(config.gpuMemoryGb !== undefined ? { gpu_memory_gb: config.gpuMemoryGb } : {}),
+        ...(config.gpuType ? { gpu_type: config.gpuType } : {}),
+        ...(config.node ? { node: config.node } : {}),
+      },
+      priority: config.priority,
+      ...(config.packageSuffix ? { package_name: `nnm_${config.packageSuffix}` } : {}),
+    };
+    return { request, bundle, bundleRef: uploaded.bundle_ref, snapshotDigest: bundle.digest, generation, diagramFingerprint, exportScope, uploaded };
   }
 
   async refreshDatasets(): Promise<DatasetInfo[]> {
@@ -447,4 +575,39 @@ function nonNegative(value: number, field: string): void {
 }
 function invalid(field: string, message: string): TrainingConfigurationError {
   return new TrainingConfigurationError(`${field}: ${message}`, { field });
+}
+
+function snapshotNode(node: Node): Node {
+  const data = node.data as { package?: unknown; params?: unknown; wheelAdapters?: unknown } | undefined;
+  return {
+    id: node.id, type: node.type, parentId: node.parentId ?? null,
+    data: { package: data?.package, params: data?.params ?? {}, wheelAdapters: Array.isArray(data?.wheelAdapters) ? [...data.wheelAdapters] : [] },
+  } as unknown as Node;
+}
+
+function fingerprint(nodes: readonly Node[], edges: readonly Edge[]): string {
+  return canonicalJson({ nodes, edges });
+}
+
+function sameDiagramSnapshot(diagram: TrainingDiagramSource, expectedFingerprint: string, expectedExports: ReadonlyMap<string, PackageExportInfo>): boolean {
+  if (fingerprint(diagram.nodes.map(snapshotNode), diagram.edges.map((edge) => ({ ...edge }))) !== expectedFingerprint) return false;
+  const current = diagram.packageExports();
+  if (current.size !== expectedExports.size) return false;
+  for (const [key, expected] of expectedExports) {
+    const actual = current.get(key);
+    if (!actual || canonicalJson(exportIdentity(actual)) !== canonicalJson(exportIdentity(expected))) return false;
+  }
+  return true;
+}
+
+function exportIdentity(value: PackageExportInfo): Record<string, unknown> {
+  return { id: value.manifest.id, version: value.manifest.version, state: value.state, active: value.active, dependencies: value.manifest.dependencies, resolvedDependencies: value.resolvedDependencies };
+}
+
+function datasetParameters(dataset: DatasetInfo, values: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(dataset.parameters.filter((parameter) => Object.hasOwn(values, parameter.name)).map((parameter) => [parameter.name, values[parameter.name]]));
+}
+
+function assertCurrent(controller: TrainingController, generation: number): void {
+  if (!controller.isSubmissionCurrent(generation)) throw new TrainingSubmissionError("Il backend o la configurazione sono cambiati durante la preparazione; invio annullato");
 }

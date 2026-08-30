@@ -1,7 +1,7 @@
 ---
 id: T05
 kind: task
-status: draft
+status: complete
 plan: ../plan.md
 role: integration
 depends_on: [T04]
@@ -83,4 +83,3 @@ Return changed files, exact checks/results, observed user-facing behavior,
 resolved assumptions, remaining blockers and affected KB statements. Keep
 credentials out of evidence. Update this task's status in its own file; the
 initiative plan owns overall status.
-

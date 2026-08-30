@@ -4,19 +4,16 @@
   import {
     BackendApiError,
     TrainingApiClient,
-    canonicalDatasetParameters,
     canCancelTrainingJob,
     type DatasetInfo,
     type DatasetParameter,
     type PairingGrant,
     type TrainingJobLogs,
-    type TrainingJobRequest,
     type TrainingJobStatus,
   } from "../training/api";
   import { TrainingController, type TrainingControllerSnapshot } from "../training/controller";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
-  import { buildPackageBundle } from "../training/package-bundle";
 
   interface Props {
     diagram: Diagram;
@@ -228,43 +225,6 @@
     return value;
   }
 
-  async function buildRequest(): Promise<TrainingJobRequest> {
-    const config = controller.getConfig();
-    if (!config.selectedDataset) throw new Error("Seleziona un dataset prima di accodare il training");
-    await diagram.waitForPackageRuntime();
-    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, diagram.packageExports(), diagram.typeResult);
-    const uploaded = await requireApi().uploadPackageBundle(bundle);
-    return {
-      schema_version: 1,
-      network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
-      training: {
-        dataset: {
-          target: config.selectedDataset,
-          parameters: selectedDatasetInfo
-            ? canonicalDatasetParameters(selectedDatasetInfo, Object.fromEntries(Object.entries(config.datasetParams).map(([key, value]) => [key, String(value)])))
-            : {},
-        },
-        seed: config.seed,
-        optimizer: { target: config.optimizerTarget, learning_rate: config.learningRate },
-        trainer: {
-          max_epochs: config.maxEpochs,
-          accelerator: config.accelerator,
-          patience: config.patience,
-          min_delta: config.minDelta,
-        },
-        wandb: { project: config.wandbProject, mode: config.wandbMode },
-      },
-      resources: {
-        cpu: config.cpu, memory_gb: config.memoryGb, gpu: config.gpu,
-        ...(config.gpuMemoryGb !== undefined ? { gpu_memory_gb: config.gpuMemoryGb } : {}),
-        ...(config.gpuType ? { gpu_type: config.gpuType } : {}),
-        ...(config.node ? { node: config.node } : {}),
-      },
-      priority: config.priority,
-      ...(config.packageSuffix ? { package_name: `nnm_${config.packageSuffix}` } : {}),
-    };
-  }
-
   async function submit() {
     loading = true;
     errorMessage = "";
@@ -274,7 +234,8 @@
       ? openWaitingWindow("In attesa che W&B inizializzi la run…")
       : null;
     try {
-      const job = await requireApi().submitTrainingJob(await buildRequest());
+      const submission = await controller.submitTraining(diagram);
+      const job = submission.job;
       successMessage = `Job ${job.id} accodato.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);

@@ -125,3 +125,11 @@ export const update_training_config = {
     return ctx.browser.call("update_training_config", input);
   },
 };
+
+/** Submit the selected editor snapshot through its paired browser session. */
+export const start_training = {
+  schema: z.object({}),
+  async handler(ctx: ServerContext) {
+    return ctx.browser.call("start_training", {});
+  },
+};
