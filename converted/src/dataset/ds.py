@@ -12,10 +12,21 @@ import torch
 from torch.utils.data import DataLoader
 
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any
+
+from dataset.contracts import DatasetContext, DatasetDefinition, TrainingBatch
 
 
 class Dataset(torch.utils.data.Dataset):
+    """Base class for trusted datasets built by the worker registry.
+
+    Dataset metadata and construction are deliberately separate from this
+    runtime class.  The backend registry publishes fixed descriptors and
+    invokes a fixed builder; it never derives a public contract from a Python
+    constructor signature.
+    """
+
     @abstractmethod
     def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
         raise NotImplementedError("Dataset.division is not implemented by subclasses")
@@ -37,6 +48,28 @@ class Dataset(torch.utils.data.Dataset):
 
         del config
         return None
+
+    @classmethod
+    def definition(cls) -> DatasetDefinition:
+        """Return the declarative definition owned by the dataset package."""
+
+        raise NotImplementedError("Dataset.definition is not implemented by this dataset")
+
+    @classmethod
+    def build(cls, parameters: Mapping[str, object], context: DatasetContext) -> "Dataset":
+        """Build a trusted dataset from already validated parameters."""
+
+        del context
+        return cls(**dict(parameters))
+
+
+def named_batch(
+    inputs: Mapping[str, torch.Tensor],
+    targets: Mapping[str, torch.Tensor],
+) -> TrainingBatch:
+    """Create the only batch representation emitted by built-in loaders."""
+
+    return TrainingBatch(inputs=dict(inputs), targets=dict(targets))
 
     @classmethod
     def inference_adapter_spec(cls, config: dict[str, Any]) -> dict[str, Any]:

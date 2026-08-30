@@ -9,19 +9,68 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 from torch.utils.data import DataLoader, random_split
+import torch
 from transformers import AutoTokenizer, DataCollatorWithPadding
 from datasets import load_dataset
+from collections.abc import Mapping
 from typing import Any
 
-from dataset.ds import Dataset
+from dataset.contracts import (
+    DatasetBatchContract,
+    DatasetClassMetadata,
+    DatasetContext,
+    DatasetDefinition,
+    DatasetParameter,
+    DatasetSourceManifest,
+    TensorSlotContract,
+)
+from dataset.ds import Dataset, named_batch
+
+
+ENRON_SPAM_DATASET_ID = "builtin.enron-spam"
+ENRON_SPAM_DATASET_VERSION = "1.0.0"
+ENRON_SPAM_DATASET_REF = "builtin_enron_spam"
+ENRON_SPAM_MANIFEST = DatasetSourceManifest(
+    schemaVersion=1,
+    id=ENRON_SPAM_DATASET_ID,
+    version=ENRON_SPAM_DATASET_VERSION,
+    entrypoints={"definition": "dataset.json", "python": "dataset.py"},
+)
+ENRON_SPAM_DEFINITION = DatasetDefinition(
+    schemaVersion=1,
+    id=ENRON_SPAM_DATASET_ID,
+    version=ENRON_SPAM_DATASET_VERSION,
+    name="Enron Spam",
+    description="Two-class Enron email spam classification dataset.",
+    parameters=(
+        DatasetParameter(name="model_name", type="string", default="bert-base-uncased"),
+        DatasetParameter(name="batch_size", type="integer", default=32),
+        DatasetParameter(name="train_size", type="number", default=0.8),
+        DatasetParameter(name="num_workers", type="integer", default=0),
+        DatasetParameter(name="max_length", type="integer", default=128),
+    ),
+    batch=DatasetBatchContract(
+        inputs={
+            "input_ids": TensorSlotContract(shape=("B", "T"), dtype="int64"),
+            "attention_mask": TensorSlotContract(shape=("B", "T"), dtype="int64"),
+        },
+        targets={"label": TensorSlotContract(shape=("B",), dtype="int64")},
+    ),
+    classes=DatasetClassMetadata(count=2, names=("ham", "spam")),
+    inferenceAdapter={"kind": "text", "version": 1, "model_name": "bert-base-uncased", "max_length": 128},
+)
 
 
 class EnronSpamDataset(Dataset):
     """Text classification dataset: SetFit/enron_spam.
 
     Tokenizes with HF AutoTokenizer. Uses DataCollatorWithPadding.
-    division() returns DataLoaders yielding (input_ids, labels) tuples.
+    division() returns DataLoaders yielding named ``TrainingBatch`` values.
     """
+
+    @classmethod
+    def definition(cls) -> DatasetDefinition:
+        return ENRON_SPAM_DEFINITION
 
     @classmethod
     def num_classes(cls, config: dict[str, Any]) -> int:
@@ -94,7 +143,10 @@ class EnronSpamDataset(Dataset):
 
     def _collate(self, batch):
         padded = self.collator(batch)
-        return padded["input_ids"], padded["labels"]
+        return named_batch(
+            {"input_ids": padded["input_ids"], "attention_mask": padded["attention_mask"]},
+            {"label": padded["labels"].to(dtype=torch.int64)},
+        )
 
     def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
         train_len = int(len(self.train_dataset) * self.train_size)
@@ -124,3 +176,34 @@ class EnronSpamDataset(Dataset):
         )
 
         return train_loader, val_loader, test_loader
+
+
+def validate_parameters(parameters: Mapping[str, object]) -> dict[str, object]:
+    """Validate Enron's fixed primitive parameter contract."""
+
+    result = dict(parameters)
+    model_name = result.get("model_name", "bert-base-uncased")
+    batch_size = result.get("batch_size", 32)
+    train_size = result.get("train_size", 0.8)
+    num_workers = result.get("num_workers", 0)
+    max_length = result.get("max_length", 128)
+    if not isinstance(model_name, str) or not model_name:
+        raise ValueError("model_name must be a non-empty string")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+        raise ValueError("batch_size must be a positive integer")
+    if isinstance(train_size, bool) or not isinstance(train_size, (int, float)) or not 0 < train_size <= 1:
+        raise ValueError("train_size must be greater than 0 and at most 1")
+    if isinstance(num_workers, bool) or not isinstance(num_workers, int) or num_workers < 0:
+        raise ValueError("num_workers must be a non-negative integer")
+    if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 1:
+        raise ValueError("max_length must be a positive integer")
+    if "train_size" in result:
+        result["train_size"] = float(train_size)
+    return result
+
+
+def build(parameters: Mapping[str, object], context: DatasetContext) -> EnronSpamDataset:
+    """Fixed builder for the trusted operator-owned Enron dataset."""
+
+    del context
+    return EnronSpamDataset(**validate_parameters(parameters))

@@ -5,8 +5,14 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from dataset.contracts import DatasetReference
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
+
+from dataset.contracts import (
+    DatasetDefinition,
+    DatasetParameter as DatasetContractParameter,
+    DatasetReference,
+    DatasetSourceManifest,
+)
 
 
 GPU_TYPE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -120,20 +126,39 @@ class ResourceRequest(BaseModel):
         return value
 
 
-class DatasetRequest(BaseModel):
-    """Dataset constructor and bounded split configuration."""
+class OpaqueDatasetRequest(BaseModel):
+    """Phase-two request shape; no import target or filesystem path is accepted."""
 
     model_config = ConfigDict(extra="forbid")
 
-    target: str = Field(min_length=1, max_length=240)
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    reference: DatasetReference
+    parameters: dict[str, StrictStr | StrictInt | StrictFloat | StrictBool] = Field(default_factory=dict)
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameter_names(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in value):
+            raise ValueError("dataset selection parameter names must be identifiers")
+        return value
 
     @model_validator(mode="after")
-    def validate_registered_parameters(self) -> "DatasetRequest":
+    def validate_descriptor_parameters(self) -> "OpaqueDatasetRequest":
+        """Validate values against the fixed descriptor, never a constructor."""
+
+        if self.reference.kind == "project":
+            # The authenticated archive descriptor is resolved by JobManager;
+            # parsing the opaque request must not grant the API a filesystem or
+            # import capability before ownership has been checked.
+            return self
+
         from backend.dataset_registry import validate_dataset_parameters
 
-        self.parameters = validate_dataset_parameters(self.target, self.parameters)
+        self.parameters = validate_dataset_parameters(self.reference, self.parameters)
         return self
+
+
+# Keep a concise alias for callers that use the domain term "selection".
+DatasetSelectionRequest = OpaqueDatasetRequest
 
 
 class OptimizerRequest(BaseModel):
@@ -170,7 +195,9 @@ class TrainingRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dataset: DatasetRequest
+    # Dataset selection is an opaque resolved reference.  Python import
+    # targets and filesystem paths are intentionally not part of this model.
+    dataset: OpaqueDatasetRequest
     seed: int = Field(default=0, ge=0, le=2**63 - 1)
     optimizer: OptimizerRequest = Field(default_factory=OptimizerRequest)
     trainer: TrainerRequest = Field(default_factory=TrainerRequest)
@@ -213,23 +240,22 @@ class JobSubmission(BaseModel):
         return value
 
 
-class DatasetParameter(BaseModel):
-    """Metadata for one dataset constructor parameter."""
-
-    name: str
-    type: str
-    default: Any = None
-    required: bool = False
+# Keep the public import name aligned with the shared declarative contract.
+DatasetParameter = DatasetContractParameter
 
 
 class DatasetInfo(BaseModel):
-    """Discoverable dataset class and its constructor metadata."""
+    """One descriptor shape shared by built-in and project datasets.
 
-    target: str
-    name: str
-    doc: str = ""
-    parameters: list[DatasetParameter] = Field(default_factory=list)
-    num_classes: int | None = Field(default=None, ge=1)
+    ``reference`` is an opaque selection handle.  In particular, no Python
+    module or class target is serialized in the public registry response.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference: DatasetReference
+    manifest: DatasetSourceManifest
+    definition: DatasetDefinition
 
 
 class ComputeUnitInfo(BaseModel):

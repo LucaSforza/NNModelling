@@ -1,172 +1,216 @@
-"""Discover dataset classes installed in the backend Python environment."""
+"""Declarative registry for trusted built-in datasets.
+
+The registry is intentionally explicit. FastAPI can publish descriptors
+without importing a dataset class or inspecting a constructor; only the
+worker-side builder resolves an opaque built-in reference to trusted code.
+"""
 
 from __future__ import annotations
 
-import inspect
-import importlib
-import pkgutil
-from types import UnionType
-from typing import Any, get_args, get_origin, get_type_hints
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
-from dataset.ds import Dataset
+from dataset.autoencoder_mnist import (
+    AUTOENCODER_MNIST_DATASET_ID,
+    AUTOENCODER_MNIST_DATASET_REF,
+    AUTOENCODER_MNIST_DATASET_VERSION,
+    AUTOENCODER_MNIST_DEFINITION,
+    AUTOENCODER_MNIST_MANIFEST,
+    build as build_autoencoder_mnist,
+    validate_parameters as validate_autoencoder_mnist_parameters,
+)
+from dataset.contracts import (
+    DatasetContext,
+    DatasetDefinition,
+    DatasetReference,
+    DatasetSourceManifest,
+)
+from dataset.enron_spam import (
+    ENRON_SPAM_DATASET_ID,
+    ENRON_SPAM_DATASET_REF,
+    ENRON_SPAM_DATASET_VERSION,
+    ENRON_SPAM_DEFINITION,
+    ENRON_SPAM_MANIFEST,
+    build as build_enron_spam,
+    validate_parameters as validate_enron_spam_parameters,
+)
+from dataset.mnist import (
+    MNIST_DATASET_ID,
+    MNIST_DATASET_REF,
+    MNIST_DATASET_VERSION,
+    MNIST_DEFINITION,
+    MNIST_MANIFEST,
+    build as build_mnist,
+    validate_parameters as validate_mnist_parameters,
+)
 
-from backend.models import DatasetInfo, DatasetParameter
+from backend.models import DatasetInfo
 
 
-def _type_name(annotation: Any) -> str:
-    """Return a stable display name for a constructor annotation."""
+Builder = Callable[[Mapping[str, Any], DatasetContext], Any]
+Validator = Callable[[Mapping[str, Any]], dict[str, Any]]
 
-    if annotation is inspect.Parameter.empty:
-        return "string"
-    if annotation in (str, int, float, bool):
-        return annotation.__name__
-    return str(annotation).replace("typing.", "")
+
+@dataclass(frozen=True)
+class BuiltinDatasetRegistration:
+    """Trusted code paired with one immutable declarative descriptor."""
+
+    reference: DatasetReference
+    manifest: DatasetSourceManifest
+    definition: DatasetDefinition
+    builder: Builder
+    validate_parameters: Validator
+
+
+_BUILTINS = (
+    BuiltinDatasetRegistration(
+        reference=DatasetReference(
+            kind="builtin", id=MNIST_DATASET_ID,
+            version=MNIST_DATASET_VERSION, ref=MNIST_DATASET_REF,
+        ),
+        manifest=MNIST_MANIFEST,
+        definition=MNIST_DEFINITION,
+        builder=build_mnist,
+        validate_parameters=validate_mnist_parameters,
+    ),
+    BuiltinDatasetRegistration(
+        reference=DatasetReference(
+            kind="builtin", id=AUTOENCODER_MNIST_DATASET_ID,
+            version=AUTOENCODER_MNIST_DATASET_VERSION,
+            ref=AUTOENCODER_MNIST_DATASET_REF,
+        ),
+        manifest=AUTOENCODER_MNIST_MANIFEST,
+        definition=AUTOENCODER_MNIST_DEFINITION,
+        builder=build_autoencoder_mnist,
+        validate_parameters=validate_autoencoder_mnist_parameters,
+    ),
+    BuiltinDatasetRegistration(
+        reference=DatasetReference(
+            kind="builtin", id=ENRON_SPAM_DATASET_ID,
+            version=ENRON_SPAM_DATASET_VERSION,
+            ref=ENRON_SPAM_DATASET_REF,
+        ),
+        manifest=ENRON_SPAM_MANIFEST,
+        definition=ENRON_SPAM_DEFINITION,
+        builder=build_enron_spam,
+        validate_parameters=validate_enron_spam_parameters,
+    ),
+)
+
+_BY_REFERENCE = {
+    (
+        registration.reference.kind,
+        registration.reference.id,
+        registration.reference.version,
+        registration.reference.ref,
+    ): registration
+    for registration in _BUILTINS
+}
 
 
 def discover_datasets() -> list[DatasetInfo]:
-    """Find concrete ``Dataset`` subclasses in the trusted dataset package."""
+    """Return fixed descriptors without constructor introspection."""
 
-    import dataset
-
-    result: list[DatasetInfo] = []
-    module_names = [dataset.__name__]
-    if hasattr(dataset, "__path__"):
-        module_names.extend(
-            f"{dataset.__name__}.{module.name}"
-            for module in pkgutil.iter_modules(dataset.__path__)
+    return [
+        DatasetInfo(
+            reference=registration.reference,
+            manifest=registration.manifest,
+            definition=registration.definition,
         )
-
-    seen: set[str] = set()
-    for module_name in module_names:
-        module = importlib.import_module(module_name)
-        for class_name, candidate in inspect.getmembers(module, inspect.isclass):
-            if candidate is Dataset or not issubclass(candidate, Dataset):
-                continue
-            target = f"{candidate.__module__}.{class_name}"
-            if target in seen:
-                continue
-            seen.add(target)
-            try:
-                signature = inspect.signature(candidate.__init__)
-                hints = get_type_hints(candidate.__init__)
-            except (TypeError, ValueError):
-                signature = None
-                hints = {}
-            parameters: list[DatasetParameter] = []
-            if signature:
-                for name, parameter in signature.parameters.items():
-                    if name == "self" or parameter.kind in (
-                        inspect.Parameter.VAR_POSITIONAL,
-                        inspect.Parameter.VAR_KEYWORD,
-                    ):
-                        continue
-                    default = None if parameter.default is inspect.Parameter.empty else parameter.default
-                    try:
-                        # The API must remain JSON serializable.
-                        import json
-
-                        json.dumps(default)
-                    except (TypeError, ValueError):
-                        default = str(default)
-                    parameters.append(
-                        DatasetParameter(
-                            name=name,
-                            type=_type_name(hints.get(name, parameter.annotation)),
-                            default=default,
-                            required=parameter.default is inspect.Parameter.empty,
-                        )
-                    )
-            result.append(
-                DatasetInfo(
-                    target=target,
-                    name=class_name,
-                    doc=inspect.getdoc(candidate) or "",
-                    parameters=parameters,
-                    num_classes=_num_classes(candidate),
-                )
-            )
-    return sorted(result, key=lambda item: item.target)
+        for registration in _BUILTINS
+    ]
 
 
-def validate_dataset_parameters(target: str, raw: Any) -> dict[str, Any]:
-    """Coerce and validate constructor parameters from the registered schema.
+def resolve_dataset(reference: DatasetReference) -> BuiltinDatasetRegistration:
+    """Resolve one exact opaque reference to trusted worker code."""
 
-    Dataset constructors are the single owner of loader settings.  The worker
-    and API use this same registry path, so unknown fields cannot silently
-    disappear and browser strings are converted before construction.
-    """
+    registration = _BY_REFERENCE.get(
+        (
+            reference.kind,
+            reference.id,
+            reference.version,
+            reference.ref,
+        )
+    )
+    if registration is None:
+        if reference.kind == "project":
+            raise ValueError("project dataset references are not available to the built-in registry")
+        raise ValueError(f"dataset reference is not registered: {reference.id}@{reference.version}")
+    return registration
 
-    if not isinstance(raw, dict):
+
+def validate_dataset_parameters(
+    reference: DatasetReference,
+    raw: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate typed values against a descriptor-owned parameter schema."""
+
+    if not isinstance(raw, Mapping):
         raise ValueError("dataset parameters must be an object")
-    dataset_class = _dataset_class(target)
-    try:
-        signature = inspect.signature(dataset_class.__init__)
-        hints = get_type_hints(dataset_class.__init__)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"cannot inspect registered dataset {target}") from exc
-    allowed = {
-        name: parameter
-        for name, parameter in signature.parameters.items()
-        if name != "self" and parameter.kind not in (
-            inspect.Parameter.VAR_POSITIONAL,
-            inspect.Parameter.VAR_KEYWORD,
-        )
-    }
-    unknown = sorted(set(raw) - set(allowed))
+    registration = resolve_dataset(reference)
+    names = {parameter.name for parameter in registration.definition.parameters}
+    unknown = sorted(set(raw) - names)
     if unknown:
         raise ValueError(f"unknown dataset parameter(s): {', '.join(unknown)}")
-    result: dict[str, Any] = {}
-    for name, value in raw.items():
-        if value in (None, ""):
-            continue
-        result[name] = _coerce_parameter(name, value, hints.get(name), allowed[name])
-    return result
+    normalized: dict[str, Any] = {}
+    for parameter in registration.definition.parameters:
+        if parameter.name in raw:
+            normalized[parameter.name] = _coerce_parameter(
+                parameter.name, parameter.type, raw[parameter.name]
+            )
+    return registration.validate_parameters(normalized)
 
 
-def _dataset_class(target: str) -> type[Dataset]:
-    allowed = {item.target for item in discover_datasets()}
-    if target not in allowed:
-        raise ValueError(f"dataset target is not registered: {target}")
-    module_name, class_name = target.rsplit(".", 1)
-    candidate = getattr(importlib.import_module(module_name), class_name, None)
-    if not inspect.isclass(candidate) or not issubclass(candidate, Dataset):
-        raise ValueError(f"unknown dataset target: {target}")
-    return candidate
+def build_dataset(
+    reference: DatasetReference,
+    parameters: Mapping[str, Any],
+    context: DatasetContext,
+) -> Any:
+    """Build a trusted dataset using the fixed builder/context interface."""
+
+    registration = resolve_dataset(reference)
+    normalized = validate_dataset_parameters(reference, parameters)
+    return registration.builder(normalized, context)
 
 
-def _coerce_parameter(name: str, value: Any, annotation: Any, parameter: inspect.Parameter) -> Any:
-    """Apply the primitive type declared by the trusted constructor."""
+def _coerce_parameter(name: str, kind: str, value: Any) -> Any:
+    """Canonicalize scalar input without relying on a Python signature."""
 
-    options = get_args(annotation)
-    if options and (get_origin(annotation) in (UnionType,)):
-        annotation = next((item for item in options if item is not type(None)), str)
-    if annotation in (None, inspect.Parameter.empty):
-        annotation = type(parameter.default) if parameter.default is not inspect.Parameter.empty else str
-    try:
-        if annotation is bool:
-            if isinstance(value, bool):
-                return value
-            if str(value).lower() in {"true", "1"}:
-                return True
-            if str(value).lower() in {"false", "0"}:
-                return False
-            raise ValueError
-        if annotation is int:
+    if kind == "string":
+        if not isinstance(value, str):
+            raise ValueError(f"invalid dataset parameter {name}")
+        return value
+    if kind == "integer":
+        if isinstance(value, bool):
+            raise ValueError(f"invalid dataset parameter {name}")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
             return int(value)
-        if annotation is float:
+        raise ValueError(f"invalid dataset parameter {name}")
+    if kind == "number":
+        if isinstance(value, bool):
+            raise ValueError(f"invalid dataset parameter {name}")
+        if isinstance(value, (int, float)):
             return float(value)
-        if annotation is str:
-            return str(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"invalid dataset parameter {name}") from exc
-    return value
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                pass
+        raise ValueError(f"invalid dataset parameter {name}")
+    if kind == "boolean":
+        if isinstance(value, bool):
+            return value
+        raise ValueError(f"invalid dataset parameter {name}")
+    raise ValueError(f"unsupported dataset parameter type: {kind}")
 
 
-def _num_classes(dataset_class: type[Dataset], config: dict[str, Any] | None = None) -> int | None:
-    """Read validated class-count metadata without constructing a dataset."""
+def builtin_reference(dataset_id: str) -> DatasetReference:
+    """Return the exact opaque reference for a built-in identity."""
 
-    value = dataset_class.num_classes(config or {})
-    if value is not None and (not isinstance(value, int) or value < 1):
-        target = f"{dataset_class.__module__}.{dataset_class.__name__}"
-        raise ValueError(f"{target}.num_classes must return a positive integer or None")
-    return value
+    for registration in _BUILTINS:
+        if registration.reference.id == dataset_id:
+            return registration.reference
+    raise ValueError(f"dataset id is not registered: {dataset_id}")

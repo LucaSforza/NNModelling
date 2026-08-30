@@ -21,7 +21,17 @@ def package_submission(manager: Any, owner: str, *, package_name: str = "nnm_tes
     stored = manager.package_store.put_bundle(bundle, owner_connection_id=owner)
     return JobSubmission(
         network={"format": "package", "value": {"graph": graph, "bundle_ref": stored["bundle_ref"]}},
-        training={"dataset": {"target": "dataset.mnist.MNISTDataset", "parameters": {}}},
+        training={
+            "dataset": {
+                "reference": {
+                    "kind": "builtin",
+                    "id": "builtin.mnist",
+                    "version": "1.0.0",
+                    "ref": "builtin_mnist",
+                },
+                "parameters": {},
+            },
+        },
         package_name=package_name,
     )
 
