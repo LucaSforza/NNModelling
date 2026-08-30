@@ -84,19 +84,19 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   export type FlowCanvasProps = {
     readonly session: ProjectWorkspaceSession;
+    readonly trainingController?: TrainingController;
     readonly onInitializationError?: (message: string) => void;
     readonly rpcHandler?: BrowserRPCHandler;
     readonly onSessionReady?: () => void;
   };
 
-  let { session, onInitializationError, rpcHandler, onSessionReady }: FlowCanvasProps = $props();
+  let { session, trainingController = new TrainingController(), onInitializationError, rpcHandler, onSessionReady }: FlowCanvasProps = $props();
 
   // The Diagram is created only after App has obtained a writable workspace.
   // It remains the sole graph authority for the lifetime of this editor.
   const diagram = new Diagram();
   // Training state belongs to the editor session, not to the conditionally
   // mounted sidebar. MCP and the sidebar therefore share this one owner.
-  const trainingController = new TrainingController();
   const stereotypeAuthoring = new ProjectStereotypeAuthoringCoordinator(session, diagram);
 
   // Context per SubflowNode — gli permette di chiamare diagram.toggleSubflow

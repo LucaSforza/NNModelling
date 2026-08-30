@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import type { ServerContext } from "../src/server";
 import { RemoteTrainingClient } from "../src/remote-training";
 import * as remoteTools from "../src/tools/remote-training";
@@ -47,6 +49,50 @@ describe("remote training MCP tools", () => {
     expect(client.getLogs).toHaveBeenCalledWith("job-1");
     expect(client.getEvents).toHaveBeenCalledWith("job-1", "2-0");
     expect(client.cancelJob).toHaveBeenCalledWith("job-1");
+  });
+});
+
+describe("selected-editor training MCP tools", () => {
+  it("keeps progress monitoring on the paired browser route", async () => {
+    const call = vi.fn().mockResolvedValue({ status: "ok", job: { id: "job-1" } });
+    const ctx = { browser: { call } } as unknown as ServerContext;
+
+    const result = await remoteTools.read_editor_training_progress.handler(ctx, { jobId: "job-1", waitMs: 100 });
+
+    expect(result).toEqual({ status: "ok", job: { id: "job-1" } });
+    expect(call).toHaveBeenCalledWith("read_training_progress", { jobId: "job-1", waitMs: 100 });
+  });
+
+  it("writes a browser-verified wheel without returning its bytes", async () => {
+    const root = await mkdtemp(`${tmpdir()}/nnm-editor-artifact-`);
+    const bytes = Buffer.from("wheel-bytes");
+    const call = vi.fn().mockResolvedValue({
+      status: "ok",
+      artifact: {
+        filename: "nnm_test-0.1.0-py3-none-any.whl",
+        bytes: bytes.length,
+        sha256: "9ceb18f15662bb87e54af2f5953c0484d2ef76f5444d87913360b9ef87d7296d",
+        base64: bytes.toString("base64"),
+      },
+    });
+    const ctx = { browser: { call } } as unknown as ServerContext;
+    const previousRoot = process.env.NNM_ARTIFACT_ROOT;
+    process.env.NNM_ARTIFACT_ROOT = root;
+
+    try {
+      // The digest is asserted by the implementation; use the real value so
+      // this test exercises the complete file-delivery path.
+      const crypto = await import("node:crypto");
+      const response = await remoteTools.download_editor_training_wheel.handler(ctx, { jobId: "job-1" });
+      expect(response).toMatchObject({ status: "ok", artifact: { path: expect.stringContaining(root), bytes: bytes.length } });
+      expect(call).toHaveBeenCalledWith("download_training_wheel", { jobId: "job-1" });
+      expect(response).not.toHaveProperty("artifact.base64");
+      expect(crypto.createHash("sha256").update(bytes).digest("hex")).toBe("9ceb18f15662bb87e54af2f5953c0484d2ef76f5444d87913360b9ef87d7296d");
+    } finally {
+      if (previousRoot === undefined) delete process.env.NNM_ARTIFACT_ROOT;
+      else process.env.NNM_ARTIFACT_ROOT = previousRoot;
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

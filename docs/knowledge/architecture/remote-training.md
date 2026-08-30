@@ -90,10 +90,11 @@ and must be reassessed against current code before becoming a new plan.
 ## MCP provenance
 
 Connection/configuration/submission operations are editor-scoped only when they
-traverse `BrowserRPCHandler` and the paired browser API. The current public
-`read_training_progress` and `download_training_wheel` tools still traverse
-`RemoteTrainingClient` and therefore use the process-authenticated backend
-identity. Results may report route/provenance and ownership-safe IDs, but never
-bearer tokens. A selected-editor progress/download route requires a distinct
-public operation or an explicit migration before it can replace the compatibility
-contract.
+traverse `BrowserRPCHandler` and the paired browser API. The public
+`read_training_progress` and `download_training_wheel` tools remain compatibility
+operations through `RemoteTrainingClient`. The distinct
+`read_editor_training_progress` and `download_editor_training_wheel` tools route
+through `BrowserRPCHandler` and the paired browser identity. The latter verifies
+the wheel in the browser, then the MCP server writes it to a private,
+non-overwriting artifact path. Results expose only route-safe metadata and never
+bearer tokens.

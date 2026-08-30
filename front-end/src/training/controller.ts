@@ -108,6 +108,16 @@ export interface TrainingSubmissionResult {
   readonly job: TrainingJobStatus;
 }
 
+export interface TrainingWheelDownload {
+  readonly status: "ok";
+  readonly artifact: {
+    readonly filename: string;
+    readonly bytes: number;
+    readonly sha256: string;
+    readonly base64: string;
+  };
+}
+
 export interface TrainingControllerSnapshot {
   connection: TrainingConnectionView;
   config: TrainingConfig;
@@ -217,6 +227,29 @@ export class TrainingController {
       return Promise.reject(new BackendApiError(401, "backend_not_connected", "Il backend di training non è connesso"));
     }
     return this.getApi().readTrainingProgress(jobId, options);
+  }
+
+  /** Download a verified wheel for the paired owner without exposing its token. */
+  async downloadTrainingWheel(jobId: string): Promise<TrainingWheelDownload> {
+    if (this.connection.status !== "active") {
+      throw new BackendApiError(401, "backend_not_connected", "Il backend di training non è connesso");
+    }
+    const job = await this.getApi().getTrainingJob(jobId);
+    const manifest = job.model_package;
+    if (!manifest || !/^[0-9a-f]{64}$/i.test(manifest.sha256)) {
+      throw new BackendApiError(404, "package_unavailable", "Il job non espone un package verificabile");
+    }
+    const blob = await this.getApi().downloadModelPackage(jobId, manifest.sha256);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    return {
+      status: "ok",
+      artifact: {
+        filename: manifest.wheel.split(/[\\/]/).pop() || "model.whl",
+        bytes: bytes.byteLength,
+        sha256: manifest.sha256.toLowerCase(),
+        base64: bytesToBase64(bytes),
+      },
+    };
   }
 
   async restore(): Promise<void> {
@@ -458,6 +491,9 @@ export class TrainingController {
     this.connection = {
       ...this.connection,
       status: "active",
+      requestId: null,
+      verificationCode: null,
+      connectionId: session.id,
       expiresAt: session.expires_at,
       sessionExpiresAt: session.expires_at,
       error: null,
@@ -618,4 +654,13 @@ function datasetParameters(dataset: DatasetInfo, values: Readonly<Record<string,
 
 function assertCurrent(controller: TrainingController, generation: number): void {
   if (!controller.isSubmissionCurrent(generation)) throw new TrainingSubmissionError("Il backend o la configurazione sono cambiati durante la preparazione; invio annullato");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }

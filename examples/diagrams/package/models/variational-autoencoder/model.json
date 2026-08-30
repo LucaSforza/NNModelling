@@ -12,7 +12,8 @@
       "data": {
         "package": {
           "id": "core.input",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "Input"
         },
         "name": "Input",
         "color": "#ffffff",
@@ -42,7 +43,8 @@
       "data": {
         "package": {
           "id": "core.flatten",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "flatten"
         },
         "name": "flatten",
         "color": "#a9a9a9",
@@ -68,7 +70,8 @@
       "data": {
         "package": {
           "id": "core.repeat",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "Encoder"
         },
         "name": "Encoder",
         "label": "Encoder",
@@ -100,7 +103,8 @@
       "data": {
         "package": {
           "id": "core.fork",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "latent_branch"
         },
         "name": "latent_branch",
         "color": "#6b78b8",
@@ -123,7 +127,8 @@
       "data": {
         "package": {
           "id": "example.vae.sampling",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "sample_z"
         },
         "name": "sample_z",
         "color": "#8b6bb8",
@@ -151,7 +156,8 @@
       "data": {
         "package": {
           "id": "example.vae.kl-divergence",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "kl_loss"
         },
         "name": "kl_loss",
         "color": "#8b6bb8",
@@ -174,7 +180,8 @@
       "data": {
         "package": {
           "id": "core.scale",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "kl_scale"
         },
         "name": "kl_scale",
         "color": "#4779c4",
@@ -199,7 +206,8 @@
       "data": {
         "package": {
           "id": "core.repeat",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "Decoder"
         },
         "name": "Decoder",
         "label": "Decoder",
@@ -231,7 +239,8 @@
       "data": {
         "package": {
           "id": "core.mse-loss",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "reconstruction_loss"
         },
         "name": "reconstruction_loss",
         "color": "#b85c5c",
@@ -254,7 +263,8 @@
       "data": {
         "package": {
           "id": "core.add",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "vae_loss"
         },
         "name": "vae_loss",
         "color": "#4779c4",
@@ -278,7 +288,8 @@
       "data": {
         "package": {
           "id": "core.output",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "prediction_output"
         },
         "name": "prediction_output",
         "color": "#4d9b72",
@@ -302,7 +313,8 @@
       "data": {
         "package": {
           "id": "core.linear",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "encoder_hidden"
         },
         "name": "encoder_hidden",
         "color": "#4779c4",
@@ -329,7 +341,8 @@
       "data": {
         "package": {
           "id": "core.relu",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "encoder_relu"
         },
         "name": "encoder_relu",
         "color": "#f4a460",
@@ -355,7 +368,8 @@
       "data": {
         "package": {
           "id": "core.linear",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "encoder_latent"
         },
         "name": "encoder_latent",
         "color": "#4779c4",
@@ -382,7 +396,8 @@
       "data": {
         "package": {
           "id": "core.fork",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "latent_params_fork"
         },
         "name": "latent_params_fork",
         "color": "#6b78b8",
@@ -406,7 +421,8 @@
       "data": {
         "package": {
           "id": "core.linear",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "mu"
         },
         "name": "mu",
         "color": "#4779c4",
@@ -433,7 +449,8 @@
       "data": {
         "package": {
           "id": "core.linear",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "log_variance"
         },
         "name": "log_variance",
         "color": "#4779c4",
@@ -460,7 +477,8 @@
       "data": {
         "package": {
           "id": "core.concat",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "latent_parameters"
         },
         "name": "latent_parameters",
         "color": "#4779c4",
@@ -487,7 +505,8 @@
       "data": {
         "package": {
           "id": "core.linear",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "decoder_hidden"
         },
         "name": "decoder_hidden",
         "color": "#4779c4",
@@ -514,7 +533,8 @@
       "data": {
         "package": {
           "id": "core.relu",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "decoder_relu"
         },
         "name": "decoder_relu",
         "color": "#f4a460",
@@ -540,7 +560,8 @@
       "data": {
         "package": {
           "id": "core.linear",
-          "version": "0.1.0"
+          "version": "0.1.0",
+          "name": "reconstruction"
         },
         "name": "reconstruction",
         "color": "#4779c4",

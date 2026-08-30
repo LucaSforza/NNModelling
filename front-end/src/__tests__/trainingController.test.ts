@@ -38,6 +38,21 @@ describe("TrainingController", () => {
     expect(JSON.stringify(snapshots.at(-1))).not.toContain("secret");
     await controller.disconnect();
   });
+
+  it("clears one-time pairing details after approval", async () => {
+    const api = {
+      health: vi.fn().mockResolvedValue({ status: "ok" }),
+      createPairing: vi.fn().mockResolvedValue({ request_id: "req", connection_id: "grant", token: "secret", verification_code: "123", expires_at: "later" }),
+      getPairingStatus: vi.fn().mockResolvedValue({ status: "approved", request_id: "req", connection_id: "grant", verification_code: "123", expires_at: "later", session_expires_at: "later" }),
+      getSession: vi.fn().mockResolvedValue({ id: "session", status: "active", device_name: "test", created_at: "now", approved_at: "now", expires_at: "later", last_seen_at: null, revoked_at: null }),
+      listDatasets: vi.fn().mockResolvedValue([]),
+    } as any;
+    const controller = new TrainingController({ apiFactory: () => api, storage: new MemoryStorage() });
+    await controller.connect("http://backend.test:8000");
+    await vi.waitFor(() => expect(controller.getConnection().status).toBe("active"), { timeout: 3000 });
+    expect(controller.getConnection()).toMatchObject({ connectionId: "session", requestId: null, verificationCode: null });
+    await controller.disconnect();
+  });
 });
 
 class MemoryStorage {

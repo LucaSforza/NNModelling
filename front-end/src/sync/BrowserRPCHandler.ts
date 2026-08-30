@@ -378,6 +378,9 @@ export class BrowserRPCHandler {
             maxBytes: params.maxBytes as number | undefined,
           });
           break;
+        case "download_training_wheel":
+          result = this.requireTraining().downloadTrainingWheel(params.jobId as string);
+          break;
 
         default:
           throw new Error(`Unknown method: ${method}`);

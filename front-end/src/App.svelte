@@ -19,6 +19,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import type { ProjectWorkspaceSession } from "./project-workspace";
   import { createPathProjectSession, type ProjectPathPayload } from "./project-workspace/path";
   import { BrowserRPCHandler, type ProjectRPCBridge } from "./sync/BrowserRPCHandler";
+  import { TrainingController } from "./training/controller";
   import "@xyflow/svelte/dist/style.css";
 
   const trainingLogJobId = new URL(window.location.href).searchParams.get("training-log");
@@ -30,7 +31,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     create: (payload) => activatePathProject(payload),
     open: (payload) => activatePathProject(payload),
   };
-  const rpcHandler = new BrowserRPCHandler(undefined, undefined, undefined, undefined, projectBridge);
+  const trainingController = new TrainingController();
+  const rpcHandler = new BrowserRPCHandler(undefined, undefined, undefined, trainingController, projectBridge);
   rpcHandler.connect();
 
   function handleWorkspaceOpen(session: ProjectWorkspaceSession): void {
@@ -85,7 +87,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         style="height: 100vh; width: 100vw; overflow: hidden; background: #f8f8f8;"
       >
         <SvelteFlowProvider>
-          <FlowCanvas session={workspaceSession} rpcHandler={rpcHandler} onSessionReady={() => readyWaiter?.resolve()} onInitializationError={handleWorkspaceError} />
+          <FlowCanvas session={workspaceSession} rpcHandler={rpcHandler} {trainingController} onSessionReady={() => readyWaiter?.resolve()} onInitializationError={handleWorkspaceError} />
         </SvelteFlowProvider>
       </div>
     {/key}
