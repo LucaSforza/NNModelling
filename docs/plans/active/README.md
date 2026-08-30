@@ -5,6 +5,8 @@ This directory contains open initiatives in `draft`, `ready`, `in_progress`, or
 
 Current initiatives:
 
+- [MCP use-case parity](mcp-use-case-parity/plan.md) — draft adaptation plan
+  grounded in the accepted UML constraint and current implementation;
 - [Standard package backend](package-backend-standard/plan.md) — in progress;
 - [Prediction and objective programs](prediction-objective-programs/plan.md) —
   ready for approval and execution.

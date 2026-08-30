@@ -11,6 +11,12 @@ or a copy of nodes and edges. Required workflow parity is defined separately by
 the accepted [MCP use-case constraint](../uml/mcp-use-case-parity.md).
 The coverage below describes implementation, not fulfillment of that constraint.
 
+The accepted [thin-proxy and code-sharing principle](../uml/mcp-use-case-parity.md#thin-proxy-and-shared-browser-logic)
+requires maximizing shared domain logic with the browser. Tool adapters should
+route to the same operations used by the UI, not reproduce project loading,
+defaults, validation, layout or training preparation on the server. This is a
+design constraint; the gaps below show where current code still diverges.
+
 ```text
 MCP client
   -> stdio server and tool adapters
@@ -91,9 +97,14 @@ groups, `include`/`extend` relations, prerequisite workflows or agent roles.
 | Edit node parameters | RPC updates the shared node, but `set_parameter` and `update_parameters` advertise string-only values. The browser handler stores supplied values without the sidebar's number/boolean/list/reference conversions. Typed RPC payloads can work outside the advertised schema; stringifying them is not equivalent. |
 | Format view | `FlowCanvas` calls `diagram.autoLayout` for horizontal/vertical **Disponi**. No MCP tool or browser RPC case exposes it. `fit_view`, `center_view` and `move_nodes` are not equivalent. |
 | Screenshot | CDP capture supports optional reload and output-handle hover. It neither performs layout nor waits for the editor's layout/render completion, so it does not enforce the required layout-before-capture workflow. |
+| Open a project | The browser has writable project creation/opening through `ProjectWorkspaceAdapter`; MCP exposes no equivalent project workflow. `import_diagram`/`reset_diagram` are not project creation/opening and do not establish directory permissions or activate the complete project resource scope. |
 
 ### Implementation evidence
 
+- [Project workspace adapter](../../../front-end/src/project-workspace/index.ts):
+  `ProjectWorkspaceAdapter`, `createProjectWorkspace`, `selectExistingProject`;
+  the accepted [project contract](../decisions/project-workspaces-and-stereotype-authoring.md)
+  defines form fields, permissions and autosave.
 - [Node creation and parameter RPC](../../../front-end/src/sync/BrowserRPCHandler.ts):
   `handleCreateNode`, `handleSetParameter`, `handleUpdateParameters`.
 - [Sidebar behavior](../../../front-end/src/components/Sidebar.svelte):
