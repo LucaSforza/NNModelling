@@ -1,16 +1,18 @@
 import { describe, expect, test } from "vitest"
 import {
-  ProjectDatasetAuthoringCoordinator,
   createProjectWorkspace,
-  generateDatasetResources,
   openProjectWorkspace,
-  readDatasetDataFile,
   readProjectWorkspace,
   type ProjectDirectoryHandle,
   type ProjectFile,
   type ProjectFileHandle,
   type ProjectWritableFile,
 } from "../project-workspace"
+import {
+  ProjectDatasetAuthoringCoordinator,
+  generateDatasetResources,
+  readDatasetDataFile,
+} from "../project-workspace/dataset-authoring"
 
 class MemoryFile implements ProjectFile {
   constructor(public value: string | Uint8Array) {}
@@ -86,6 +88,15 @@ describe("project dataset authoring", () => {
     expect(generated.files["dataset.py"]).toContain("TrainingBatch")
     expect(generated.files["dataset.py"]).toContain("validation.pt")
     expect((await readDatasetDataFile({ name: "labels.csv", text: async () => "a,b" })).bytes).toEqual(new Uint8Array([97, 44, 98]))
+  })
+
+  test("generates the worker-compatible DatasetContext without backend imports", () => {
+    const source = generateDatasetResources(REQUEST).files["dataset.py"]
+    expect(source).toContain("resource_root: Path")
+    expect(source).toContain("reference: Any | None = None")
+    expect(source).toContain("context.resource_root / \"data\"")
+    expect(source).not.toContain("context.root")
+    expect(source).not.toContain("from dataset.contracts import")
   })
 
   test("creates and reopens an identical project dataset", async () => {

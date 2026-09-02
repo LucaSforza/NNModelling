@@ -208,11 +208,12 @@ export class TrainingController {
 
   /** Install project-owned descriptors and their browser-readable closures. */
   setProjectDatasets(datasets: readonly DatasetInfo[], resources: ReadonlyMap<string, GeneratedDatasetResources>): void {
+    // Project refs are archive uploads, so a ref/digest from the previous
+    // project must never be reused for the new project's source files.
+    this.projectDatasetReferences.clear();
     this.projectDatasetResources = new Map(resources);
     this.datasets = [...this.datasets.filter((dataset) => dataset.reference.kind === "builtin"), ...datasets];
-    if (!this.config.selectedDataset && this.datasets[0]) {
-      this.config = { ...this.config, selectedDataset: this.datasets[0].reference.ref, datasetParams: datasetDefaults(this.datasets[0]) };
-    }
+    this.config = reconcileDatasetConfig(this.config, this.datasets);
     this.emit();
   }
 
@@ -590,6 +591,16 @@ function mergeDatasetDefaults(dataset: DatasetInfo, values: Record<string, unkno
   return { ...datasetDefaults(dataset), ...values };
 }
 
+function reconcileDatasetConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]): TrainingConfig {
+  const selected = datasets.find((dataset) => dataset.reference.ref === config.selectedDataset);
+  if (!selected) {
+    return datasets[0]
+      ? { ...config, selectedDataset: datasets[0].reference.ref, datasetParams: datasetDefaults(datasets[0]) }
+      : { ...config, selectedDataset: "", datasetParams: {} };
+  }
+  return { ...config, datasetParams: mergeDatasetDefaults(selected, config.datasetParams) };
+}
+
 function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]): void {
   if (config.selectedDataset) {
     const dataset = datasets.find((candidate) => candidate.reference.ref === config.selectedDataset);
@@ -647,10 +658,15 @@ function invalid(field: string, message: string): TrainingConfigurationError {
 }
 
 function snapshotNode(node: Node): Node {
-  const data = node.data as { package?: unknown; params?: unknown; wheelAdapters?: unknown } | undefined;
+  const data = node.data as { package?: unknown; params?: unknown; wheelAdapters?: unknown; inputBinding?: unknown } | undefined;
   return {
     id: node.id, type: node.type, parentId: node.parentId ?? null,
-    data: { package: data?.package, params: data?.params ?? {}, wheelAdapters: Array.isArray(data?.wheelAdapters) ? [...data.wheelAdapters] : [] },
+    data: {
+      package: data?.package,
+      params: data?.params ?? {},
+      wheelAdapters: Array.isArray(data?.wheelAdapters) ? [...data.wheelAdapters] : [],
+      ...(typeof data?.inputBinding === "string" ? { inputBinding: data.inputBinding } : {}),
+    },
   } as unknown as Node;
 }
 

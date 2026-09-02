@@ -11,15 +11,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from dataset.autoencoder_mnist import (
-    AUTOENCODER_MNIST_DATASET_ID,
-    AUTOENCODER_MNIST_DATASET_REF,
-    AUTOENCODER_MNIST_DATASET_VERSION,
-    AUTOENCODER_MNIST_DEFINITION,
-    AUTOENCODER_MNIST_MANIFEST,
-    build as build_autoencoder_mnist,
-    validate_parameters as validate_autoencoder_mnist_parameters,
-)
 from dataset.contracts import (
     DatasetContext,
     DatasetDefinition,
@@ -73,17 +64,6 @@ _BUILTINS = (
         definition=MNIST_DEFINITION,
         builder=build_mnist,
         validate_parameters=validate_mnist_parameters,
-    ),
-    BuiltinDatasetRegistration(
-        reference=DatasetReference(
-            kind="builtin", id=AUTOENCODER_MNIST_DATASET_ID,
-            version=AUTOENCODER_MNIST_DATASET_VERSION,
-            ref=AUTOENCODER_MNIST_DATASET_REF,
-        ),
-        manifest=AUTOENCODER_MNIST_MANIFEST,
-        definition=AUTOENCODER_MNIST_DEFINITION,
-        builder=build_autoencoder_mnist,
-        validate_parameters=validate_autoencoder_mnist_parameters,
     ),
     BuiltinDatasetRegistration(
         reference=DatasetReference(
@@ -158,6 +138,10 @@ def validate_dataset_parameters(
         if parameter.name in raw:
             normalized[parameter.name] = _coerce_parameter(
                 parameter.name, parameter.type, raw[parameter.name]
+            )
+        elif parameter.default is not None:
+            normalized[parameter.name] = _coerce_parameter(
+                parameter.name, parameter.type, parameter.default
             )
     return registration.validate_parameters(normalized)
 

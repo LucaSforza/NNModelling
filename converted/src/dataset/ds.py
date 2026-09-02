@@ -13,9 +13,17 @@ from torch.utils.data import DataLoader
 
 from abc import abstractmethod
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TypedDict
 
 from dataset.contracts import DatasetContext, DatasetDefinition, TrainingBatch
+
+
+class DatasetSplits(TypedDict):
+    """The named loaders exposed by every dataset implementation."""
+
+    train: DataLoader
+    validation: DataLoader
+    test: DataLoader
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -28,7 +36,7 @@ class Dataset(torch.utils.data.Dataset):
     """
 
     @abstractmethod
-    def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
+    def division(self) -> DatasetSplits:
         raise NotImplementedError("Dataset.division is not implemented by subclasses")
 
     @classmethod

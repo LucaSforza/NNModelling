@@ -142,13 +142,23 @@ export class DiagramCore {
   declare public nodes: Node[];
   declare public edges: Edge[];
   /** Metadata for the currently loaded package-native model. */
-  public modelManifest: ModelManifest = {
-    schemaVersion: 1,
+  private _modelManifest: ModelManifest = {
+    schemaVersion: 2,
     id: "model.untitled",
     version: "0.1.0",
     name: "Untitled model",
     customPackages: [],
+    customDatasets: [],
   };
+
+  public get modelManifest(): ModelManifest {
+    return this._modelManifest;
+  }
+
+  public set modelManifest(value: ModelManifest) {
+    // Keep even untyped/runtime assignments on the canonical release shape.
+    this._modelManifest = parseModelManifest(value);
+  }
   private _layoutDirection: LayoutDirection = "vertical";
 
   public get layoutDirection(): LayoutDirection {

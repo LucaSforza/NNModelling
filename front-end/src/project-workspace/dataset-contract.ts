@@ -118,15 +118,24 @@ const SHA256 = /^[0-9a-f]{64}$/i
 export function parseModelManifest(value: unknown): ParsedModelManifest {
   const object = record(value, "model manifest")
   const schemaVersion = object.schemaVersion
-  if (schemaVersion !== MODEL_MANIFEST_SCHEMA_VERSION) fail("model manifest schemaVersion is unsupported", "unknown-version", "schemaVersion")
+  let normalized: Record<string, unknown>
+  if (schemaVersion === 1) {
+    assertKnownKeys(object, ["schemaVersion", "id", "version", "name", "description", "customPackages"], "model manifest")
+    normalized = { ...object, schemaVersion: MODEL_MANIFEST_SCHEMA_VERSION, customDatasets: [] }
+  } else if (schemaVersion === MODEL_MANIFEST_SCHEMA_VERSION) {
+    normalized = object
+  } else {
+    fail("model manifest schemaVersion is unsupported", "unknown-version", "schemaVersion")
+  }
+
   const allowed = ["schemaVersion", "id", "version", "name", "description", "customPackages", "customDatasets"]
-  assertKnownKeys(object, allowed, "model manifest")
-  const id = identity(object.id, "model manifest id")
-  const version = versionOf(object.version, "model manifest version")
-  const name = nonEmptyString(object.name, "model manifest name")
-  const description = object.description === undefined ? undefined : nonEmptyString(object.description, "model manifest description")
-  const customPackages = parseModelEntries(object.customPackages, "customPackages")
-  const customDatasets = parseModelEntries(object.customDatasets, "customDatasets")
+  assertKnownKeys(normalized, allowed, "model manifest")
+  const id = identity(normalized.id, "model manifest id")
+  const version = versionOf(normalized.version, "model manifest version")
+  const name = nonEmptyString(normalized.name, "model manifest name")
+  const description = normalized.description === undefined ? undefined : nonEmptyString(normalized.description, "model manifest description")
+  const customPackages = parseModelEntries(normalized.customPackages, "customPackages")
+  const customDatasets = parseModelEntries(normalized.customDatasets, "customDatasets")
   return {
     manifest: {
       schemaVersion: MODEL_MANIFEST_SCHEMA_VERSION,

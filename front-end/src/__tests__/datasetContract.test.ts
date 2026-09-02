@@ -38,7 +38,23 @@ describe("dataset and manifest contracts", () => {
       customDatasets: [],
     })
     expect(result.manifest).toMatchObject({ schemaVersion: 2, customDatasets: [], customPackages: [{ id: "demo.layer" }] })
-    expect(() => parseModelManifest({ ...result.manifest, schemaVersion: 1 })).toThrow(/unknown-version/)
+  })
+
+  test("normalizes a legacy v1 manifest to v2 with no datasets", () => {
+    expect(parseModelManifest({
+      schemaVersion: 1,
+      id: "legacy.model",
+      version: "1.0.0",
+      name: "Legacy",
+      customPackages: [],
+    }).manifest).toEqual({
+      schemaVersion: 2,
+      id: "legacy.model",
+      version: "1.0.0",
+      name: "Legacy",
+      customPackages: [],
+      customDatasets: [],
+    })
   })
 
   test.each([

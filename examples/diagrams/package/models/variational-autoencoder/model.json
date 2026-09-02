@@ -20,11 +20,13 @@
         "params": {
           "shape": [
             "B",
+            1,
             28,
             28
           ],
           "dtype": "float32"
-        }
+        },
+        "inputBinding": "image"
       },
       "measured": {
         "width": 30,
@@ -840,7 +842,7 @@
   ],
   "layoutDirection": "vertical",
   "manifest": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "example.vae-mnist",
     "version": "0.1.0",
     "name": "Variational Autoencoder",
@@ -855,6 +857,13 @@
         "id": "example.vae.kl-divergence",
         "version": "0.1.0",
         "path": "packages/kl-divergence"
+      }
+    ],
+    "customDatasets": [
+      {
+        "id": "example.vae-mnist",
+        "version": "0.1.0",
+        "path": "datasets/autoencoder-mnist"
       }
     ]
   }

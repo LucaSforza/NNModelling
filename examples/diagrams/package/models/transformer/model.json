@@ -1,10 +1,11 @@
 {
   "manifest": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "example.transformer",
     "version": "0.1.0",
     "name": "Transformer",
-    "customPackages": []
+    "customPackages": [],
+    "customDatasets": []
   },
   "nodes": [
     {

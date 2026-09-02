@@ -1,10 +1,11 @@
 {
   "manifest": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "example.resnet-mnist",
     "version": "0.1.0",
     "name": "ResNet",
-    "customPackages": []
+    "customPackages": [],
+    "customDatasets": []
   },
   "nodes": [
     {

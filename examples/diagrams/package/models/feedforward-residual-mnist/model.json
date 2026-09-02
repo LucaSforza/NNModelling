@@ -735,11 +735,12 @@
   ],
   "layoutDirection": "vertical",
   "manifest": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "feedforward-residual-mnist",
     "version": "0.1.0",
     "name": "FeedForward Residual MNIST",
     "description": "Residual feed-forward classifier for MNIST",
-    "customPackages": []
+    "customPackages": [],
+    "customDatasets": []
   }
 }

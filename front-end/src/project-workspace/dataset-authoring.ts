@@ -389,7 +389,7 @@ function renderDatasetPython(request: ValidatedDatasetAuthoringRequest, definiti
 
 The .pt files mentioned below are only a convenient starting point. Replace
 the loader with any local, deterministic implementation that returns the
-named TrainingBatch contract; project data must stay below context.root.
+named TrainingBatch contract; project data must stay below context.resource_root.
 """
 
 from __future__ import annotations
@@ -405,9 +405,12 @@ from torch.utils.data import DataLoader, Dataset
 
 @dataclass(frozen=True)
 class DatasetContext:
-    """Read-only root containing this dataset's editable data/ directory."""
+    """Read-only resources supplied by the isolated dataset worker."""
 
     resource_root: Path
+    # The worker supplies the opaque shared-contract reference as the second
+    # positional field; keep its concrete backend type out of this scaffold.
+    reference: Any | None = None
 
 
 @dataclass(frozen=True)

@@ -22,14 +22,15 @@ const models = [
 describe("model semantic conformance", () => {
   test.each([
     ["resnet", {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "example.resnet-mnist",
       version: "0.1.0",
       name: "ResNet",
       customPackages: [],
+      customDatasets: [],
     }],
     ["vae", {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "example.vae-mnist",
       version: "0.1.0",
       name: "Variational Autoencoder",
@@ -38,6 +39,7 @@ describe("model semantic conformance", () => {
         { id: "example.vae.sampling", version: "0.1.0", path: "packages/sampling" },
         { id: "example.vae.kl-divergence", version: "0.1.0", path: "packages/kl-divergence" },
       ],
+      customDatasets: [],
     }],
   ])("parses %s model manifest deterministically", (_model, manifest) => {
     const first = parseModelManifest(manifest)

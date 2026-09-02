@@ -1,15 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 import { TrainingController, TrainingConfigurationError } from "../training/controller";
 import type { DatasetInfo } from "../training/api";
+import type { GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
 
 const dataset: DatasetInfo = {
   reference: { kind: "builtin", id: "builtin.mnist", version: "1.0.0", ref: "builtin_mnist" },
   manifest: { schemaVersion: 1, id: "builtin.mnist", version: "1.0.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
   definition: { schemaVersion: 1, id: "builtin.mnist", version: "1.0.0", name: "MNIST", parameters: [
-    { name: "batch_size", type: "int", default: 32, required: false },
-    { name: "shuffle", type: "bool", default: true, required: false },
+    { name: "batch_size", type: "integer", default: 32, required: false },
+    { name: "shuffle", type: "boolean", default: true, required: false },
   ], batch: { inputs: { image: { shape: ["B", 1], dtype: "float32" } }, targets: { label: { shape: ["B"], dtype: "int64" } } } },
 };
+
+function projectDataset(ref: string, id = ref): DatasetInfo {
+  return {
+    reference: { kind: "project", id, version: "1.0.0", ref },
+    manifest: { schemaVersion: 1, id, version: "1.0.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
+    definition: { schemaVersion: 1, id, version: "1.0.0", name: id, parameters: [
+      { name: "batch_size", type: "integer", default: 16, required: false },
+      { name: "shuffle", type: "boolean", default: false, required: false },
+    ], batch: { inputs: { image: { shape: ["B", 1], dtype: "float32" } }, targets: { label: { shape: ["B"], dtype: "int64" } } } },
+  };
+}
+
+const resources = new Map<string, GeneratedDatasetResources>();
 
 describe("TrainingController", () => {
   it("keeps a typed configuration and rejects invalid patches atomically", () => {
@@ -35,6 +49,31 @@ describe("TrainingController", () => {
     expect(controller.getConnection()).toMatchObject({ status: "pending", requestId: "req", verificationCode: "123" });
     expect(JSON.stringify(snapshots.at(-1))).not.toContain("secret");
     await controller.disconnect();
+  });
+
+  it("reconciles selection and parameters when the project dataset catalog changes", () => {
+    const first = projectDataset("project-a");
+    const second = projectDataset("project-b");
+    const controller = new TrainingController();
+
+    controller.setProjectDatasets([first], resources);
+    controller.updateConfig({ datasetParams: { batch_size: 99 } });
+    expect(controller.getConfig()).toMatchObject({ selectedDataset: first.reference.ref, datasetParams: { batch_size: 99, shuffle: false } });
+
+    controller.setProjectDatasets([second], resources);
+    expect(controller.getConfig()).toMatchObject({ selectedDataset: second.reference.ref, datasetParams: { batch_size: 16 } });
+  });
+
+  it("clears project archive references when installing a new project catalog", () => {
+    const controller = new TrainingController();
+    const oldDataset = projectDataset("project-a");
+    const newDataset = projectDataset("project-b");
+    controller.setProjectDatasets([oldDataset], resources);
+    (controller as unknown as { projectDatasetReferences: Map<string, unknown> }).projectDatasetReferences.set(oldDataset.reference.ref, { ...oldDataset.reference, digest: "old" });
+
+    controller.setProjectDatasets([newDataset], resources);
+
+    expect((controller as unknown as { projectDatasetReferences: Map<string, unknown> }).projectDatasetReferences.size).toBe(0);
   });
 
   it("clears one-time pairing details after approval", async () => {

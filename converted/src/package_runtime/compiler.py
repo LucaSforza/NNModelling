@@ -159,7 +159,10 @@ def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[s
             package_value = _resolve_package(catalog, package)
             node_type = node.get("type")
             if package_value.kind == "input" or node_type == "input":
-                normalized_nodes.append({"id": node["id"], "type": "input"})
+                input_node: dict[str, Any] = {"id": node["id"], "type": "input"}
+                if isinstance(node.get("inputBinding"), str):
+                    input_node["inputBinding"] = node["inputBinding"]
+                normalized_nodes.append(input_node)
                 continue
             runtime_type = "layer" if node_type == "custom" else node_type
             if runtime_type not in {"layer", "join", "subflow"}:

@@ -138,7 +138,7 @@ def create_app(
         allow_origins=origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-NNM-Admin-Token"],
+        allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-NNM-Admin-Token", "X-NNM-SHA256"],
         expose_headers=["X-NNM-SHA256"],
     )
     app.state.manager = manager or JobManager.from_environment()

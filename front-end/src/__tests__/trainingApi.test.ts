@@ -15,7 +15,7 @@ describe("training job actions", () => {
         { name: "batch_size", type: "int", default: 32, required: false },
         { name: "num_workers", type: "int", default: 0, required: false },
         { name: "train_size", type: "float", default: 0.8, required: false },
-      ], batch: { inputs: { image: { shape: ["B", 1, 28, 28], dtype: "float32" } }, targets: { reconstruction: { shape: ["B", 1, 28, 28], dtype: "float32" } } } },
+      ], batch: { inputs: { image: { shape: ["B", 1, 28, 28], dtype: "float32" } }, targets: { target: { shape: ["B", 1, 28, 28], dtype: "float32" } } } },
     };
 
     expect(canonicalDatasetParameters(dataset, {

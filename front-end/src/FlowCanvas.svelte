@@ -69,9 +69,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // RPC handler — receives MCP server requests and dispatches to Diagram
   import { BrowserRPCHandler } from "./sync/BrowserRPCHandler";
   import { TrainingController } from "./training/controller";
-  import type { DatasetInfo } from "./training/api";
-  import { parseDatasetDefinition, parseDatasetSourceManifest, parseModelManifest, type DatasetReference } from "./project-workspace/dataset-contract";
-  import type { GeneratedDatasetResources } from "./project-workspace/dataset-authoring";
+  import { loadProjectDatasetResources } from "./project-workspace/project-dataset-resources";
 
   const nodeTypes = {
     custom: CustomNode,
@@ -98,8 +96,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // The Diagram is created only after App has obtained a writable workspace.
   // It remains the sole graph authority for the lifetime of this editor.
   const diagram = new Diagram();
-  const projectDatasetResources = loadProjectDatasetResources(session);
-  trainingController.setProjectDatasets(projectDatasetResources.infos, projectDatasetResources.resources);
   // Training state belongs to the editor session, not to the conditionally
   // mounted sidebar. MCP and the sidebar therefore share this one owner.
   const stereotypeAuthoring = new ProjectStereotypeAuthoringCoordinator(session, diagram);
@@ -164,6 +160,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         await diagram.waitForPackageRuntime();
         const snapshot = diagram.parseProjectJson(session.modelJson);
         if (!snapshot) throw new Error("Il progetto contiene un modello non valido.");
+        const projectDatasetResources = loadProjectDatasetResources(session);
+        trainingController.setProjectDatasets(projectDatasetResources.infos, projectDatasetResources.resources);
 
         const isEmptyProject = snapshot.nodes.length === 0 && snapshot.edges.length === 0 &&
           snapshot.manifest.customPackages.length === 0;
@@ -512,44 +510,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       await setViewport(originalViewport);
     }
   }
-
-function loadProjectDatasetResources(session: ProjectWorkspaceSession): {
-  readonly infos: readonly DatasetInfo[];
-  readonly resources: ReadonlyMap<string, GeneratedDatasetResources>;
-} {
-  const resources = new Map<string, GeneratedDatasetResources>();
-  const infos: DatasetInfo[] = [];
-  try {
-    const manifest = parseModelManifest(JSON.parse(session.modelJson)).manifest;
-    for (const entry of manifest.customDatasets) {
-      const prefix = `${entry.path}/`;
-      const manifestJson = session.resources[`${prefix}manifest.json`];
-      const definitionJson = session.resources[`${prefix}dataset.json`];
-      const python = session.resources[`${prefix}dataset.py`];
-      if (manifestJson === undefined || definitionJson === undefined || python === undefined) continue;
-      const readText = (value: string | Uint8Array): string => typeof value === "string" ? value : new TextDecoder().decode(value);
-      const sourceManifest = parseDatasetSourceManifest(JSON.parse(readText(manifestJson)));
-      const definition = parseDatasetDefinition(JSON.parse(readText(definitionJson)));
-      const reference: DatasetReference = { kind: "project", id: entry.id, version: entry.version, ref: `project_${entry.id.replaceAll(".", "_")}_${entry.version.replaceAll(".", "_")}` };
-      const dataFiles = Object.entries(session.resources)
-        .filter(([path]) => path.startsWith(`${prefix}data/`))
-        .map(([path, value]) => ({ path: path.slice(`${prefix}data/`.length), bytes: typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value) }));
-      const generated: GeneratedDatasetResources = {
-        manifest: sourceManifest,
-        definition,
-        modelDataset: entry,
-        files: { "manifest.json": readText(manifestJson), "dataset.json": readText(definitionJson), "dataset.py": readText(python) },
-        dataFiles,
-      };
-      resources.set(reference.ref, generated);
-      infos.push({ reference, manifest: sourceManifest, definition });
-    }
-  } catch {
-    // Project import already reports malformed model resources; training sees
-    // only the valid descriptors that can be uploaded as a complete closure.
-  }
-  return { infos, resources };
-}
 
 </script>
 

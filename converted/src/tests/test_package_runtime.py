@@ -53,6 +53,26 @@ def build(parameters, context: BuildContext, services: NoServices):
     assert tuple(model(torch.ones(4, 2)).shape) == (4, 3)
 
 
+def test_normalized_input_node_preserves_named_binding() -> None:
+    identity_source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    input_package = _package("demo.input", identity_source, definition={"kind": "input"})
+    layer_package = _package("demo.identity", identity_source)
+    bundle = {
+        "packages": [input_package, layer_package],
+        "graph": {
+            "nodes": [
+                {"id": "input", "type": "custom", "package": {"id": "demo.input", "version": "0.1.0"}, "inputBinding": "image"},
+                {"id": "layer", "type": "custom", "package": {"id": "demo.identity", "version": "0.1.0"}},
+            ],
+            "edges": [{"source": "input", "target": "layer", "targetHandle": "in-0"}],
+        },
+    }
+
+    model = compile_package_graph(bundle)
+    value = torch.ones(2, 1)
+    assert torch.equal(model.prediction({"image": value}), value)
+
+
 def test_cross_entropy_objective_receives_target() -> None:
     source = """
 import torch

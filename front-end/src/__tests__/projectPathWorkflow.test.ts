@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { createPathProjectSession, type ProjectPathPayload } from "../project-workspace/path"
 
-const MODEL = JSON.stringify({ manifest: { schemaVersion: 1, id: "demo", version: "0.1.0", name: "Demo", customPackages: [] }, nodes: [], edges: [] })
+const MODEL = JSON.stringify({ manifest: { schemaVersion: 2, id: "demo", version: "0.1.0", name: "Demo", customPackages: [], customDatasets: [] }, nodes: [], edges: [] })
 
 describe("MCP-selected project workspace", () => {
   test("keeps handles local and forwards ordered model saves", async () => {

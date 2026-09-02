@@ -24,7 +24,7 @@ from dataset.contracts import (
     DatasetSourceManifest,
     TensorSlotContract,
 )
-from dataset.ds import Dataset, named_batch
+from dataset.ds import Dataset, DatasetSplits, named_batch
 
 
 ENRON_SPAM_DATASET_ID = "builtin.enron-spam"
@@ -148,7 +148,7 @@ class EnronSpamDataset(Dataset):
             {"label": padded["labels"].to(dtype=torch.int64)},
         )
 
-    def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
+    def division(self) -> DatasetSplits:
         train_len = int(len(self.train_dataset) * self.train_size)
         val_len = len(self.train_dataset) - train_len
         train_sub, val_sub = random_split(self.train_dataset, [train_len, val_len])
@@ -175,7 +175,11 @@ class EnronSpamDataset(Dataset):
             num_workers=self.num_workers,
         )
 
-        return train_loader, val_loader, test_loader
+        return {
+            "train": train_loader,
+            "validation": val_loader,
+            "test": test_loader,
+        }
 
 
 def validate_parameters(parameters: Mapping[str, object]) -> dict[str, object]:

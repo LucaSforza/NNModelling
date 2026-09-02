@@ -28,18 +28,19 @@ export type NewProjectFormValues = {
 /** Build new-project metadata through the canonical model manifest validator. */
 export function manifestFromProjectForm(values: NewProjectFormValues): ModelManifest {
   const candidate = {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     id: values.id.trim(),
     version: values.version.trim(),
     name: values.name.trim(),
     ...(values.description?.trim() ? { description: values.description.trim() } : {}),
     customPackages: [],
+    customDatasets: [],
   };
   return parseModelManifest(candidate);
 }
 
 export function createEmptyProjectJson(manifest: ModelManifest): string {
-  return JSON.stringify({ nodes: [], edges: [], layoutDirection: "vertical", manifest }, null, 2);
+  return JSON.stringify({ nodes: [], edges: [], layoutDirection: "vertical", manifest: parseModelManifest(manifest) }, null, 2);
 }
 
 // Tipo esatto per il payload dell'evento di trascinamento

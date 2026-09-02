@@ -11,15 +11,16 @@ class MemoryDiagram extends DiagramCore {
 
 describe("canonical package project persistence", () => {
   const resnetManifest: ModelManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "example.resnet-mnist",
     version: "0.1.0",
     name: "ResNet",
     customPackages: [],
+    customDatasets: [],
   }
 
   const vaeManifest: ModelManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "example.vae-mnist",
     version: "0.1.0",
     name: "Variational Autoencoder",
@@ -28,6 +29,7 @@ describe("canonical package project persistence", () => {
       { id: "example.vae.sampling", version: "0.1.0", path: "packages/sampling" },
       { id: "example.vae.kl-divergence", version: "0.1.0", path: "packages/kl-divergence" },
     ],
+    customDatasets: [],
   }
 
   test("round-trips an empty custom package set", () => {
@@ -38,6 +40,30 @@ describe("canonical package project persistence", () => {
     expect(loaded.importFromJson(source.exportToJson())).toBe(true)
     expect(loaded.modelManifest).toEqual(resnetManifest)
     expect(JSON.parse(loaded.exportToJson()).manifest).toEqual(resnetManifest)
+  })
+
+  test("reads a v1 manifest once and persists its v2 normalization", () => {
+    const diagram = new MemoryDiagram()
+    expect(diagram.importFromJson(JSON.stringify({
+      nodes: [],
+      edges: [],
+      manifest: {
+        schemaVersion: 1,
+        id: "legacy.model",
+        version: "0.1.0",
+        name: "Legacy model",
+        customPackages: [],
+      },
+    }))).toBe(true)
+    expect(diagram.modelManifest).toEqual({
+      schemaVersion: 2,
+      id: "legacy.model",
+      version: "0.1.0",
+      name: "Legacy model",
+      customPackages: [],
+      customDatasets: [],
+    })
+    expect(JSON.parse(diagram.exportToJson()).manifest.schemaVersion).toBe(2)
   })
 
   test("round-trips exact non-empty custom package references", () => {
@@ -72,7 +98,7 @@ describe("canonical package project persistence", () => {
     ["duplicate paths", { ...vaeManifest, customPackages: [vaeManifest.customPackages[0], { ...vaeManifest.customPackages[1], path: vaeManifest.customPackages[0].path }] }],
     ["malformed identity", { ...vaeManifest, customPackages: [{ ...vaeManifest.customPackages[0], id: "Not A Package" }] }],
   ])("reports %s as an actionable validation error", (_label, manifest) => {
-    expect(() => parseModelManifest(manifest)).toThrow(/model manifest customPackages/)
+    expect(() => parseModelManifest(manifest)).toThrow(/(?:duplicate-entry|invalid-identity).*customPackages/)
   })
 
   test("writes only exact package id and version", () => {

@@ -5,6 +5,7 @@ import fs from "node:fs/promises"
 
 const PROJECT_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+const PROJECT_RESOURCE_LIMIT_BYTES = 64 * 1024 * 1024
 
 /**
  * Validate a user-supplied project path before it crosses the browser bridge.
@@ -103,7 +104,7 @@ async function readFiles(
     else if (entry.isFile()) {
       const bytes = await fs.readFile(path.join(directory, entry.name))
       size.bytes += bytes.byteLength
-      if (size.bytes > 8 * 1024 * 1024) throw new MCPServerError("PROJECT_TOO_LARGE", "project resources exceed 8 MiB")
+      if (size.bytes > PROJECT_RESOURCE_LIMIT_BYTES) throw new MCPServerError("PROJECT_TOO_LARGE", "project resources exceed 64 MiB")
       const resourcePath = relative.split(path.sep).join("/")
       resources[resourcePath] = resourcePath === "model.json"
         ? { encoding: "utf8", data: bytes.toString("utf8") }

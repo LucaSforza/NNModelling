@@ -25,7 +25,7 @@ from dataset.contracts import (
     DatasetSourceManifest,
     TensorSlotContract,
 )
-from dataset.ds import Dataset, named_batch
+from dataset.ds import Dataset, DatasetSplits, named_batch
 
 
 MNIST_DATASET_ID = "builtin.mnist"
@@ -133,7 +133,7 @@ class MNISTDataset(Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
+    def division(self) -> DatasetSplits:
         # Split the dataset into training and validation sets
         train_size = int(self.train_size * len(self.dataset))
         val_size = len(self) - train_size
@@ -161,7 +161,11 @@ class MNISTDataset(Dataset):
             num_workers=self.num_workers,
             collate_fn=self._collate,
         )
-        return train_loader, val_loader, test_loader
+        return {
+            "train": train_loader,
+            "validation": val_loader,
+            "test": test_loader,
+        }
 
     @staticmethod
     def _collate(batch: list[tuple[torch.Tensor, int]]) -> object:
