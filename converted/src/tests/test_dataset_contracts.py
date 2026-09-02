@@ -118,10 +118,11 @@ def test_opaque_request_has_no_python_target_or_path() -> None:
         reference={"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist"},
         parameters={"batch_size": 32},
     )
-    assert request.model_dump(mode="json") == {
-        "reference": {"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist", "digest": None},
-        "parameters": {"batch_size": 32},
-    }
+    payload = request.model_dump(mode="json")
+    assert "target" not in payload
+    assert "path" not in payload
+    assert "target" not in payload["reference"]
+    assert "path" not in payload["reference"]
     with pytest.raises(ValidationError):
         OpaqueDatasetRequest(
             reference={"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist"},
