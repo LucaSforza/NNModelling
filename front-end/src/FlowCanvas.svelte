@@ -127,6 +127,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     pending: 0,
     latestAcceptedVersion: 0,
   });
+  let hasUnsavedChanges = $state(false);
+  let dirtyGeneration = 0;
   let layoutError = $state<string | null>(null);
   let isLayoutMenuOpen = $state(false);
   let canvasRef = $state<HTMLDivElement>();
@@ -139,10 +141,21 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     return error instanceof Error ? error.message : String(error);
   }
 
-  function persistModel(): void {
-    void session.save(diagram.exportToJson()).catch((error) => {
+  function markModelDirty(): void {
+    dirtyGeneration += 1;
+    hasUnsavedChanges = true;
+  }
+
+  async function saveModel(): Promise<void> {
+    if (!hasUnsavedChanges) return;
+    const generationAtSave = dirtyGeneration;
+    try {
+      await session.save(diagram.exportToJson());
+      // A change made while the write was pending still needs a later save.
+      if (generationAtSave === dirtyGeneration) hasUnsavedChanges = false;
+    } catch (error) {
       initializationError = saveErrorMessage(error);
-    });
+    }
   }
 
   function authorStereotype(request: StereotypeAuthoringRequest): Promise<void> {
@@ -173,9 +186,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         }
         if (!active) return;
         unsubscribeSave = session.writer.subscribe((status) => { saveStatus = status; });
+        if (isEmptyProject && diagram.nodes.length > 0) markModelDirty();
         isSessionReady = true;
         onSessionReady?.();
-        if (isEmptyProject) persistModel();
       } catch (error) {
         if (!active) return;
         initializationError = saveErrorMessage(error);
@@ -189,18 +202,18 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     };
   });
 
-  // DiagramCore notifies synchronously after accepted mutations. This is the
-  // only autosave subscription; ProjectModelWriter serializes rapid changes.
+  // DiagramCore notifies synchronously after accepted mutations. Keep the
+  // in-memory model dirty; disk writes happen only from the Save button.
   $effect(() => {
     if (!isSessionReady) return;
-    const unsubscribe = diagram.onGraphChanged(persistModel);
+    const unsubscribe = diagram.onGraphChanged(markModelDirty);
     return unsubscribe;
   });
 
   let saveLabel = $derived(
     saveStatus.state === "pending" ? "Salvataggio…" :
       saveStatus.state === "failed" ? "Salvataggio fallito" :
-        "Salvato",
+        hasUnsavedChanges ? "Da salvare" : "Salvato",
   );
 
   // Auto-apertura quando si seleziona un nodo
@@ -311,9 +324,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     );
     if (newNodes !== undefined) {
       diagram.nodes = newNodes;
-      // Svelte Flow supplies the final positions after the drag; persist this
-      // accepted canvas mutation through the same ordered writer.
-      persistModel();
+      // Svelte Flow supplies the final positions after the drag outside the
+      // DiagramCore mutation API, so mark this canvas change explicitly.
+      markModelDirty();
     }
 
     // Wait for Svelte Flow to publish the final handle positions after a
@@ -538,11 +551,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       onnodedragstop={handleNodeDragStop}
       onconnect={() => {
         diagram.refreshTypes();
-        persistModel();
+        markModelDirty();
       }}
       ondelete={() => {
         diagram.refreshTypes();
-        persistModel();
+        markModelDirty();
       }}
       fitView
       fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
@@ -554,12 +567,26 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           <strong>{diagram.modelManifest.name}</strong>
           <span>{diagram.modelManifest.id}</span>
         </div>
-        <div class:save-failed={saveStatus.state === "failed"} class="save-status" role="status" aria-live="polite">
+        <div
+          class:save-needed={hasUnsavedChanges}
+          class:save-failed={saveStatus.state === "failed"}
+          class="save-status"
+          role="status"
+          aria-live="polite"
+        >
           <span class="save-indicator" aria-hidden="true"></span>{saveLabel}
           {#if saveStatus.state === "failed" && saveStatus.error}
             <span class="save-error">{saveErrorMessage(saveStatus.error)}</span>
           {/if}
         </div>
+        <button
+          type="button"
+          class="toolbar-btn"
+          onclick={saveModel}
+          disabled={!hasUnsavedChanges}
+        >
+          💾 Salva
+        </button>
         <button onclick={handleExportPng} class="toolbar-btn"
           >🖼️ Esporta PNG</button
         >
@@ -715,6 +742,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     font-weight: 700;
   }
 
+  .save-status.save-needed { color: #a96800; }
   .save-status.save-failed { color: #9a2626; }
   .save-indicator { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .save-error { max-width: 220px; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
