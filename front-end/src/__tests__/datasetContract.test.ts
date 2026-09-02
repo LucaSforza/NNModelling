@@ -71,13 +71,14 @@ describe("dataset and manifest contracts", () => {
     expect(parseDatasetReference({ kind: "project", id: "demo.tokens", version: "1.0.0", ref: "dataset_abc", digest: "A".repeat(64) })).toMatchObject({ kind: "project", digest: "a".repeat(64) })
     expect(() => parseDatasetReference({ kind: "project", id: "demo.tokens", version: "1.0.0", ref: "datasets/tokens", digest: "A".repeat(64) })).toThrow(/invalid-reference/)
     expect(() => parseDatasetReference({ kind: "project", id: "demo.tokens", version: "1.0.0", ref: "dataset_abc" })).toThrow(/invalid-reference/)
+    expect(() => parseDatasetReference({ kind: "builtin", id: "builtin.mnist", version: "1.0.0", ref: "builtin_mnist" })).toThrow(/invalid-reference/)
   })
 
   test("normalizes an opaque training selection without a Python target", () => {
     expect(validateDatasetSelection({
-      reference: { kind: "builtin", id: "builtin.mnist", version: "1.0.0", ref: "builtin_mnist" },
+      reference: { kind: "project", id: "example.vae-mnist", version: "0.1.0", ref: "project_example_vae_mnist_0_1_0", digest: "a".repeat(64) },
       parameters: { batch_size: 32 },
-    })).toMatchObject({ reference: { kind: "builtin" }, parameters: { batch_size: 32 } })
-    expect(() => validateDatasetSelection({ target: "dataset.mnist.MNISTDataset", parameters: {} })).toThrow()
+    })).toMatchObject({ reference: { kind: "project" }, parameters: { batch_size: 32 } })
+    expect(() => validateDatasetSelection({ parameters: {} })).toThrow()
   })
 })

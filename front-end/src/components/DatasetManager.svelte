@@ -10,22 +10,13 @@
   import type { DatasetDefinition, ModelDatasetReference } from "../project-workspace/dataset-contract";
   import type { DType, Dimension } from "../type-system/tensor-type";
 
-  export type DatasetCatalogEntry = {
-    readonly id: string;
-    readonly version: string;
-    readonly name: string;
-    readonly description?: string;
-    readonly kind: "builtin" | "project";
-  };
-
   interface Props {
-    readonly builtins?: readonly DatasetCatalogEntry[];
     readonly projectDatasets?: readonly (ModelDatasetReference & { readonly name?: string })[];
     readonly projectDefinitions?: readonly DatasetDefinition[];
     readonly onAuthoringRequest?: (request: DatasetAuthoringRequest) => Promise<void> | void;
   }
 
-  let { builtins = [], projectDatasets = [], projectDefinitions = [], onAuthoringRequest }: Props = $props();
+  let { projectDatasets = [], projectDefinitions = [], onAuthoringRequest }: Props = $props();
   let id = $state("project.dataset");
   let version = $state("1.0.0");
   let directory = $state("datasets/project-dataset");
@@ -133,14 +124,10 @@
 
 <section class="dataset-manager" aria-label="Dataset manager">
   <header class="dataset-manager__header">
-    <div><h2>Datasets</h2><p>Built-ins are read-only. Author a dataset owned by the current project.</p></div>
+    <div><h2>Datasets</h2><p>Author datasets owned by the current project.</p></div>
   </header>
 
   <div class="dataset-manager__catalog">
-    <div><h3>Built-in</h3>{#if builtins.length === 0}<p class="empty">No built-in datasets.</p>{/if}</div>
-    {#each builtins as dataset (`${dataset.id}@${dataset.version}`)}
-      <div class="catalog-row"><span><strong>{dataset.name}</strong><small>{dataset.id}@{dataset.version}</small></span><em>Read-only</em></div>
-    {/each}
     <div><h3>Current project</h3>{#if projectDatasets.length === 0}<p class="empty">No project datasets yet.</p>{/if}</div>
     {#each projectDatasets as dataset (`${dataset.id}@${dataset.version}`)}
       <div class="catalog-row"><span><strong>{projectDatasetName(dataset)}</strong><small>{dataset.id}@{dataset.version}</small></span><em>Project</em></div>

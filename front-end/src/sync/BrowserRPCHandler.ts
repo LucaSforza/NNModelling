@@ -380,7 +380,7 @@ export class BrowserRPCHandler {
           });
           break;
         case "download_training_wheel":
-          result = this.requireTraining().downloadTrainingWheel(params.jobId as string);
+          result = this.requireTraining().downloadTrainingWheel(params.jobId as string, params.packageName as string);
           break;
 
         default:

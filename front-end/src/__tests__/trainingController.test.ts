@@ -4,9 +4,9 @@ import type { DatasetInfo } from "../training/api";
 import type { GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
 
 const dataset: DatasetInfo = {
-  reference: { kind: "builtin", id: "builtin.mnist", version: "1.0.0", ref: "builtin_mnist" },
-  manifest: { schemaVersion: 1, id: "builtin.mnist", version: "1.0.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
-  definition: { schemaVersion: 1, id: "builtin.mnist", version: "1.0.0", name: "MNIST", parameters: [
+  reference: { kind: "project", id: "example.vae-mnist", version: "0.1.0", ref: "project_example_vae_mnist_0_1_0", digest: "a".repeat(64) },
+  manifest: { schemaVersion: 1, id: "example.vae-mnist", version: "0.1.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
+  definition: { schemaVersion: 1, id: "example.vae-mnist", version: "0.1.0", name: "VAE MNIST", parameters: [
     { name: "batch_size", type: "integer", default: 32, required: false },
     { name: "shuffle", type: "boolean", default: true, required: false },
   ], batch: { inputs: { image: { shape: ["B", 1], dtype: "float32" } }, targets: { label: { shape: ["B"], dtype: "int64" } } } },
@@ -28,7 +28,7 @@ const resources = new Map<string, GeneratedDatasetResources>();
 describe("TrainingController", () => {
   it("keeps a typed configuration and rejects invalid patches atomically", () => {
     const controller = new TrainingController();
-    controller.setDatasets([dataset]);
+    controller.setProjectDatasets([dataset], resources);
     controller.updateConfig({ selectedDataset: dataset.reference.ref, datasetParams: { batch_size: 64 } });
     expect(controller.getConfig()).toMatchObject({ selectedDataset: dataset.reference.ref, datasetParams: { batch_size: 64, shuffle: true } });
 
@@ -82,7 +82,6 @@ describe("TrainingController", () => {
       createPairing: vi.fn().mockResolvedValue({ request_id: "req", connection_id: "grant", token: "secret", verification_code: "123", expires_at: "later" }),
       getPairingStatus: vi.fn().mockResolvedValue({ status: "approved", request_id: "req", connection_id: "grant", verification_code: "123", expires_at: "later", session_expires_at: "later" }),
       getSession: vi.fn().mockResolvedValue({ id: "session", status: "active", device_name: "test", created_at: "now", approved_at: "now", expires_at: "later", last_seen_at: null, revoked_at: null }),
-      listDatasets: vi.fn().mockResolvedValue([]),
     } as any;
     const controller = new TrainingController({ apiFactory: () => api, storage: new MemoryStorage() });
     await controller.connect("http://backend.test:8000");

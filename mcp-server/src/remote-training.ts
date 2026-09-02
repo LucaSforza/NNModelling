@@ -111,20 +111,8 @@ export class RemoteTrainingClient {
     return this.request("/health");
   }
 
-  listDatasets(): Promise<unknown[]> {
-    return this.request("/datasets");
-  }
-
   listComputeUnits(): Promise<unknown[]> {
     return this.request("/compute-units");
-  }
-
-  submitJob(job: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request("/jobs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(job),
-    });
   }
 
   getJob(jobId: string): Promise<Record<string, unknown>> {
@@ -208,13 +196,13 @@ export class RemoteTrainingClient {
     }
   }
 
-  async downloadWheel(jobId: string, destinationPath?: string): Promise<{ status: "ok"; artifact: WheelArtifact }> {
+  async downloadWheel(jobId: string, packageName: string, destinationPath?: string): Promise<{ status: "ok"; artifact: WheelArtifact }> {
+    validatePackageName(packageName);
     const job = await this.getJob(jobId);
     const manifest = job.model_package as Record<string, unknown> | null | undefined;
     if (!manifest || typeof manifest !== "object") throw new RemoteTrainingError("ARTIFACT_UNAVAILABLE", "Model package is not available");
-    const sha256 = typeof manifest.sha256 === "string" && /^[0-9a-f]{64}$/i.test(manifest.sha256) ? manifest.sha256.toLowerCase() : null;
-    if (!sha256) throw new RemoteTrainingError("ARTIFACT_MANIFEST_INVALID", "Model package manifest has no valid SHA-256 digest", 502);
-    const name = safeName(typeof manifest.wheel === "string" ? basename(manifest.wheel) : "model.whl");
+    const version = safeWheelVersion(manifest.version);
+    const name = `${packageName}-${version}-py3-none-any.whl`;
     await mkdir(this.artifactRoot, { recursive: true, mode: 0o700 });
     const path = destinationPath ? this.validateDestination(destinationPath) : join(this.artifactRoot, `nnm-${safeName(jobId)}-${name}`);
     let handle;
@@ -223,14 +211,16 @@ export class RemoteTrainingClient {
       throw new RemoteTrainingError("ARTIFACT_WRITE_FAILED", "Could not create artifact destination");
     }
     try {
-      const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package`, { headers: this.headers() });
+      const query = `?packageName=${encodeURIComponent(packageName)}`;
+      const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package${query}`, { headers: this.headers() });
       if (!response.ok) throw await this.requestError(response);
       const header = response.headers.get("x-nnm-sha256");
-      if (!header || !/^[0-9a-f]{64}$/i.test(header) || header.toLowerCase() !== sha256) throw new RemoteTrainingError("ARTIFACT_DIGEST_MISMATCH", "Package digest does not match the owned manifest", 502);
+      if (!header || !/^[0-9a-f]{64}$/i.test(header)) throw new RemoteTrainingError("ARTIFACT_DIGEST_INVALID", "Package response has no valid SHA-256 digest", 502);
       if (!response.body) throw new RemoteTrainingError("ARTIFACT_UNAVAILABLE", "Package response has no body", 404);
       const reader = response.body.getReader(); const digest = createHash("sha256"); let bytes = 0;
       while (true) { const item = await reader.read(); if (item.done) break; bytes += item.value.byteLength; if (bytes > MAX_ARTIFACT_BYTES) throw new RemoteTrainingError("ARTIFACT_TOO_LARGE", "Wheel exceeds the transfer limit", 413); digest.update(item.value); await handle.write(item.value); }
-      if (digest.digest("hex") !== sha256) throw new RemoteTrainingError("ARTIFACT_CORRUPTED", "Downloaded wheel failed SHA-256 verification", 502);
+      const sha256 = digest.digest("hex");
+      if (sha256 !== header.toLowerCase()) throw new RemoteTrainingError("ARTIFACT_CORRUPTED", "Downloaded wheel failed SHA-256 verification", 502);
       return { status: "ok", artifact: { kind: "wheel", path, mediaType: "application/octet-stream", bytes, sha256 } };
     } catch (error) { await rm(path, { force: true }); throw error; } finally { await handle.close(); }
   }
@@ -262,4 +252,17 @@ function bounded(value: number, minimum: number, field: string, maximum = Number
 
 function safeName(value: string): string {
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) ? value : "model.whl";
+}
+
+function validatePackageName(value: string): void {
+  if (!/^nnm_[A-Za-z][A-Za-z0-9_]*$/.test(value)) {
+    throw new RemoteTrainingError("INVALID_PACKAGE_NAME", "packageName must match nnm_<name>", 400);
+  }
+}
+
+function safeWheelVersion(value: unknown): string {
+  if (typeof value !== "string" || !/^[0-9]+(?:\.[0-9]+)*(?:[A-Za-z0-9.+-]*)$/.test(value)) {
+    throw new RemoteTrainingError("ARTIFACT_MANIFEST_INVALID", "Model package manifest has no valid version", 502);
+  }
+  return value;
 }

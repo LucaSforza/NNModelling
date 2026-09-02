@@ -21,29 +21,11 @@ function client(ctx: ServerContext): RemoteTrainingClient {
   return ctx.remoteTraining ?? new RemoteTrainingClient();
 }
 
-export const list_training_datasets = {
-  schema: z.object({}),
-
-  async handler(ctx: ServerContext) {
-    return client(ctx).listDatasets();
-  },
-};
-
 export const list_training_compute_units = {
   schema: z.object({}),
 
   async handler(ctx: ServerContext) {
     return client(ctx).listComputeUnits();
-  },
-};
-
-export const submit_training_job = {
-  schema: z.object({
-    job: z.record(z.unknown()).describe("Complete NNModelling training job JSON"),
-  }),
-
-  async handler(ctx: ServerContext, input: { job: Record<string, unknown> }) {
-    return client(ctx).submitJob(input.job);
   },
 };
 
@@ -95,9 +77,9 @@ export const read_training_progress = {
 };
 
 export const download_training_wheel = {
-  schema: z.object({ jobId: z.string().min(1), destinationPath: z.string().min(1).optional() }),
-  async handler(ctx: ServerContext, input: { jobId: string; destinationPath?: string }) {
-    return client(ctx).downloadWheel(input.jobId, input.destinationPath);
+  schema: z.object({ jobId: z.string().min(1), packageName: z.string().regex(/^nnm_[A-Za-z][A-Za-z0-9_]*$/), destinationPath: z.string().min(1).optional() }),
+  async handler(ctx: ServerContext, input: { jobId: string; packageName: string; destinationPath?: string }) {
+    return client(ctx).downloadWheel(input.jobId, input.packageName, input.destinationPath);
   },
 };
 
@@ -109,9 +91,8 @@ export const cancel_training_job = {
   },
 };
 
-// Editor-scoped training session operations. These deliberately use browser
-// RPC: pairing and configuration belong to the selected editor, while the
-// legacy process-authenticated tools above remain available for compatibility.
+// Editor-scoped training session operations use browser RPC so pairing and
+// configuration remain owned by the selected editor.
 export const connect_training_backend = {
   schema: z.object({ baseUrl: z.string().min(1), deviceName: z.string().max(80).optional() }),
   async handler(ctx: ServerContext, input: { baseUrl: string; deviceName?: string }) {
@@ -179,9 +160,9 @@ export const read_editor_training_progress = {
 
 /** Download a selected-editor wheel after browser-side digest verification. */
 export const download_editor_training_wheel = {
-  schema: z.object({ jobId: z.string().min(1), destinationPath: z.string().min(1).optional() }),
-  async handler(ctx: ServerContext, input: { jobId: string; destinationPath?: string }) {
-    const response = await ctx.browser.call("download_training_wheel", { jobId: input.jobId }) as EditorWheelResponse;
+  schema: z.object({ jobId: z.string().min(1), packageName: z.string().regex(/^nnm_[A-Za-z][A-Za-z0-9_]*$/), destinationPath: z.string().min(1).optional() }),
+  async handler(ctx: ServerContext, input: { jobId: string; packageName: string; destinationPath?: string }) {
+    const response = await ctx.browser.call("download_training_wheel", { jobId: input.jobId, packageName: input.packageName }) as EditorWheelResponse;
     const artifact = response?.artifact;
     if (response?.status !== "ok" || !artifact || typeof artifact.base64 !== "string") {
       throw new Error("Il browser non ha restituito un package verificato");

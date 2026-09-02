@@ -59,7 +59,6 @@
   let gpuType = $state("");
   let node = $state("");
   let priority = $state("0");
-  let packageSuffix = $state("");
   let selectedJobId = $state<string | null>(null);
   let loading = $state(false);
   let loadingJobs = $state(false);
@@ -113,7 +112,7 @@
     maxEpochs = String(config.maxEpochs); accelerator = config.accelerator; patience = String(config.patience); minDelta = String(config.minDelta);
     wandbProject = config.wandbProject; wandbMode = config.wandbMode; cpu = String(config.cpu); memoryGb = String(config.memoryGb); gpu = String(config.gpu);
     gpuMemoryGb = config.gpuMemoryGb === undefined ? "" : String(config.gpuMemoryGb); gpuType = config.gpuType ?? ""; node = config.node ?? "";
-    priority = String(config.priority); packageSuffix = config.packageSuffix ?? "";
+    priority = String(config.priority);
     if (view.status === "active" && !wasActive) {
       void loadDatasets();
       void refreshJobs();
@@ -207,7 +206,7 @@
         patience: coerce(patience, "int"), minDelta: coerce(minDelta, "float"), wandbProject, wandbMode,
         cpu: coerce(cpu, "int"), memoryGb: coerce(memoryGb, "float"), gpu: coerce(gpu, "int"),
         gpuMemoryGb: gpuMemoryGb ? coerce(gpuMemoryGb, "float") : undefined, gpuType: gpuType || undefined,
-        node: node || undefined, priority: coerce(priority, "int"), packageSuffix: packageSuffix || undefined });
+        node: node || undefined, priority: coerce(priority, "int") });
     } catch {
       // Text inputs can be temporarily incomplete; submit/MCP validation reports the error.
     }
@@ -322,12 +321,18 @@
 
   async function downloadModelPackage(job: TrainingJobStatus) {
     if (!job.model_package) return;
+    const packageName = window.prompt(
+      "Nome del package Python da esportare (formato nnm_<nome>)",
+      job.model_package.package_name,
+    );
+    if (packageName === null) return;
     try {
-      const blob = await requireApi().downloadModelPackage(job.id, job.model_package.sha256);
+      const normalizedPackageName = packageName.trim();
+      const blob = await requireApi().downloadModelPackage(job.id, normalizedPackageName);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = job.model_package.wheel.split("/").at(-1) ?? "model.whl";
+      link.download = `${normalizedPackageName}-${job.model_package.version}-py3-none-any.whl`;
       document.body.append(link);
       link.click();
       link.remove();
@@ -473,10 +478,6 @@
       <label>Tipo GPU<input bind:value={gpuType} placeholder="A100" /></label>
       <label>Nodo<input bind:value={node} placeholder="qualsiasi" /></label>
       <label>Priorità<input type="number" bind:value={priority} /></label>
-      <label>Nome pacchetto
-        <input bind:value={packageSuffix} placeholder="mnist_classifier" pattern="[A-Za-z][A-Za-z0-9_]*" />
-        <small>La wheel e l'import avranno il prefisso <code>nnm_</code>.</small>
-      </label>
       <button class="submit" onclick={submit} disabled={loading}>{loading ? "Invio..." : "Invia training"}</button>
     </section>
 

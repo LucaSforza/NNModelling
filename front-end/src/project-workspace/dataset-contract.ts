@@ -101,7 +101,7 @@ export type DatasetSourceManifest = {
 }
 
 export type DatasetReference = {
-  readonly kind: "builtin" | "project"
+  readonly kind: "project"
   readonly id: string
   readonly version: string
   /** Server-issued opaque handle; never a Python import target or filesystem path. */
@@ -218,14 +218,14 @@ export function parseDatasetSourceManifest(value: unknown): DatasetSourceManifes
 export function parseDatasetReference(value: unknown): DatasetReference {
   const object = record(value, "dataset reference")
   assertKnownKeys(object, ["kind", "id", "version", "ref", "digest"], "dataset reference")
-  if (object.kind !== "builtin" && object.kind !== "project") fail("kind must be builtin or project", "invalid-reference", "kind")
+  if (object.kind !== "project") fail("kind must be project", "invalid-reference", "kind")
   const id = identity(object.id, "dataset reference id")
   const version = versionOf(object.version, "dataset reference version")
   const ref = nonEmptyString(object.ref, "dataset reference ref")
   if (ref.includes("/") || ref.includes("\\") || ref.startsWith(".")) fail("ref must be opaque and not a path", "invalid-reference", "ref")
   const digest = object.digest === undefined ? undefined : nonEmptyString(object.digest, "dataset reference digest")
   if (digest !== undefined && !SHA256.test(digest)) fail("digest must be a SHA-256 hex string", "invalid-reference", "digest")
-  if (object.kind === "project" && digest === undefined) fail("project references require a digest", "invalid-reference", "digest")
+  if (digest === undefined) fail("project references require a digest", "invalid-reference", "digest")
   return { kind: object.kind, id, version, ref, ...(digest === undefined ? {} : { digest: digest.toLowerCase() }) }
 }
 

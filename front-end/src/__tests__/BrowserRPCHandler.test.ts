@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { BrowserRPCHandler } from "../sync/BrowserRPCHandler"
 
 function harness() {
@@ -77,5 +77,24 @@ describe("BrowserRPCHandler startup project bridge", () => {
 
     handler.handleMessage({ data: JSON.stringify({ id: "graph", method: "get_graph", params: {} }) })
     expect(sent[1]?.error).toMatchObject({ code: "NO_ACTIVE_PROJECT" })
+  })
+})
+
+describe("BrowserRPCHandler training download", () => {
+  test("forwards the selected packageName to the browser-owned controller", async () => {
+    const sent: Array<Record<string, unknown>> = []
+    const downloadTrainingWheel = vi.fn().mockResolvedValue({ status: "ok" })
+    const handler: any = new BrowserRPCHandler({} as any, "ws://test", undefined, { downloadTrainingWheel })
+    handler.ws = { readyState: 1, send(payload: string) { sent.push(JSON.parse(payload)) } }
+
+    handler.handleMessage({ data: JSON.stringify({
+      id: "download",
+      method: "download_training_wheel",
+      params: { jobId: "job-1", packageName: "nnm_vae" },
+    }) })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(downloadTrainingWheel).toHaveBeenCalledWith("job-1", "nnm_vae")
+    expect(sent[0]?.result).toEqual({ status: "ok" })
   })
 })

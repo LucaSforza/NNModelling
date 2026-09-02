@@ -101,7 +101,6 @@ export interface TrainingJobRequest {
   training: TrainingRequest;
   resources: ResourceRequest;
   priority: number;
-  package_name?: string;
 }
 
 export interface OpaqueDatasetRequest { reference: DatasetReference; parameters: Record<string, string | number | boolean>; }
@@ -208,10 +207,6 @@ export class TrainingApiClient {
 
   revokeSession(): Promise<SessionInfo> {
     return this.request("/session", { method: "DELETE" });
-  }
-
-  listDatasets(): Promise<DatasetInfo[]> {
-    return this.request("/datasets");
   }
 
   datasetArchiveCapabilities(): Promise<DatasetArchiveCapabilities> {
@@ -370,12 +365,10 @@ export class TrainingApiClient {
    * Download the authenticated job's wheel, verifying its integrity before any
    * byte is returned.
    *
-   * The authoritative digest comes from the job manifest (`expectedSha256`).
-   * The server recomputes and exposes the digest of the bytes it serves
-   * through the `X-NNM-SHA256` response header; the header must be present,
-   * well-formed and equal to the expected digest. The body is then digested
-   * client-side with Web Crypto and must match the expected digest too, so a
-   * corrupted or substituted response is never trusted on the header alone.
+   * The selected package name is sent to the backend for download-time wheel
+   * generation. The server exposes the digest of those selected bytes through
+   * the `X-NNM-SHA256` response header; the header must be present and
+   * well-formed, and the body must match it before any Blob is returned.
    *
    * Web Crypto is exposed only in a secure frontend context (HTTPS or
    * localhost). If it is unavailable — or a digest operation rejects — the
@@ -387,11 +380,11 @@ export class TrainingApiClient {
    *   missing/malformed/mismatched header or body digest, or an unavailable
    *   Web Crypto platform. No Blob is produced unless every check passes.
    */
-  async downloadModelPackage(jobId: string, expectedSha256: string): Promise<Blob> {
-    const expected = requireSha256Hex(expectedSha256, 400, "invalid_expected_digest",
-      "Il digest SHA-256 atteso dal manifest del job non è valido");
+  async downloadModelPackage(jobId: string, packageName: string): Promise<Blob> {
+    const selectedPackageName = requirePackageName(packageName);
     requireWebCrypto();
-    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package`, {
+    const query = new URLSearchParams({ packageName: selectedPackageName });
+    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package?${query}`, {
       headers: this.authHeaders(),
     });
     if (!response.ok) throw await responseError(response);
@@ -403,14 +396,9 @@ export class TrainingApiClient {
     }
     const declared = requireSha256Hex(header, 502, "package_digest_invalid",
       "Il digest SHA-256 restituito dal server non è valido; il download è stato annullato");
-    if (declared !== expected) {
-      throw new BackendApiError(502, "package_digest_mismatch",
-        "Il digest SHA-256 restituito dal server non corrisponde al manifest del job; il download è stato annullato");
-    }
-
     const bytes = new Uint8Array(await response.arrayBuffer());
     const bodyDigest = await sha256Hex(bytes);
-    if (bodyDigest !== expected) {
+    if (bodyDigest !== declared) {
       throw new BackendApiError(502, "package_corrupted",
         "Il package scaricato non ha superato la verifica di integrità SHA-256; il download è stato annullato. Riprova o rigenera il job");
     }
@@ -503,6 +491,19 @@ export function canCancelTrainingJob(status: TrainingJobStatus["status"]): boole
   return status === "queued" || status === "running";
 }
 
+const PACKAGE_NAME = /^nnm_[A-Za-z][A-Za-z0-9_]*$/;
+
+export function requirePackageName(value: string): string {
+  if (!PACKAGE_NAME.test(value)) {
+    throw new BackendApiError(400, "invalid_package_name", "Il nome package deve avere il formato nnm_<nome>");
+  }
+  return value;
+}
+
+export function wheelFilename(packageName: string, version: string): string {
+  return `${requirePackageName(packageName)}-${version}-py3-none-any.whl`;
+}
+
 async function responseError(response: Response): Promise<BackendApiError> {
   const body = await response.json().catch(() => undefined) as ApiErrorBody | undefined;
   const detail = body?.detail;
@@ -551,7 +552,7 @@ function requireWebCrypto(): void {
  * rejecting digest operation is mapped to the same actionable platform error
  * as the upfront availability check, so verification never fails silently.
  */
-async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+export async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   let digest: ArrayBuffer;
   try {
     digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);

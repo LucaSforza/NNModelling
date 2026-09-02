@@ -1,6 +1,9 @@
 import {
   BackendApiError,
   TrainingApiClient,
+  requirePackageName,
+  sha256Hex,
+  wheelFilename,
   type DatasetInfo,
   type PairingGrant,
   type SessionInfo,
@@ -62,7 +65,6 @@ export interface TrainingConfig {
   gpuType?: string;
   node?: string;
   priority: number;
-  packageSuffix?: string;
 }
 
 export type TrainingConfigPatch = Partial<TrainingConfig>;
@@ -153,7 +155,7 @@ const DEFAULT_CONFIG: TrainingConfig = {
 };
 
 const CONFIG_KEYS = new Set(Object.keys(DEFAULT_CONFIG).concat([
-  "gpuMemoryGb", "gpuType", "node", "packageSuffix",
+  "gpuMemoryGb", "gpuType", "node",
 ]));
 
 /**
@@ -212,23 +214,13 @@ export class TrainingController {
     // project must never be reused for the new project's source files.
     this.projectDatasetReferences.clear();
     this.projectDatasetResources = new Map(resources);
-    this.datasets = [...this.datasets.filter((dataset) => dataset.reference.kind === "builtin"), ...datasets];
+    this.datasets = [...datasets];
     this.config = reconcileDatasetConfig(this.config, this.datasets);
     this.emit();
   }
 
   isSubmissionCurrent(generation: number): boolean {
     return this.generation === generation;
-  }
-
-  /** Install the browser-provided descriptor catalog and materialize defaults. */
-  setDatasets(datasets: readonly DatasetInfo[]): TrainingConfig {
-    this.datasets = datasets.map((dataset) => ({ ...dataset, definition: { ...dataset.definition, parameters: dataset.definition.parameters.map((parameter) => ({ ...parameter })) } }));
-    if (!this.config.selectedDataset && this.datasets[0]) {
-      this.config = { ...this.config, selectedDataset: this.datasets[0].reference.ref, datasetParams: datasetDefaults(this.datasets[0]) };
-    }
-    this.emit();
-    return this.getConfig();
   }
 
   /** Browser-only access for the sidebar's existing job and bundle actions. */
@@ -246,23 +238,25 @@ export class TrainingController {
   }
 
   /** Download a verified wheel for the paired owner without exposing its token. */
-  async downloadTrainingWheel(jobId: string): Promise<TrainingWheelDownload> {
+  async downloadTrainingWheel(jobId: string, packageName: string): Promise<TrainingWheelDownload> {
     if (this.connection.status !== "active") {
       throw new BackendApiError(401, "backend_not_connected", "Il backend di training non è connesso");
     }
     const job = await this.getApi().getTrainingJob(jobId);
     const manifest = job.model_package;
-    if (!manifest || !/^[0-9a-f]{64}$/i.test(manifest.sha256)) {
+    if (!manifest) {
       throw new BackendApiError(404, "package_unavailable", "Il job non espone un package verificabile");
     }
-    const blob = await this.getApi().downloadModelPackage(jobId, manifest.sha256);
+    const selectedPackageName = requirePackageName(packageName);
+    const blob = await this.getApi().downloadModelPackage(jobId, selectedPackageName);
     const bytes = new Uint8Array(await blob.arrayBuffer());
+    const sha256 = await sha256Hex(bytes);
     return {
       status: "ok",
       artifact: {
-        filename: manifest.wheel.split(/[\\/]/).pop() || "model.whl",
+        filename: wheelFilename(selectedPackageName, manifest.version),
         bytes: bytes.byteLength,
-        sha256: manifest.sha256.toLowerCase(),
+        sha256,
         base64: bytesToBase64(bytes),
       },
     };
@@ -368,7 +362,7 @@ export class TrainingController {
       throw new TrainingConfigurationError(`Campo di configurazione sconosciuto: ${unknown.join(", ")}`, { fields: unknown });
     }
     const normalizedPatch = { ...patch } as Record<string, unknown>;
-    for (const key of ["gpuMemoryGb", "gpuType", "node", "packageSuffix"]) {
+    for (const key of ["gpuMemoryGb", "gpuType", "node"]) {
       if (normalizedPatch[key] === null) normalizedPatch[key] = undefined;
     }
     const next = { ...this.config, ...normalizedPatch, datasetParams: patch.datasetParams === undefined
@@ -470,25 +464,8 @@ export class TrainingController {
         ...(config.node ? { node: config.node } : {}),
       },
       priority: config.priority,
-      ...(config.packageSuffix ? { package_name: `nnm_${config.packageSuffix}` } : {}),
     };
     return { request, bundle, bundleRef: uploaded.bundle_ref, snapshotDigest: bundle.digest, generation, diagramFingerprint, exportScope, uploaded };
-  }
-
-  async refreshDatasets(): Promise<DatasetInfo[]> {
-    const generation = this.generation;
-    const datasets = await this.getApi().listDatasets();
-    if (generation !== this.generation) return this.getDatasets();
-    const selected = this.config.selectedDataset;
-    this.setDatasets([...datasets, ...this.datasets.filter((dataset) => dataset.reference.kind === "project")]);
-    if (selected) {
-      const current = datasets.find((dataset) => dataset.reference.ref === selected);
-      if (current) {
-        this.config = { ...this.config, datasetParams: mergeDatasetDefaults(current, this.config.datasetParams) };
-        this.emit();
-      }
-    }
-    return this.getDatasets();
   }
 
   private async checkPairing(): Promise<void> {
@@ -525,7 +502,6 @@ export class TrainingController {
       error: null,
     };
     this.emit();
-    await this.refreshDatasets();
   }
 
   private startPairingTimer(): void {
@@ -625,7 +601,6 @@ function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]
   integerAtLeast(config.gpu, "gpu", 0);
   if (config.gpuMemoryGb !== undefined) positive(config.gpuMemoryGb, "gpuMemoryGb");
   integer(config.priority, "priority");
-  if (config.packageSuffix && !/^[A-Za-z][A-Za-z0-9_]*$/.test(config.packageSuffix)) throw invalid("packageSuffix", "formato non valido");
 }
 
 function validateDatasetValue(parameter: DatasetInfo["definition"]["parameters"][number], value: unknown): void {
