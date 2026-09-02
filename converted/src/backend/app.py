@@ -24,7 +24,6 @@ from backend.auth import (
     ValkeyAuthStore,
     parse_duration,
 )
-from backend.dataset_registry import discover_datasets
 from backend.dataset_store import DatasetArchiveStore, DatasetArchiveValidationError
 from backend.manager import JobManager, PackageIntegrityError, _remove_file
 from backend.package_store import BundleNotFoundError, PackageStore
@@ -260,7 +259,9 @@ def create_app(
     async def datasets(
         _connection: dict[str, Any] = Depends(current_connection),
     ) -> list[dict[str, Any]]:
-        return [dataset.model_dump(mode="json") for dataset in discover_datasets()]
+        """Return the backend catalog; datasets are supplied by the project."""
+
+        return []
 
     @app.get("/dataset-archives/capabilities", response_model=DatasetArchiveCapabilities)
     async def dataset_archive_capabilities(
@@ -448,23 +449,21 @@ def create_app(
     @app.get("/jobs/{job_id}/package")
     async def download_model_package(
         job_id: str,
+        package_name: str = Query(..., alias="packageName", min_length=5, max_length=100),
         connection: dict[str, Any] = Depends(current_connection),
     ) -> FileResponse:
-        """Download the authenticated job's generated pip wheel.
+        """Download the authenticated job's wheel under a chosen package name.
 
-        The wheel is streamed into a private immutable snapshot and hashed
-        from that single opened source handle before any byte is served; the
-        snapshot digest must match the manifest, and only the verified
-        snapshot is transferred (never the mutable artifact path). A corrupted
-        or replaced wheel is rejected with ``409 Conflict`` and never
-        downloaded. On success the verified digest is exposed through the
-        ``X-NNM-SHA256`` response header and the snapshot is removed once the
-        response completes or fails.
+        The server verifies its immutable template, rebuilds the wheel so the
+        requested import package is real, then streams that generated wheel
+        from a private snapshot. The response digest covers exactly those
+        bytes and is exposed through ``X-NNM-SHA256``.
         """
 
         try:
             path, filename, digest = app.state.manager.package_download(
                 job_id,
+                package_name=package_name,
                 owner_connection_id=connection["id"],
             )
         except KeyError as exc:
@@ -476,6 +475,8 @@ def create_app(
                 status_code=409,
                 detail={"code": "package_integrity_error", "message": str(exc)},
             ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _verified_snapshot_response(path, filename, digest)
 
     @app.get("/jobs/{job_id}/events")

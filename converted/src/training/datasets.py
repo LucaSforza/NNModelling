@@ -10,7 +10,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from backend.dataset_registry import build_dataset
 from dataset.contracts import DatasetContext, DatasetDefinition, DatasetReference
 
 
@@ -23,12 +22,6 @@ def resolve_dataset(request: Mapping[str, Any]) -> tuple[Any, DatasetDefinition,
     parameters = raw.get("parameters", {})
     if not isinstance(parameters, Mapping):
         raise ValueError("training.dataset.parameters must be an object")
-    if reference.kind == "builtin":
-        normalized = _builtin_parameters(reference, parameters)
-        definition = __import__("backend.dataset_registry", fromlist=["resolve_dataset"]).resolve_dataset(reference).definition
-        dataset = build_dataset(reference, normalized, DatasetContext(_resource_root(), reference))
-        return dataset, definition, reference, normalized
-
     root = _resource_root()
     definition = DatasetDefinition.model_validate(json.loads((root / "dataset.json").read_text(encoding="utf-8")))
     if (definition.id, definition.version) != (reference.id, reference.version):
@@ -50,12 +43,6 @@ def _resource_root() -> Path:
     if not root.is_dir():
         raise ValueError("dataset resource root is unavailable")
     return root
-
-
-def _builtin_parameters(reference: DatasetReference, raw: Mapping[str, Any]) -> dict[str, Any]:
-    from backend.dataset_registry import validate_dataset_parameters
-
-    return validate_dataset_parameters(reference, raw)
 
 
 def _project_parameters(definition: DatasetDefinition, raw: Mapping[str, Any]) -> dict[str, Any]:

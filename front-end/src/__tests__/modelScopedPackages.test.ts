@@ -15,7 +15,7 @@ import klDefinition from "../../../examples/diagrams/package/models/variational-
 import klInference from "../../../examples/diagrams/package/models/variational-autoencoder/packages/kl-divergence/inference.lua?raw"
 
 const modelPath = resolve(fileURLToPath(new URL("../../../examples/diagrams/package/models/variational-autoencoder/model.json", import.meta.url)))
-const exampleIndexPath = resolve(fileURLToPath(new URL("../../../examples/manifest.json", import.meta.url)))
+const datasetManifestPath = resolve(fileURLToPath(new URL("../../../examples/diagrams/package/models/variational-autoencoder/datasets/autoencoder-mnist/manifest.json", import.meta.url)))
 let host: TypeSystemHost | undefined
 
 afterEach(async () => {
@@ -24,16 +24,12 @@ afterEach(async () => {
 })
 
 describe("model-scoped VAE packages", () => {
-  test("indexes package-native model bundles at their canonical paths", async () => {
-    const index = JSON.parse(await readFile(exampleIndexPath, "utf8")) as {
-      packageModels: Record<string, string>
-    }
-
-    expect(index.packageModels).toEqual({
-      resnet: "diagrams/package/models/resnet/model.json",
-      transformer: "diagrams/package/models/transformer/model.json",
-      "variational-autoencoder": "diagrams/package/models/variational-autoencoder/model.json",
-      "variational-autoencoder-simple": "diagrams/package/models/variational-autoencoder/simple.json",
+  test("keeps the VAE model and dataset at their canonical package-owned paths", async () => {
+    expect(JSON.parse(await readFile(modelPath, "utf8"))).toHaveProperty("manifest")
+    expect(JSON.parse(await readFile(datasetManifestPath, "utf8"))).toMatchObject({
+      id: "example.vae-mnist",
+      version: "0.1.0",
+      entrypoints: { definition: "dataset.json", python: "dataset.py" },
     })
   })
 

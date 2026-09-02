@@ -27,13 +27,10 @@ from .contracts import (
     parse_model_manifest,
     serialize_dataset_definition,
 )
-from .ds import named_batch
-
 __all__ = [
     "DatasetBatchContract", "DatasetBuilder", "DatasetClassMetadata", "DatasetContext",
     "DatasetContractError", "DatasetDefinition", "DatasetParameter", "DatasetReference",
     "DatasetSourceManifest", "ModelDatasetReference", "ModelManifestV2",
     "ModelPackageReference", "TensorSlotContract", "TrainingBatch",
-    "named_batch",
     "normalize_training_batch", "parse_model_manifest", "serialize_dataset_definition",
 ]

@@ -13,9 +13,12 @@ from dataset.contracts import DatasetBatchContract, DatasetDefinition, DatasetRe
 from package_runtime import PackageValidationError
 from package_worker import _dataset_loaders, _normalized_training, _validate_graph_bindings, run, train
 
-REFERENCE = DatasetReference(kind="builtin", id="builtin.mnist", version="1.0.0", ref="builtin_mnist")
+REFERENCE = DatasetReference(
+    kind="project", id="demo.dataset", version="1.0.0",
+    ref="dataset_aaaaaaaaaaaaaaaaaaaaaaaa", digest="a" * 64,
+)
 DEFINITION = DatasetDefinition(
-    id="builtin.mnist", version="1.0.0", name="MNIST",
+    id="demo.dataset", version="1.0.0", name="Demo dataset",
     batch=DatasetBatchContract(
         inputs={"image": TensorSlotContract(shape=("B", 1), dtype="float32")},
         targets={"label": TensorSlotContract(shape=("B",), dtype="int64")},
@@ -143,7 +146,7 @@ def test_graph_bindings_compare_transformed_objective_target_contract() -> None:
 
     with pytest.raises(ValueError, match="objective target 'label'.*incompatible shape"):
         _validate_graph_bindings(package, DatasetDefinition(
-            id="builtin.mnist", version="1.0.0", name="MNIST",
+            id="demo.dataset", version="1.0.0", name="Demo dataset",
             batch=DatasetBatchContract(
                 inputs={"image": TensorSlotContract(shape=("B", 1), dtype="float32")},
                 targets={"label": TensorSlotContract(shape=("B", 1, 2), dtype="int64")},

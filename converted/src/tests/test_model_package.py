@@ -15,7 +15,7 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from model_package.adapters import adapter_spec_from_definition
-from model_package.exporter import _architecture_fingerprint, build_model_wheel
+from model_package.exporter import _architecture_fingerprint, build_model_wheel, repackage_model_wheel
 from package_runtime.compiler import compile_package_graph
 
 
@@ -225,6 +225,42 @@ def test_wheel_normalizes_graph_only_training_state(tmp_path: Path) -> None:
         assert output.shape == (3, 2)
     finally:
         _cleanup("inner_state", wheel)
+
+
+def test_download_name_is_a_real_importable_package(tmp_path: Path) -> None:
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input"},
+            {"id": "linear", "type": "layer", "package": {"id": "core.linear", "version": "0.1.0"}, "parameters": {"in_features": 1, "out_features": 1}},
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    save_file(compile_package_graph(bundle).state_dict(), source_dir / "weights.safetensors")
+    source = build_model_wheel(source_dir, package_name="nnm_template", package=bundle)
+    downloaded = repackage_model_wheel(source, tmp_path / "downloads", package_name="nnm_vae")
+
+    assert downloaded.name == "nnm_vae-0.1.0-py3-none-any.whl"
+    with zipfile.ZipFile(downloaded) as archive:
+        names = set(archive.namelist())
+        assert "nnm_vae/__init__.py" in names
+        assert "nnm_vae-0.1.0.dist-info/METADATA" in names
+        assert b"Name: nnm_vae\n" in archive.read("nnm_vae-0.1.0.dist-info/METADATA")
+    sys.path.insert(0, str(downloaded))
+    module = importlib.import_module("nnm_vae")
+    try:
+        assert module.Model().predict_tensor(torch.randn(2, 1)).shape == (2, 1)
+    finally:
+        sys.path.remove(str(downloaded))
+        for module_name in list(sys.modules):
+            if module_name == "nnm_vae" or module_name.startswith("nnm_vae."):
+                del sys.modules[module_name]
 
 
 @pytest.mark.parametrize(

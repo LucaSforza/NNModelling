@@ -12,43 +12,38 @@ def _training() -> dict[str, object]:
     return {
         "dataset": {
             "reference": {
-                "kind": "builtin",
-                "id": "builtin.mnist",
+                "kind": "project",
+                "id": "demo.dataset",
                 "version": "1.0.0",
-                "ref": "builtin_mnist",
+                "ref": "dataset_aaaaaaaaaaaaaaaaaaaaaaaa",
+                "digest": "a" * 64,
             },
         },
     }
 
 
-def test_dataset_parameters_are_typed_and_owned_by_descriptor() -> None:
+def test_project_dataset_parameters_remain_opaque_until_owned_archive_resolution() -> None:
     submission = JobSubmission(
         network={"format": "package", "value": {"graph": {}, "bundle_ref": "bundle-1"}},
         training={
             **_training(),
             "dataset": {
                 "reference": {
-                    "kind": "builtin", "id": "builtin.mnist",
-                    "version": "1.0.0", "ref": "builtin_mnist",
+                    "kind": "project", "id": "demo.dataset",
+                    "version": "1.0.0", "ref": "dataset_aaaaaaaaaaaaaaaaaaaaaaaa", "digest": "a" * 64,
                 },
                 "parameters": {"batch_size": "64", "num_workers": "0", "train_size": "0.05"},
             },
         },
     )
 
-    assert submission.training.dataset.parameters == {"batch_size": 64, "num_workers": 0, "train_size": 0.05}
+    assert submission.training.dataset.parameters == {"batch_size": "64", "num_workers": "0", "train_size": "0.05"}
 
-    with pytest.raises(ValidationError, match="unknown dataset parameter"):
-        JobSubmission(
-            network={"format": "package", "value": {"graph": {}, "bundle_ref": "bundle-1"}},
-            training={**_training(), "dataset": {**_training()["dataset"], "parameters": {"nope": 1}}},
-        )
-
-    with pytest.raises(ValidationError, match="unknown dataset parameter"):
-        JobSubmission(
-            network={"format": "package", "value": {"graph": {}, "bundle_ref": "bundle-1"}},
-            training={**_training(), "dataset": {**_training()["dataset"], "parameters": {"root": "/tmp"}}},
-        )
+    opaque = JobSubmission(
+        network={"format": "package", "value": {"graph": {}, "bundle_ref": "bundle-1"}},
+        training={**_training(), "dataset": {**_training()["dataset"], "parameters": {"root": "/tmp"}}},
+    )
+    assert opaque.training.dataset.parameters == {"root": "/tmp"}
 
 
 def test_job_submission_accepts_only_package_network_format() -> None:
@@ -70,7 +65,17 @@ def test_job_submission_accepts_only_package_network_format() -> None:
                 "format": "package",
                 "value": {"graph": {"nodes": [], "edges": []}, "bundle_ref": "bundle-1"},
             },
-            training={"dataset": {"target": "dataset.mnist.MNISTDataset"}},
+            training={"dataset": {"target": "dataset.legacy.Dataset"}},
+        )
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        JobSubmission(
+            network={
+                "format": "package",
+                "value": {"graph": {"nodes": [], "edges": []}, "bundle_ref": "bundle-1"},
+            },
+            training=_training(),
+            package_name="nnm_legacy",
         )
 
     with pytest.raises(ValidationError, match="overrides"):

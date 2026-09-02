@@ -115,7 +115,7 @@ def test_reference_requires_opaque_project_digest() -> None:
 
 def test_opaque_request_has_no_python_target_or_path() -> None:
     request = OpaqueDatasetRequest(
-        reference={"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist"},
+        reference={"kind": "project", "id": "demo.tokens", "version": "1.0.0", "ref": "dataset_aaaaaaaaaaaaaaaaaaaaaaaa", "digest": "a" * 64},
         parameters={"batch_size": 32},
     )
     payload = request.model_dump(mode="json")
@@ -125,17 +125,22 @@ def test_opaque_request_has_no_python_target_or_path() -> None:
     assert "path" not in payload["reference"]
     with pytest.raises(ValidationError):
         OpaqueDatasetRequest(
-            reference={"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist"},
+            reference={"kind": "project", "id": "demo.tokens", "version": "1.0.0", "ref": "dataset_aaaaaaaaaaaaaaaaaaaaaaaa", "digest": "a" * 64},
             parameters={"root": Path("/tmp")},
+        )
+
+    with pytest.raises(ValidationError):
+        OpaqueDatasetRequest(
+            reference={"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist"},
         )
 
     submission = JobSubmission(
         network={"format": "package", "value": {"graph": {}, "bundle_ref": "bundle-1"}},
         training={
             "dataset": {
-                "reference": {"kind": "builtin", "id": "builtin.mnist", "version": "1.0.0", "ref": "builtin_mnist"},
+                "reference": {"kind": "project", "id": "demo.tokens", "version": "1.0.0", "ref": "dataset_aaaaaaaaaaaaaaaaaaaaaaaa", "digest": "a" * 64},
                 "parameters": {"batch_size": 32},
             }
         },
     )
-    assert submission.training.dataset.reference.ref == "builtin_mnist"  # type: ignore[union-attr]
+    assert submission.training.dataset.reference.ref == "dataset_aaaaaaaaaaaaaaaaaaaaaaaa"  # type: ignore[union-attr]

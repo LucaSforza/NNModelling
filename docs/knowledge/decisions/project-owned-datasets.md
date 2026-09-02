@@ -129,11 +129,9 @@ TrainingBatch(
 
 ## Shared dataset package contract
 
-Built-in and project-owned datasets use the same versioned manifest,
-definition, parameter and batch contracts. Built-ins remain trusted resources
-baked into the worker image and may read operator-mounted data; project
-datasets are untrusted uploaded resources. Source changes storage and trust,
-not dataset semantics or the training UI schema.
+The only supported dataset runtime is the project-owned dataset contract.
+Project datasets are untrusted uploaded resources and their source changes
+storage and trust, not dataset semantics or the training UI schema.
 
 The Python entrypoint exposes a fixed builder equivalent to:
 
@@ -147,9 +145,9 @@ dataset owns `division()` and produces train, validation and test DataLoaders
 whose items normalize to `TrainingBatch`. Declarative parameter definitions,
 not FastAPI signature inspection, drive the UI and request validation.
 
-MNIST, AutoencoderMNIST and Enron migrate to this contract. The frontend lists
-built-ins reported by the backend together with only the custom datasets
-declared by the current project.
+The canonical example is the VAE's project-owned
+`example.vae-mnist@0.1.0` dataset. There is no backend built-in dataset
+registry or Python import target to discover.
 
 ## Transport and execution
 
@@ -165,9 +163,6 @@ declared by the current project.
   least-privilege worker used for browser-supplied package Python. The worker's
   fixed loader imports the declared dataset entrypoint only inside that
   container.
-- Built-in datasets resolve through the same descriptor API without an upload;
-  their code remains in the trusted worker image and their data remains an
-  operator-controlled read-only mount.
 - Training requests never contain a Python import target, browser path or host
   path. They contain an opaque resolved dataset reference and typed parameters.
 

@@ -38,7 +38,7 @@ contains:
 - `training`: an opaque resolved dataset reference with typed parameters,
   optimizer, trainer, W&B and early stopping;
 - `resources`: CPU, memory, GPU and optional controller selectors;
-- `priority` and optional `nnm_<name>` package name.
+- `priority` only; the importable wheel name is selected at download time.
 
 The current public lifecycle is:
 
@@ -66,10 +66,8 @@ and must be reassessed against current code before becoming a new plan.
   through a Podman/Docker controller.
 - Artifacts default to `converted/jobs/<job-id>/` and may be relocated with
   `NNM_BACKEND_ARTIFACT_ROOT`.
-- Built-in and project-owned datasets share declarative parameters and named
-  input/target tensor-slot contracts. Project dataset archives are bounded,
-  content-addressed and ownership-scoped; their Python executes only inside
-  the worker. See
+- Project dataset archives are bounded, content-addressed and
+  ownership-scoped; their Python executes only inside the worker. See
   [Project-owned datasets](../decisions/project-owned-datasets.md).
 - Job access is scoped to an authenticated browser connection; see
   [Pairing and ownership](../contracts/pairing.md).
@@ -86,6 +84,13 @@ and must be reassessed against current code before becoming a new plan.
 - `front-end/src/components/TrainingSidebar.svelte`: browser workflow.
 - `front-end/src/training/api.ts`: browser REST/SSE client.
 - `mcp-server/src/remote-training.ts`: optional authenticated HTTP client.
+
+Wheel downloads require `GET /jobs/{id}/package?packageName=nnm_<suffix>`.
+`packageName` is validated server-side and is never accepted in
+`JobSubmission` or persisted training configuration. The backend rebuilds the
+wheel package directory and dist-info under that name, recomputes `RECORD`,
+and returns the digest of those exact bytes in `X-NNM-SHA256`. Clients must
+verify that response digest and the downloaded body.
 
 ## MCP provenance
 

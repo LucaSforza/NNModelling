@@ -132,13 +132,12 @@ loss behavior is never selected by output-shape heuristics or a package-ID
 special case. The accepted compilation and target-binding model is defined by
 the [prediction/objective program decision](prediction-objective-programs.md).
 
-Built-in datasets are packaged in the trusted worker image and may use
-operator-managed mounts. A project may also upload a complete dataset package
-as untrusted content-addressed data. FastAPI validates its declarative contract
-but never imports its Python; only the least-privilege worker loads it from a
-server-resolved read-only mount. The browser cannot provide an import path or
-host path. Network and W&B online mode are disabled unless the operator
-explicitly enables a policy that grants only the required egress.
+The VAE project dataset is uploaded as untrusted content-addressed data.
+FastAPI validates its declarative contract but never imports its Python; only
+the least-privilege worker loads it from a server-resolved read-only mount.
+The browser cannot provide an import path or host path. Network and W&B online
+mode are disabled unless the operator explicitly enables a policy that grants
+only the required egress.
 
 Project dataset ownership, named training batches and the bounded upload v1 are
 defined by the
@@ -148,11 +147,13 @@ dataset transfer is not implied by accepting browser-supplied dataset code.
 ## Artifact contract
 
 The worker produces safetensors and resolved metadata as intermediate files,
-then builds the portable wheel before the job can become `succeeded`. The
-wheel contains the package-native runtime, vendored package resources, the
-resolved semantic graph, declarative input adapters and verified weights. The
-authenticated download remains `GET /jobs/{id}/package` with an SHA-256
-manifest.
+then builds a server-named template wheel before the job can become
+`succeeded`. The wheel contains the package-native runtime, vendored package
+resources, the resolved semantic graph, declarative input adapters and
+verified weights. Authenticated download is
+`GET /jobs/{id}/package?packageName=nnm_<suffix>`; the server regenerates
+the importable package under the requested name and returns the digest of the
+served bytes.
 
 The `training_package` status field, `/training-package` endpoint,
 `nnm-trained-package/v1` ZIP and checkout-dependent VAE consumer are removed.

@@ -1,4 +1,4 @@
-"""Versioned, declarative contracts shared by built-in and project datasets."""
+"""Versioned, declarative contracts for project-owned datasets."""
 
 from __future__ import annotations
 
@@ -189,11 +189,11 @@ class DatasetSourceManifest(BaseModel):
 
 
 class DatasetReference(BaseModel):
-    """Opaque resolved reference; it is not a Python target or filesystem path."""
+    """Opaque project-owned reference; it is not a Python target or path."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    kind: Literal["builtin", "project"]
+    kind: Literal["project"]
     id: str = Field(pattern=_ID)
     version: str = Field(pattern=_VERSION)
     ref: str = Field(min_length=1)

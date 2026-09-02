@@ -17,7 +17,6 @@ from dataset.contracts import (
 
 GPU_TYPE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 NODE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-,\[\]]*")
-PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
 
 
 class NetworkPayload(BaseModel):
@@ -143,17 +142,8 @@ class OpaqueDatasetRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_descriptor_parameters(self) -> "OpaqueDatasetRequest":
-        """Validate values against the fixed descriptor, never a constructor."""
+        """Keep project parameters opaque until the owned archive is resolved."""
 
-        if self.reference.kind == "project":
-            # The authenticated archive descriptor is resolved by JobManager;
-            # parsing the opaque request must not grant the API a filesystem or
-            # import capability before ownership has been checked.
-            return self
-
-        from backend.dataset_registry import validate_dataset_parameters
-
-        self.parameters = validate_dataset_parameters(self.reference, self.parameters)
         return self
 
 
@@ -214,7 +204,6 @@ class JobSubmission(BaseModel):
     training: TrainingRequest
     resources: ResourceRequest = Field(default_factory=ResourceRequest)
     priority: int = Field(default=0, ge=0, le=1_000_000)
-    package_name: str | None = Field(default=None, max_length=100)
 
     @field_validator("schema_version")
     @classmethod
@@ -228,24 +217,12 @@ class JobSubmission(BaseModel):
             raise ValueError("schema_version must be 1; other versions are not supported")
         return value
 
-    @field_validator("package_name")
-    @classmethod
-    def package_name_has_required_prefix(cls, value: str | None) -> str | None:
-        """Accept Python-importable package names with the required prefix."""
-
-        if value is None:
-            return None
-        if not PACKAGE_NAME.fullmatch(value):
-            raise ValueError("package_name must match nnm_<name> using letters, digits, and underscores")
-        return value
-
-
 # Keep the public import name aligned with the shared declarative contract.
 DatasetParameter = DatasetContractParameter
 
 
 class DatasetInfo(BaseModel):
-    """One descriptor shape shared by built-in and project datasets.
+    """One descriptor shape for a project-owned dataset.
 
     ``reference`` is an opaque selection handle.  In particular, no Python
     module or class target is serialized in the public registry response.
