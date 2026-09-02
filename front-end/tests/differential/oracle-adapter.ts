@@ -1,7 +1,7 @@
 import { resolve } from "node:path"
 import { pathToFileURL, fileURLToPath } from "node:url"
 
-import { Context } from "@deepseek-ai/cordis"
+import { Context } from "cordis"
 
 import { PROTOCOL_VERSION, parseRequest, type InputInferenceRequest, type ModelInferenceRequest, type ProtocolOutcome, type ProtocolRequest, type ProtocolResponse, type TensorType } from "./protocol"
 

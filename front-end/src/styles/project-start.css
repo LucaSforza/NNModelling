@@ -1,0 +1,180 @@
+:root {
+  --project-ink: #172033;
+  --project-muted: #60708a;
+  --project-border: #d9e1ee;
+  --project-blue: #315fc4;
+  --project-blue-dark: #244ba3;
+  --project-focus: #86aaf7;
+}
+
+.project-start {
+  position: relative;
+  min-height: 100vh;
+  width: 100vw;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(20px, 5vw, 64px);
+  background:
+    radial-gradient(circle at 8% 4%, rgb(210 226 255 / 82%), transparent 34%),
+    radial-gradient(circle at 94% 92%, rgb(220 214 255 / 60%), transparent 36%),
+    linear-gradient(135deg, #f7f9fd 0%, #eef2f8 100%);
+  color: var(--project-ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.project-start::before,
+.project-start::after {
+  position: absolute;
+  z-index: 0;
+  width: min(34vw, 420px);
+  aspect-ratio: 1;
+  border: 1px solid rgb(91 119 183 / 14%);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+}
+
+.project-start::before { top: -18%; left: -11%; box-shadow: 0 0 0 26px rgb(91 119 183 / 4%), 0 0 0 54px rgb(91 119 183 / 3%); }
+.project-start::after { right: -12%; bottom: -24%; box-shadow: 0 0 0 26px rgb(91 119 183 / 4%), 0 0 0 54px rgb(91 119 183 / 3%); }
+
+.project-start .project-card,
+.project-start .project-form {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 560px);
+  box-sizing: border-box;
+  border: 1px solid rgb(217 225 238 / 92%);
+  border-radius: 24px;
+  background: rgb(255 255 255 / 91%);
+  box-shadow: 0 28px 80px rgb(39 59 99 / 15%), 0 4px 14px rgb(39 59 99 / 7%);
+  backdrop-filter: blur(16px);
+}
+
+.project-start .project-card { padding: clamp(28px, 6vw, 58px); }
+.project-start .project-form { padding: clamp(24px, 5vw, 46px); }
+
+.project-start .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 13px;
+  color: var(--project-blue);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.project-start .eyebrow::before {
+  width: 20px;
+  height: 3px;
+  border-radius: 99px;
+  background: currentColor;
+  content: "";
+}
+
+.project-start h1 { margin: 0; font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.045em; line-height: 1.04; }
+
+.project-start .project-lead {
+  max-width: 38ch;
+  margin: 17px 0 32px;
+  color: var(--project-muted);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.project-start .project-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.project-start .primary,
+.project-start .secondary {
+  min-height: 46px;
+  box-sizing: border-box;
+  padding: 11px 17px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 750;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.project-start .primary { border-color: var(--project-blue); background: var(--project-blue); color: #fff; box-shadow: 0 7px 16px rgb(49 95 196 / 22%); }
+.project-start .primary:hover:not(:disabled) { border-color: var(--project-blue-dark); background: var(--project-blue-dark); box-shadow: 0 9px 20px rgb(49 95 196 / 27%); transform: translateY(-1px); }
+.project-start .secondary { border-color: var(--project-border); background: rgb(255 255 255 / 78%); color: #2c4775; }
+.project-start .secondary:hover:not(:disabled) { border-color: #abc0e7; background: #f5f8ff; color: var(--project-blue-dark); transform: translateY(-1px); }
+.project-start .primary:disabled, .project-start .secondary:disabled { cursor: wait; opacity: 0.62; transform: none; }
+
+.project-start .project-form-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 30px;
+}
+
+.project-start .project-form label {
+  display: grid;
+  gap: 8px;
+  margin-top: 19px;
+  color: #33435e;
+  font-size: 0.84rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.project-start .project-form label span,
+.project-start .project-form small { color: #72819a; font-weight: 450; }
+.project-start .project-form small { font-size: 0.74rem; line-height: 1.45; }
+
+.project-start .project-form input,
+.project-start .project-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd6e7;
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: rgb(255 255 255 / 83%);
+  color: var(--project-ink);
+  font: inherit;
+  font-size: 0.93rem;
+  font-weight: 450;
+  line-height: 1.4;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.project-start .project-form input::placeholder,
+.project-start .project-form textarea::placeholder { color: #99a7ba; }
+.project-start .project-form textarea { min-height: 92px; resize: vertical; }
+.project-start .project-form input:hover, .project-start .project-form textarea:hover { border-color: #aebed7; }
+.project-start .project-form input:focus, .project-start .project-form textarea:focus { border-color: var(--project-focus); outline: none; background: #fff; box-shadow: 0 0 0 4px rgb(134 170 247 / 18%); }
+.project-start .project-form > .primary { width: 100%; margin-top: 27px; }
+
+.project-start .project-error,
+.project-start .project-message {
+  margin: 19px 0 0;
+  padding: 11px 13px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.project-start .project-error { border-color: #efc2c2; background: #fff6f6; color: #9b3030; }
+.project-start .project-message { border-color: #b9dcc4; background: #f3fbf5; color: #276a38; }
+
+@media (max-width: 520px) {
+  .project-start { align-items: start; padding-top: 32px; }
+  .project-start .project-card, .project-start .project-form { border-radius: 18px; }
+  .project-start .project-actions > button { width: 100%; }
+  .project-start .project-form-heading { flex-direction: column; }
+  .project-start .project-form-heading > .secondary { align-self: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-start .primary, .project-start .secondary, .project-start .project-form input, .project-start .project-form textarea { transition: none; }
+}

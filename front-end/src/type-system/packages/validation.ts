@@ -86,7 +86,7 @@ function parseAdapterRandomness(value: unknown): { readonly mode: "none" } | { r
   fail("wheel adapter randomness is invalid")
 }
 
-function parseObjective(value: unknown, kind: PackageKind): { readonly externalInputs: readonly { readonly name: string; readonly source: "batch.targets"; readonly transform?: "flatten_batch" }[] } {
+function parseObjective(value: unknown, kind: PackageKind): { readonly externalInputs: readonly { readonly name: string; readonly source: `batch.targets.${string}`; readonly transform?: "flatten_batch" }[] } {
   if (kind !== "loss") fail("only loss packages may declare an objective")
   const object = record(value, "objective")
   keys(object, ["externalInputs"], "objective")
@@ -97,12 +97,12 @@ function parseObjective(value: unknown, kind: PackageKind): { readonly externalI
     const item = record(entry, "objective external input")
     keys(item, ["name", "source", "transform"], "objective external input")
     const name = string(item.name, "objective external input name")
-    if (!name.trim() || names.has(name)) fail("objective external input names must be unique")
-    if (item.source !== "batch.targets" || sources.has(String(item.source))) fail("objective external input source is invalid or duplicated")
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || names.has(name)) fail("objective external input names must be unique valid identifiers")
+    if (typeof item.source !== "string" || !/^batch\.targets\.[A-Za-z_][A-Za-z0-9_]*$/.test(item.source) || sources.has(item.source)) fail("objective external input source is invalid or duplicated")
     if (item.transform !== undefined && item.transform !== "flatten_batch") fail("objective external input transform is invalid")
     names.add(name)
     sources.add(String(item.source))
-    return { name, source: "batch.targets" as const, ...(item.transform === undefined ? {} : { transform: item.transform as "flatten_batch" }) }
+    return { name, source: item.source as `batch.targets.${string}`, ...(item.transform === undefined ? {} : { transform: item.transform as "flatten_batch" }) }
   })
   return { externalInputs }
 }

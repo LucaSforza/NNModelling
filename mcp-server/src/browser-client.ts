@@ -48,6 +48,7 @@ export interface BrowserRPCClientConfig {
   port?: number;
   requestTimeout?: number;
 }
+export type BrowserNotification = (tabId: string, method: string, params: Record<string, unknown>) => void | Promise<void>;
 
 /**
  * BrowserRPCClient — WebSocket server that accepts multiple browser
@@ -75,6 +76,7 @@ export class BrowserRPCClient {
   private host: string;
   private port: number;
   private requestTimeout: number;
+  private readonly notificationListeners = new Set<BrowserNotification>();
 
   constructor(config?: BrowserRPCClientConfig) {
     this.host = config?.host ?? "localhost";
@@ -215,6 +217,11 @@ export class BrowserRPCClient {
     return this.activeTab;
   }
 
+  onNotification(listener: BrowserNotification): () => void {
+    this.notificationListeners.add(listener);
+    return () => this.notificationListeners.delete(listener);
+  }
+
   // ── Private ────────────────────────────────────────────────────────
 
   private handleConnection(ws: WebSocket): void {
@@ -304,7 +311,13 @@ export class BrowserRPCClient {
       return; // Ignore non-JSON messages
     }
 
-    if (!msg.id) return;
+    if (!msg.id) {
+      const notification = msg as unknown as { method?: unknown; params?: unknown };
+      if (typeof notification.method === "string" && notification.params && typeof notification.params === "object") {
+        for (const listener of this.notificationListeners) void listener(tabId, notification.method, notification.params as Record<string, unknown>);
+      }
+      return;
+    }
 
     const entry = this.clients.get(tabId);
     if (!entry) return;

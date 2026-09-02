@@ -388,7 +388,11 @@ def controller_main(argv: list[str]) -> int:
     except (OSError, ValueError) as exc:
         print(f"controller token unavailable: {exc}", file=sys.stderr)
         return 1
-    dataset_root = _dataset_root()
+    # Built-in data lives under ``converted/data`` while project archives are
+    # extracted under ``converted/jobs/<job>/dataset``.  Both are manager-owned
+    # paths below this shared root; the controller still rejects everything
+    # outside it during per-job validation.
+    dataset_root = Path(input_root).resolve().parent
     controller = ContainerController(engine=CliEngineAdapter(engine), input_root=Path(input_root), artifact_root=Path(artifact_root), dataset_root=dataset_root)
     serve_unix(controller, Path(socket_name), token=token)
     return 0

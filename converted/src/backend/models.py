@@ -5,12 +5,18 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
+
+from dataset.contracts import (
+    DatasetDefinition,
+    DatasetParameter as DatasetContractParameter,
+    DatasetReference,
+    DatasetSourceManifest,
+)
 
 
 GPU_TYPE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 NODE_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-,\[\]]*")
-PACKAGE_NAME = re.compile(r"nnm_[A-Za-z][A-Za-z0-9_]*\Z")
 
 
 class NetworkPayload(BaseModel):
@@ -66,6 +72,26 @@ class PackageBundleInfo(BaseModel):
     size: int = Field(ge=0)
 
 
+class DatasetArchiveInfo(BaseModel):
+    """Opaque result of one complete project dataset archive upload."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference: DatasetReference
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=0)
+    limit: int = Field(gt=0)
+
+
+class DatasetArchiveCapabilities(BaseModel):
+    """Backend-advertised limits for the deliberately bounded upload path."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    format: Literal["zip"] = "zip"
+    max_bytes: int = Field(gt=0)
+
+
 class ResourceRequest(BaseModel):
     """Resources requested by a job from a compute-unit profile."""
 
@@ -99,20 +125,30 @@ class ResourceRequest(BaseModel):
         return value
 
 
-class DatasetRequest(BaseModel):
-    """Dataset constructor and bounded split configuration."""
+class OpaqueDatasetRequest(BaseModel):
+    """Phase-two request shape; no import target or filesystem path is accepted."""
 
     model_config = ConfigDict(extra="forbid")
 
-    target: str = Field(min_length=1, max_length=240)
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    reference: DatasetReference
+    parameters: dict[str, StrictStr | StrictInt | StrictFloat | StrictBool] = Field(default_factory=dict)
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameter_names(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in value):
+            raise ValueError("dataset selection parameter names must be identifiers")
+        return value
 
     @model_validator(mode="after")
-    def validate_registered_parameters(self) -> "DatasetRequest":
-        from backend.dataset_registry import validate_dataset_parameters
+    def validate_descriptor_parameters(self) -> "OpaqueDatasetRequest":
+        """Keep project parameters opaque until the owned archive is resolved."""
 
-        self.parameters = validate_dataset_parameters(self.target, self.parameters)
         return self
+
+
+# Keep a concise alias for callers that use the domain term "selection".
+DatasetSelectionRequest = OpaqueDatasetRequest
 
 
 class OptimizerRequest(BaseModel):
@@ -149,7 +185,9 @@ class TrainingRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dataset: DatasetRequest
+    # Dataset selection is an opaque resolved reference.  Python import
+    # targets and filesystem paths are intentionally not part of this model.
+    dataset: OpaqueDatasetRequest
     seed: int = Field(default=0, ge=0, le=2**63 - 1)
     optimizer: OptimizerRequest = Field(default_factory=OptimizerRequest)
     trainer: TrainerRequest = Field(default_factory=TrainerRequest)
@@ -166,7 +204,6 @@ class JobSubmission(BaseModel):
     training: TrainingRequest
     resources: ResourceRequest = Field(default_factory=ResourceRequest)
     priority: int = Field(default=0, ge=0, le=1_000_000)
-    package_name: str | None = Field(default=None, max_length=100)
 
     @field_validator("schema_version")
     @classmethod
@@ -180,35 +217,22 @@ class JobSubmission(BaseModel):
             raise ValueError("schema_version must be 1; other versions are not supported")
         return value
 
-    @field_validator("package_name")
-    @classmethod
-    def package_name_has_required_prefix(cls, value: str | None) -> str | None:
-        """Accept Python-importable package names with the required prefix."""
-
-        if value is None:
-            return None
-        if not PACKAGE_NAME.fullmatch(value):
-            raise ValueError("package_name must match nnm_<name> using letters, digits, and underscores")
-        return value
-
-
-class DatasetParameter(BaseModel):
-    """Metadata for one dataset constructor parameter."""
-
-    name: str
-    type: str
-    default: Any = None
-    required: bool = False
+# Keep the public import name aligned with the shared declarative contract.
+DatasetParameter = DatasetContractParameter
 
 
 class DatasetInfo(BaseModel):
-    """Discoverable dataset class and its constructor metadata."""
+    """One descriptor shape for a project-owned dataset.
 
-    target: str
-    name: str
-    doc: str = ""
-    parameters: list[DatasetParameter] = Field(default_factory=list)
-    num_classes: int | None = Field(default=None, ge=1)
+    ``reference`` is an opaque selection handle.  In particular, no Python
+    module or class target is serialized in the public registry response.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference: DatasetReference
+    manifest: DatasetSourceManifest
+    definition: DatasetDefinition
 
 
 class ComputeUnitInfo(BaseModel):
@@ -248,6 +272,7 @@ class JobStatus(BaseModel):
     model_package: ModelPackageInfo | None = None
     package_error: str | None = None
     artifact_dir: str
+    dataset: OpaqueDatasetRequest | None = None
 
 
 class PairingRequestInput(BaseModel):

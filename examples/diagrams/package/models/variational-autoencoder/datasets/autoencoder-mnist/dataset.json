@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "example.vae-mnist",
+  "version": "0.1.0",
+  "name": "Autoencoder MNIST",
+  "description": "MNIST images paired with themselves for reconstruction.",
+  "parameters": [
+    {
+      "name": "batch_size",
+      "type": "integer",
+      "required": false,
+      "default": 32
+    },
+    {
+      "name": "num_workers",
+      "type": "integer",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "train_size",
+      "type": "number",
+      "required": false,
+      "default": 0.8
+    }
+  ],
+  "batch": {
+    "inputs": {
+      "image": {
+        "shape": ["B", 1, 28, 28],
+        "dtype": "float32"
+      }
+    },
+    "targets": {
+      "target": {
+        "shape": ["B", 1, 28, 28],
+        "dtype": "float32"
+      }
+    }
+  },
+  "inferenceAdapter": {
+    "kind": "image",
+    "version": 1,
+    "channels": 1,
+    "size": [28, 28],
+    "mean": [0.1307],
+    "std": [0.3081]
+  }
+}

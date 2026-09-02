@@ -146,7 +146,7 @@ class ContainerExecutor:
             input_root=input_path.resolve().parent, artifact_root=artifact_path.resolve().parent,
         ).command(spec)
 
-    def _controller_for(self, artifact_dir: Path, input_dir: Path) -> ContainerController:
+    def _controller_for(self, artifact_dir: Path, input_dir: Path, dataset_dir: Path | None) -> ContainerController:
         """Create the narrow controller for the two manager-owned roots."""
 
         # ``engine`` remains parsed here for manager compatibility; the
@@ -185,7 +185,7 @@ class ContainerExecutor:
             engine=adapter,
             input_root=input_dir.resolve().parent,
             artifact_root=artifact_dir.resolve().parent,
-            dataset_root=_dataset_root(),
+            dataset_root=(dataset_dir.resolve().parent if dataset_dir is not None else _dataset_root()),
             popen=self._popen_factory,
         )
         self._controller = controller
@@ -199,7 +199,7 @@ class ContainerExecutor:
             job_id=str(job["id"]), image=self.image, input_dir=Path(input_dir), artifact_dir=Path(artifact_dir),
             cpu=request.cpu, memory_gb=request.memory_gb, pid_limit=self.pid_limit,
             timeout_seconds=self.timeout_seconds, network=self.network,
-            dataset_dir=_dataset_root(),
+            dataset_dir=Path(job["dataset_dir"]).resolve() if job.get("dataset_dir") else _dataset_root(),
         )
 
     def submit(
@@ -223,7 +223,8 @@ class ContainerExecutor:
             if package_file.is_file():
                 payload["package"] = json.loads(package_file.read_text(encoding="utf-8"))
             job_file.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-        controller = self._controller_for(artifact_path, input_path)
+        dataset_dir = Path(job["dataset_dir"]).resolve() if job.get("dataset_dir") else None
+        controller = self._controller_for(artifact_path, input_path, dataset_dir)
         if self._remote is not None:
             result = self._remote.submit(self._spec(job, artifact_path, input_path))
             threading.Thread(

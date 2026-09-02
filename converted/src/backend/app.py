@@ -24,7 +24,7 @@ from backend.auth import (
     ValkeyAuthStore,
     parse_duration,
 )
-from backend.dataset_registry import discover_datasets
+from backend.dataset_store import DatasetArchiveStore, DatasetArchiveValidationError
 from backend.manager import JobManager, PackageIntegrityError, _remove_file
 from backend.package_store import BundleNotFoundError, PackageStore
 from backend.models import (
@@ -37,6 +37,8 @@ from backend.models import (
     PackageBundleInfo,
     PackageInfo,
     PackageUpload,
+    DatasetArchiveCapabilities,
+    DatasetArchiveInfo,
     SessionInfo,
 )
 
@@ -135,7 +137,7 @@ def create_app(
         allow_origins=origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-NNM-Admin-Token"],
+        allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-NNM-Admin-Token", "X-NNM-SHA256"],
         expose_headers=["X-NNM-SHA256"],
     )
     app.state.manager = manager or JobManager.from_environment()
@@ -143,6 +145,21 @@ def create_app(
         app.state.package_store = app.state.manager.package_store
     else:
         app.state.package_store = PackageStore(Path(os.getenv("NNM_BACKEND_PACKAGE_ROOT", "packages")))
+    dataset_root = Path(
+        os.getenv(
+            "NNM_BACKEND_DATASET_ROOT",
+            str(Path(getattr(app.state.manager, "artifact_root", Path("datasets"))) / "datasets"),
+        )
+    )
+    app.state.dataset_store = DatasetArchiveStore(
+        dataset_root,
+        max_archive_bytes=int(os.getenv("NNM_DATASET_MAX_ARCHIVE_BYTES", "67108864")),
+    )
+    if hasattr(app.state.manager, "dataset_store"):
+        # Upload and submission must share one authenticated, digest-addressed
+        # archive store; otherwise a project reference could not be resolved by
+        # the scheduler after the upload response.
+        app.state.manager.dataset_store = app.state.dataset_store
     app.state.auth = auth_service or _auth_from_environment(in_memory=injected_manager is not None)
     app.state.admin_token = admin_token if admin_token is not None else _read_admin_token()
 
@@ -242,7 +259,72 @@ def create_app(
     async def datasets(
         _connection: dict[str, Any] = Depends(current_connection),
     ) -> list[dict[str, Any]]:
-        return [dataset.model_dump(mode="json") for dataset in discover_datasets()]
+        """Return the backend catalog; datasets are supplied by the project."""
+
+        return []
+
+    @app.get("/dataset-archives/capabilities", response_model=DatasetArchiveCapabilities)
+    async def dataset_archive_capabilities(
+        _connection: dict[str, Any] = Depends(current_connection),
+    ) -> DatasetArchiveCapabilities:
+        """Advertise the complete-upload limit before the browser reads data."""
+
+        return DatasetArchiveCapabilities(max_bytes=app.state.dataset_store.max_archive_bytes)
+
+    @app.post("/dataset-archives", response_model=DatasetArchiveInfo, status_code=201)
+    async def upload_dataset_archive(
+        request: Request,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> DatasetArchiveInfo:
+        """Receive one bounded ZIP and publish it only after full validation."""
+
+        store: DatasetArchiveStore = app.state.dataset_store
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type not in {"application/zip", "application/octet-stream"}:
+            raise HTTPException(status_code=415, detail={
+                "code": "dataset_archive_media_type",
+                "message": "dataset archive must be uploaded as a ZIP byte stream",
+            })
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = -1
+            if declared_size < 0:
+                raise HTTPException(status_code=400, detail={
+                    "code": "dataset_archive_length_invalid",
+                    "message": "content-length must be a non-negative integer",
+                })
+            if declared_size > store.max_archive_bytes:
+                raise HTTPException(status_code=413, detail={
+                    "code": "dataset_archive_too_large",
+                    "message": f"dataset archive exceeds maximum size of {store.max_archive_bytes} bytes",
+                    "max_bytes": store.max_archive_bytes,
+                })
+        data = bytearray()
+        async for chunk in request.stream():
+            data.extend(chunk)
+            if len(data) > store.max_archive_bytes:
+                raise HTTPException(status_code=413, detail={
+                    "code": "dataset_archive_too_large",
+                    "message": f"dataset archive exceeds maximum size of {store.max_archive_bytes} bytes",
+                    "max_bytes": store.max_archive_bytes,
+                })
+        declared_digest = request.headers.get("x-nnm-sha256")
+        try:
+            record = store.put(
+                bytes(data),
+                owner_connection_id=connection["id"],
+                declared_digest=declared_digest,
+            )
+        except DatasetArchiveValidationError as exc:
+            raise HTTPException(status_code=422, detail={
+                "code": "dataset_archive_invalid",
+                "message": str(exc),
+                "max_bytes": store.max_archive_bytes,
+            }) from exc
+        return DatasetArchiveInfo(**record)
 
     @app.post("/packages", response_model=PackageInfo, status_code=201)
     async def upload_package(
@@ -367,23 +449,21 @@ def create_app(
     @app.get("/jobs/{job_id}/package")
     async def download_model_package(
         job_id: str,
+        package_name: str = Query(..., alias="packageName", min_length=5, max_length=100),
         connection: dict[str, Any] = Depends(current_connection),
     ) -> FileResponse:
-        """Download the authenticated job's generated pip wheel.
+        """Download the authenticated job's wheel under a chosen package name.
 
-        The wheel is streamed into a private immutable snapshot and hashed
-        from that single opened source handle before any byte is served; the
-        snapshot digest must match the manifest, and only the verified
-        snapshot is transferred (never the mutable artifact path). A corrupted
-        or replaced wheel is rejected with ``409 Conflict`` and never
-        downloaded. On success the verified digest is exposed through the
-        ``X-NNM-SHA256`` response header and the snapshot is removed once the
-        response completes or fails.
+        The server verifies its immutable template, rebuilds the wheel so the
+        requested import package is real, then streams that generated wheel
+        from a private snapshot. The response digest covers exactly those
+        bytes and is exposed through ``X-NNM-SHA256``.
         """
 
         try:
             path, filename, digest = app.state.manager.package_download(
                 job_id,
+                package_name=package_name,
                 owner_connection_id=connection["id"],
             )
         except KeyError as exc:
@@ -395,6 +475,8 @@ def create_app(
                 status_code=409,
                 detail={"code": "package_integrity_error", "message": str(exc)},
             ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _verified_snapshot_response(path, filename, digest)
 
     @app.get("/jobs/{job_id}/events")

@@ -8,3 +8,29 @@
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+from .contracts import (
+    DatasetBatchContract,
+    DatasetBuilder,
+    DatasetClassMetadata,
+    DatasetContext,
+    DatasetContractError,
+    DatasetDefinition,
+    DatasetParameter,
+    DatasetReference,
+    DatasetSourceManifest,
+    ModelDatasetReference,
+    ModelManifestV2,
+    ModelPackageReference,
+    TensorSlotContract,
+    TrainingBatch,
+    normalize_training_batch,
+    parse_model_manifest,
+    serialize_dataset_definition,
+)
+__all__ = [
+    "DatasetBatchContract", "DatasetBuilder", "DatasetClassMetadata", "DatasetContext",
+    "DatasetContractError", "DatasetDefinition", "DatasetParameter", "DatasetReference",
+    "DatasetSourceManifest", "ModelDatasetReference", "ModelManifestV2",
+    "ModelPackageReference", "TensorSlotContract", "TrainingBatch",
+    "normalize_training_batch", "parse_model_manifest", "serialize_dataset_definition",
+]

@@ -1,27 +1,21 @@
-import type { Context } from "@deepseek-ai/cordis"
+import type { Context, Fiber } from "cordis"
 
-import { PackageCatalog } from "./catalog"
-import { PackageRegistry } from "./registry"
+import { PackageCatalog, packageKey } from "./catalog"
+import { LuaInferenceService, PackageRegistryService } from "./cordis-services"
 import { satisfies } from "./semver"
 import { resolveParameters } from "./validation"
 import type { TensorType } from "../tensor-type"
 import type { TypeContext, TypeResult } from "../type-inference"
-import type {
-  InferenceRule,
-  InferenceRuntime,
-  LoadedInferenceRule,
-  Package,
-  StereotypeReference,
-} from "./types"
+import type { InferenceRule, Package, StereotypeReference } from "./types"
+import type { PackageIdentity } from "../../core/types"
 
 export type PackageLease = { readonly id: string; dispose(): Promise<void> }
 
 type Active = {
   readonly packageInfo: Package
   readonly rule: InferenceRule
-  readonly fiber: { dispose(): void | Promise<void> }
+  readonly fiber: Fiber
   leases: number
-  readonly dependencies: readonly PackageLease[]
 }
 
 /**
@@ -31,24 +25,32 @@ type Active = {
  */
 export class PackageLoader {
   private readonly active = new Map<string, Active>()
+  private readonly activating = new Map<string, Promise<Active>>()
   private inferenceDepth = 0
   private readonly maximumInferenceDepth = 32
 
   constructor(
     private readonly context: Context,
     private readonly catalog: PackageCatalog,
-    private readonly registry: PackageRegistry,
-    private readonly runtime: InferenceRuntime,
   ) {}
 
-  async load(id: string): Promise<PackageLease> { return this.activate(id, []) }
+  async load(identity: PackageIdentity): Promise<PackageLease> {
+    this.services()
+    return this.activate(identity, [])
+  }
 
-  infer(id: string, context: TypeContext, parameters: Readonly<Record<string, unknown>>): TypeResult {
-    const active = this.active.get(id)
-    if (!active) return expected(`package '${id}' is not active`)
+  /** Dispose package Fibers before the host disposes the service/root context. */
+  async dispose(): Promise<void> {
+    for (const active of [...this.active.values()].reverse()) await active.fiber.dispose()
+  }
+
+  infer(identity: PackageIdentity, context: TypeContext, parameters: Readonly<Record<string, unknown>>): TypeResult {
+    this.services()
+    const active = this.active.get(identity.id)
+    if (!active || active.packageInfo.manifest.version !== identity.version) return expected(`package '${identity.id}@${identity.version}' is not active`)
     if (this.inferenceDepth >= this.maximumInferenceDepth) return expected(`maximum inference depth of ${this.maximumInferenceDepth} exceeded`)
-    if (context.kind !== active.packageInfo.definition.kind) return expected(`package '${id}' requires ${active.packageInfo.definition.kind}`)
-    if (!hasRequiredInputs(context.kind, context.inputs)) return expected(`package '${id}' received an invalid input count for ${context.kind}`)
+    if (context.kind !== active.packageInfo.definition.kind) return expected(`package '${identity.id}' requires ${active.packageInfo.definition.kind}`)
+    if (!hasRequiredInputs(context.kind, context.inputs)) return expected(`package '${identity.id}' received an invalid input count for ${context.kind}`)
 
     let resolved: Readonly<Record<string, unknown>>
     try {
@@ -83,51 +85,75 @@ export class PackageLoader {
     }
   }
 
-  private async activate(id: string, trail: readonly string[]): Promise<PackageLease> {
+  private async activate(identity: PackageIdentity, trail: readonly string[]): Promise<PackageLease> {
+    const id = identity.id
+    const key = packageKey(identity.id, identity.version)
     const existing = this.active.get(id)
-    if (existing) { existing.leases++; return this.lease(existing) }
-    if (trail.includes(id)) throw new Error(`package '${id}' dependency activation failed: static dependency cycle: ${[...trail, id].join(" -> ")}`)
-    const packageInfo = this.catalog.get(id)
-    if (!packageInfo) throw new Error(`package '${id}' selection failed: selected package is missing`)
+    if (existing && existing.packageInfo.manifest.version !== identity.version) throw new Error(`package ID '${id}' is already active as '${packageKey(id, existing.packageInfo.manifest.version)}'`)
+    if (existing) return this.lease(existing)
+    if (trail.includes(key)) throw new Error(`package '${key}' dependency activation failed: static dependency cycle: ${[...trail, key].join(" -> ")}`)
+    const packageInfo = this.catalog.getExact(key)
+    if (!packageInfo) throw new Error(`package '${key}' selection failed: selected package is missing`)
 
-    const dependencies: PackageLease[] = []
-    let loaded: LoadedInferenceRule | undefined
+    const pending = this.activating.get(key)
+    if (pending) return this.lease(await pending)
+
+    const activation = this.createActive(id, packageInfo, trail)
+    this.activating.set(key, activation)
     try {
-      for (const [dependency, range] of Object.entries(packageInfo.manifest.dependencies)) {
-        const target = this.catalog.get(dependency)
-        if (!target || !satisfies(target.manifest.version, range)) throw new Error(`static dependency '${dependency}' is missing or incompatible`)
-        dependencies.push(await this.activate(dependency, [...trail, id]))
-      }
-      const inference = packageInfo.manifest.entrypoints.inference
-      if (!inference) throw new Error(`package '${id}' has no inference entrypoint`)
-      loaded = await this.runtime.load(packageInfo, inference.file)
+      return this.lease(await activation)
+    } finally {
+      this.activating.delete(key)
+    }
+  }
 
-      let unregister = () => {}
-      const fiber = await this.context.plugin({
+  private async createActive(id: string, packageInfo: Package, trail: readonly string[]): Promise<Active> {
+    const services = this.services()
+    let fiber: Fiber
+    try {
+      fiber = this.context.plugin({
         name: id,
-        apply: (pluginContext) => {
-          pluginContext.effect(() => {
-            unregister = this.registry.register({ packageInfo, rule: loaded!.infer })
-            return async () => {
-              this.active.delete(id)
-              unregister()
-              await loaded?.dispose()
+        apply: async (pluginContext) => {
+          for (const [dependency, range] of Object.entries(packageInfo.manifest.dependencies)) {
+            const resolvedKey = "resolvedDependencies" in packageInfo ? packageInfo.resolvedDependencies[dependency] : undefined
+            const candidates = resolvedKey
+              ? [this.catalog.getExact(resolvedKey)].filter((candidate): candidate is Package => candidate !== undefined)
+              : this.catalog.query(dependency, range)
+            if (candidates.length !== 1 || candidates[0]!.manifest.id !== dependency || !satisfies(candidates[0]!.manifest.version, range)) {
+              throw new Error(`static dependency '${dependency}' is missing or incompatible`)
             }
-          })
+            const target = candidates[0]!
+            const lease = await this.activate({ id: target.manifest.id, version: target.manifest.version, name: target.definition.name }, [...trail, packageKey(id, packageInfo.manifest.version)])
+            pluginContext.effect(() => () => lease.dispose(), `package '${id}' dependency '${dependency}'`)
+          }
+
+          const inference = packageInfo.manifest.entrypoints.inference
+          if (!inference) throw new Error(`package '${id}' has no inference entrypoint`)
+          const loaded = await services.luaInference.load(packageInfo, inference.file)
+          pluginContext.effect(() => () => loaded.dispose(), `package '${id}' Lua inference`)
+
+          const unregister = services.packageRegistry.register({ packageInfo, rule: loaded.infer })
+          const active: Active = { packageInfo, rule: loaded.infer, fiber, leases: 0 }
+          this.active.set(id, active)
+          pluginContext.effect(() => () => {
+            this.active.delete(id)
+            unregister()
+          }, `package '${id}' registry`)
         },
       })
-      const active: Active = { packageInfo, rule: loaded.infer, fiber, leases: 1, dependencies }
-      this.active.set(id, active)
-      return this.lease(active)
+      await fiber
+      const active = this.active.get(id)
+      if (!active) throw new Error("package Fiber completed without an active registration")
+      return active
     } catch (cause) {
-      await loaded?.dispose()
-      for (const dependency of dependencies.reverse()) await dependency.dispose()
+      if (fiber!) await fiber.dispose()
       const message = cause instanceof Error ? cause.message : String(cause)
-      throw new Error(`${id}@${packageInfo.manifest.version} activation failed: ${message}`)
+      throw new Error(`${id}@${packageInfo.manifest.version} activation failed: ${message}`, { cause })
     }
   }
 
   private lease(active: Active): PackageLease {
+    active.leases++
     let released = false
     return {
       id: active.packageInfo.manifest.id,
@@ -135,11 +161,21 @@ export class PackageLoader {
         if (released) return
         released = true
         if (--active.leases !== 0) return
-        this.active.delete(active.packageInfo.manifest.id)
         await active.fiber.dispose()
-        for (const dependency of [...active.dependencies].reverse()) await dependency.dispose()
       },
     }
+  }
+
+  private services(): { readonly packageRegistry: PackageRegistryService; readonly luaInference: LuaInferenceService } {
+    const packageRegistry = this.context.get("packageRegistry", true)
+    const luaInference = this.context.get("luaInference", true)
+    if (!(packageRegistry instanceof PackageRegistryService)) {
+      throw new Error("required Cordis service 'packageRegistry' is unavailable")
+    }
+    if (!(luaInference instanceof LuaInferenceService)) {
+      throw new Error("required Cordis service 'luaInference' is unavailable")
+    }
+    return { packageRegistry, luaInference }
   }
 
   private inferReference(
@@ -162,15 +198,15 @@ export class PackageLoader {
       const kind = target.packageInfo.definition.kind
       if (kind === "input") {
         if (inputs.length !== 0) return expected(`package '${reference.id}' requires no inputs`)
-        return this.infer(reference.id, { kind, inputs: [] }, reference.parameters)
+        return this.infer({ id: reference.id, version: target.packageInfo.manifest.version, name: target.packageInfo.definition.name }, { kind, inputs: [] }, reference.parameters)
       }
       if (kind === "layer" || kind === "loss" || kind === "output" || kind === "subflow") {
         if (inputs.length !== 1) return expected(`package '${reference.id}' requires one input`)
         const input = inputs[0]!
-        return this.infer(reference.id, kind === "subflow" ? { kind, inputs: [input], inferSubflow: () => expected("subflow unavailable") } : { kind, inputs: [input] }, reference.parameters)
+        return this.infer({ id: reference.id, version: target.packageInfo.manifest.version, name: target.packageInfo.definition.name }, kind === "subflow" ? { kind, inputs: [input], inferSubflow: () => expected("subflow unavailable") } : { kind, inputs: [input] }, reference.parameters)
       }
       if (inputs.length < 2) return expected(`package '${reference.id}' requires two inputs`)
-      return this.infer(reference.id, { kind, inputs: [inputs[0]!, inputs[1]!, ...inputs.slice(2)] }, reference.parameters)
+      return this.infer({ id: reference.id, version: target.packageInfo.manifest.version, name: target.packageInfo.definition.name }, { kind, inputs: [inputs[0]!, inputs[1]!, ...inputs.slice(2)] }, reference.parameters)
     } finally {
       target.leases--
     }

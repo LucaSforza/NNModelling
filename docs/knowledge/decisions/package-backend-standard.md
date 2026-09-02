@@ -54,11 +54,12 @@ FastAPI may parse and validate bounded declarative data:
 - bundle schema, canonical digest and archive paths;
 - package identities, versions and declared dependency closure;
 - graph topology, containment, handle ordering and resource limits;
-- typed training configuration and dataset registry names.
+- typed training configuration, dataset descriptors and opaque dataset
+  references.
 
-Python package code, PyTorch model construction, dataset access and training
-run only in a short-lived worker container. AST inspection is diagnostic input
-validation, never a sandbox.
+Python package code, project dataset code, PyTorch model construction, dataset
+access and training run only in a short-lived worker container. AST inspection
+is diagnostic input validation, never a sandbox.
 
 The worker container uses the least privilege available from the selected
 engine:
@@ -66,7 +67,7 @@ engine:
 - rootless Podman or rootless Docker by default;
 - non-root worker user;
 - read-only image/root filesystem;
-- read-only input bundle and operator-managed dataset mounts;
+- read-only model bundle and resolved dataset mounts;
 - one narrowly scoped writable artifact directory;
 - dropped capabilities, `no-new-privileges`, default seccomp and the host's
   SELinux/AppArmor policy;
@@ -90,7 +91,7 @@ The controller accepts a versioned, server-generated `ContainerJobSpec` only:
 - job ID and immutable input/artifact roots under configured directories;
 - an allowlisted image digest;
 - normalized CPU, memory, PID, timeout and network policy;
-- the fixed worker entrypoint and declared dataset mounts.
+- the fixed worker entrypoint and server-resolved dataset mounts.
 
 It rejects arbitrary engine flags, host paths, commands, image names and shell
 strings. It creates, monitors, logs, times out and cancels the one container
@@ -120,9 +121,10 @@ package or training contracts.
 
 Package jobs use a typed, versioned package-native training specification. Each
 field is either normalized and applied or rejected; no field is silently
-ignored. The contract covers dataset registry selection, constructor
-parameters, batch size, workers, split, seed, optimizer, objective/loss,
-epochs, early stopping, accelerator, W&B mode and resource limits.
+ignored. The contract covers an opaque dataset reference, declaratively typed
+dataset parameters, batch size, workers, split, seed, optimizer,
+objective/loss, epochs, early stopping, accelerator, W&B mode and resource
+limits.
 
 The seed is applied before model construction, dataset splitting or loader
 creation. The objective receives targets through an explicit runtime contract;
@@ -130,19 +132,28 @@ loss behavior is never selected by output-shape heuristics or a package-ID
 special case. The accepted compilation and target-binding model is defined by
 the [prediction/objective program decision](prediction-objective-programs.md).
 
-Datasets are pre-installed/registered or mounted by the operator. The browser
-cannot provide an import path, host path or dataset Python source. Network and
-W&B online mode are disabled unless the operator explicitly enables a policy
-that grants only the required egress.
+The VAE project dataset is uploaded as untrusted content-addressed data.
+FastAPI validates its declarative contract but never imports its Python; only
+the least-privilege worker loads it from a server-resolved read-only mount.
+The browser cannot provide an import path or host path. Network and W&B online
+mode are disabled unless the operator explicitly enables a policy that grants
+only the required egress.
+
+Project dataset ownership, named training batches and the bounded upload v1 are
+defined by the
+[project-owned dataset decision](project-owned-datasets.md). Large or resumable
+dataset transfer is not implied by accepting browser-supplied dataset code.
 
 ## Artifact contract
 
 The worker produces safetensors and resolved metadata as intermediate files,
-then builds the portable wheel before the job can become `succeeded`. The
-wheel contains the package-native runtime, vendored package resources, the
-resolved semantic graph, declarative input adapters and verified weights. The
-authenticated download remains `GET /jobs/{id}/package` with an SHA-256
-manifest.
+then builds a server-named template wheel before the job can become
+`succeeded`. The wheel contains the package-native runtime, vendored package
+resources, the resolved semantic graph, declarative input adapters and
+verified weights. Authenticated download is
+`GET /jobs/{id}/package?packageName=nnm_<suffix>`; the server regenerates
+the importable package under the requested name and returns the digest of the
+served bytes.
 
 The `training_package` status field, `/training-package` endpoint,
 `nnm-trained-package/v1` ZIP and checkout-dependent VAE consumer are removed.

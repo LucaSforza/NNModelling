@@ -83,7 +83,7 @@ describe("BrowserRPC package-only boundary", () => {
   test("accepts separate prediction and objective terminals", () => {
     const { handler, diagram, sent } = harness()
     const node = (id: string, pkg: typeof input, type = "custom") => ({
-      id, type, parentId: null, data: { package: { id: pkg.id, version: pkg.version, name: pkg.definition.name }, name: id, params: {} },
+      id, type, parentId: null, data: { package: { id: pkg.id, version: pkg.version, name: pkg.definition.name }, name: id, params: {}, ...(pkg.id === "core.input" ? { inputBinding: "input" } : {}) },
     })
     diagram.nodes = [
       node("input", input),

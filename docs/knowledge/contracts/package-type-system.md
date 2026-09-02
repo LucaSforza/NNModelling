@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-22
+updated: 2026-08-29
 ---
 
 # Frontend package type-system contract
@@ -26,10 +26,13 @@ records only the NNModelling-owned integration boundary.
 ## Current frontend boundary
 
 - `DiagramCore` is the only authority for the live graph.
-- Every frontend node has exact `data.package = {id, version, name}` identity.
-  Display names never resolve packages.
+- Every frontend node has exact `data.package = {id, version}` project identity.
+  Display names are derived from the installed definition and never resolve
+  packages. Current imports may contain a redundant `name`; it is ignored and
+  omitted on the next save.
 - Bundled resources under `stereotype-packages/` provide one independently
-  identified package per stereotype.
+  identified core package per stereotype. Model-owned packages are supplied by
+  the current model manifest and are not part of this global core catalog.
 - `TypeSystemHost` activates definitions and isolated Lua inference rules in
   the browser. Production inference never invokes Python or the reference
   repository.
@@ -39,6 +42,47 @@ records only the NNModelling-owned integration boundary.
   `{value, position}` wrappers.
 - Browser RPC and the visible editor expose the same package-only graph and
   inference result.
+
+## Project-owned custom packages
+
+- Bundled core records are loaded and activated at editor bootstrap. The
+  runtime is ready, and the automatic `Input` node is created, only after all
+  bundled packages activate successfully.
+- Custom stereotype packages live under the writable project directory and
+  are declared exhaustively by `manifest.customPackages`. They are never
+  installed into or discovered from a global browser catalog.
+- The visible Stereotypes manager lists immutable core packages and the current
+  project's exact custom set. Creating a stereotype writes its package
+  manifest, definition, Lua rule and PyTorch entrypoint inside the project,
+  updates the model manifest and stages the resulting package scope.
+- The project catalog retains every declared helper resource and exact resolved
+  dependency identity for deterministic package-bundle export. The bundle
+  contains `pytorch.py` and all package-relative helper files byte-for-byte.
+- Invalid authoring input, project directories or package scopes are rejected
+  transactionally. The editor and browser-backed MCP expose the same structured
+  runtime diagnostics; a failed package branch faults only its dependent graph
+  region.
+- The former local-directory installer and IndexedDB external-package ownership
+  path are superseded by the accepted
+  [writable project decision](../decisions/project-workspaces-and-stereotype-authoring.md)
+  and are scheduled for removal by its active implementation plan.
+
+## Model-scoped package loading
+
+- A package-native model JSON has a required top-level `manifest` with model
+  identity and a complete `customPackages` list. Each entry contains an exact
+  package ID/version and a model-relative package directory.
+- The active editor scope is `core + current-model-custom`. Core packages are
+  automatically active; no undeclared package is searched or added
+  to the palette.
+- Model package manifests and paths are validated before `DiagramCore` commits
+  the model. A failed model switch leaves the previous graph and custom scope
+  unchanged. A successful switch disposes the previous custom fibers,
+  registrations and runtime diagnostics.
+- The backend bundle resolves model-relative resources before transport and
+  includes each package's declared Python entrypoint and complete helper-file
+  closure. The backend never receives a filesystem path from the model
+  manifest.
 
 ## Tensor and result model
 

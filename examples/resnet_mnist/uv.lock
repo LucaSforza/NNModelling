@@ -189,15 +189,15 @@ wheels = [
 ]
 
 [[package]]
-name = "nnm-resnet-mnist-reference"
+name = "nnm-resnet-mnist"
 version = "0.1.0"
-source = { path = "nnm_resnet_mnist_reference-0.1.0-py3-none-any.whl" }
+source = { path = "nnm_resnet_mnist-0.1.0-py3-none-any.whl" }
 dependencies = [
     { name = "safetensors" },
     { name = "torch" },
 ]
 wheels = [
-    { filename = "nnm_resnet_mnist_reference-0.1.0-py3-none-any.whl", hash = "sha256:c24f896c11b390d75eedfc1aad51d8e4a0398fb8e06797936616a498dd63e363" },
+    { filename = "nnm_resnet_mnist-0.1.0-py3-none-any.whl", hash = "sha256:b20d6c1489155a5be6c5ea2266bb3642331b5068b7f180921ca8c02ad0e22f8c" },
 ]
 
 [package.metadata]
@@ -507,14 +507,14 @@ name = "resnet-mnist-example"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "nnm-resnet-mnist-reference" },
+    { name = "nnm-resnet-mnist" },
     { name = "pillow" },
     { name = "torchvision" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "nnm-resnet-mnist-reference", path = "nnm_resnet_mnist_reference-0.1.0-py3-none-any.whl" },
+    { name = "nnm-resnet-mnist", path = "nnm_resnet_mnist-0.1.0-py3-none-any.whl" },
     { name = "pillow", specifier = ">=12.0" },
     { name = "torchvision", specifier = ">=0.28" },
 ]

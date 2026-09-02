@@ -14,19 +14,27 @@ import pytest
 import torch
 from safetensors.torch import load_file, save_file
 
-from model_package.adapters import adapter_spec_for_dataset
-from model_package.exporter import _architecture_fingerprint, build_model_wheel
+from model_package.adapters import adapter_spec_from_definition
+from model_package.exporter import _architecture_fingerprint, build_model_wheel, repackage_model_wheel
 from package_runtime.compiler import compile_package_graph
 
 
 ROOT = Path(__file__).parents[3]
 CORE = ROOT / "stereotype-packages" / "core"
+VAE_PACKAGES = ROOT / "examples" / "diagrams" / "package" / "models" / "variational-autoencoder" / "packages"
 
 
-def test_dataset_adapter_uses_registered_target() -> None:
-    """Dataset adapter metadata comes from the trusted dataset catalog."""
+def test_dataset_adapter_uses_declarative_definition() -> None:
+    """Dataset adapter metadata comes from the immutable dataset definition."""
 
-    assert adapter_spec_for_dataset("dataset.mnist.MNISTDataset") == {
+    assert adapter_spec_from_definition({"inferenceAdapter": {
+        "kind": "image",
+        "version": 1,
+        "channels": 1,
+        "size": [28, 28],
+        "mean": [0.1307],
+        "std": [0.3081],
+    }}) == {
         "kind": "image",
         "version": 1,
         "channels": 1,
@@ -36,13 +44,17 @@ def test_dataset_adapter_uses_registered_target() -> None:
     }
 
 
-def test_dataset_adapter_rejects_unregistered_target() -> None:
-    with pytest.raises(ValueError, match="not registered"):
-        adapter_spec_for_dataset("not.trusted.Dataset")
+def test_dataset_adapter_rejects_non_declarative_value() -> None:
+    with pytest.raises(TypeError, match="must be an object"):
+        adapter_spec_from_definition({"inferenceAdapter": "not-a-target"})
 
 
 def _package(package_id: str) -> dict[str, object]:
     directory = CORE / package_id.removeprefix("core.")
+    if package_id == "example.vae.sampling":
+        directory = VAE_PACKAGES / "sampling"
+    elif package_id == "example.vae.kl-divergence":
+        directory = VAE_PACKAGES / "kl-divergence"
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     files: dict[str, dict[str, str]] = {}
     for filename in ("manifest.json", "stereotype.json", "inference.lua", "pytorch.py"):
@@ -180,6 +192,77 @@ def test_wheel_model_facade_loads_embedded_and_compatible_override(tmp_path: Pat
         _cleanup("model", wheel)
 
 
+def test_wheel_normalizes_graph_only_training_state(tmp_path: Path) -> None:
+    """Export accepts the inner graph state emitted by older workers."""
+
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input"},
+            {
+                "id": "linear",
+                "type": "layer",
+                "package": {"id": "core.linear", "version": "0.1.0"},
+                "parameters": {"in_features": 2, "out_features": 2},
+            },
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    artifact = tmp_path / "inner_state"
+    artifact.mkdir()
+    compiled = compile_package_graph(bundle)
+    save_file(compiled.module.state_dict(), artifact / "weights.safetensors")
+    wheel = build_model_wheel(artifact, package_name="nnm_inner_state", package=bundle)
+    assert wheel.name == "nnm_inner_state-0.1.0-py3-none-any.whl"
+    sys.path.insert(0, str(wheel))
+    module = importlib.import_module("nnm_inner_state")
+    try:
+        output = module.Model().predict_tensor(torch.randn(3, 2))
+        assert output.shape == (3, 2)
+    finally:
+        _cleanup("inner_state", wheel)
+
+
+def test_download_name_is_a_real_importable_package(tmp_path: Path) -> None:
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input"},
+            {"id": "linear", "type": "layer", "package": {"id": "core.linear", "version": "0.1.0"}, "parameters": {"in_features": 1, "out_features": 1}},
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    save_file(compile_package_graph(bundle).state_dict(), source_dir / "weights.safetensors")
+    source = build_model_wheel(source_dir, package_name="nnm_template", package=bundle)
+    downloaded = repackage_model_wheel(source, tmp_path / "downloads", package_name="nnm_vae")
+
+    assert downloaded.name == "nnm_vae-0.1.0-py3-none-any.whl"
+    with zipfile.ZipFile(downloaded) as archive:
+        names = set(archive.namelist())
+        assert "nnm_vae/__init__.py" in names
+        assert "nnm_vae-0.1.0.dist-info/METADATA" in names
+        assert b"Name: nnm_vae\n" in archive.read("nnm_vae-0.1.0.dist-info/METADATA")
+    sys.path.insert(0, str(downloaded))
+    module = importlib.import_module("nnm_vae")
+    try:
+        assert module.Model().predict_tensor(torch.randn(2, 1)).shape == (2, 1)
+    finally:
+        sys.path.remove(str(downloaded))
+        for module_name in list(sys.modules):
+            if module_name == "nnm_vae" or module_name.startswith("nnm_vae."):
+                del sys.modules[module_name]
+
+
 @pytest.mark.parametrize(
     ("checkpoint_kind", "message"),
     [
@@ -290,7 +373,7 @@ def test_vae_wheel_returns_reconstruction_and_never_executes_mse_or_kl(tmp_path:
             {"id": "statistics", "type": "layer", "package": {"id": "core.linear", "version": "0.1.0"}, "parameters": {"in_features": 2, "out_features": 4}},
             {"id": "prediction", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
             {"id": "mse", "type": "layer", "package": {"id": "core.mse-loss", "version": "0.1.0"}, "parameters": {}},
-            {"id": "kl", "type": "layer", "package": {"id": "core.kl-divergence", "version": "0.1.0"}, "parameters": {}},
+            {"id": "kl", "type": "layer", "package": {"id": "example.vae.kl-divergence", "version": "0.1.0"}, "parameters": {}},
             {"id": "objective", "type": "layer", "package": {"id": "core.add", "version": "0.1.0"}, "parameters": {}},
         ],
         [
@@ -302,7 +385,7 @@ def test_vae_wheel_returns_reconstruction_and_never_executes_mse_or_kl(tmp_path:
             {"source": "mse", "target": "objective", "targetHandle": "in-0"},
             {"source": "kl", "target": "objective", "targetHandle": "in-1"},
         ],
-        ["core.linear", "core.output", "core.mse-loss", "core.kl-divergence", "core.add"],
+        ["core.linear", "core.output", "core.mse-loss", "example.vae.kl-divergence", "core.add"],
     )
     wheel, module = _wheel_model(tmp_path, bundle, "vae")
     try:

@@ -24,7 +24,7 @@ function packageNode(id: string, identity: PackageIdentity, params: Record<strin
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: identity, name: identity.name, params },
+    data: { package: identity, name: identity.name, params, ...(identity.id === "core.input" ? { inputBinding: "input" } : {}) },
   } as Node
 }
 
@@ -32,10 +32,10 @@ async function createScheduler(): Promise<PackageGraphScheduler> {
   const msePackage = { resources: { "manifest.json": mseManifest, "stereotype.json": mseDefinition, "inference.lua": mseInference } }
   const host = await TypeSystemHost.create([coreInputPackage, coreForkPackage, coreOutputPackage, msePackage])
   hosts.push(host)
-  await host.activate("core.input")
-  await host.activate("core.fork")
-  await host.activate("core.output")
-  await host.activate("core.mse-loss")
+  await host.activate(inputIdentity)
+  await host.activate(forkIdentity)
+  await host.activate({ id: "core.output", version: "0.1.0", name: "Output" })
+  await host.activate({ id: "core.mse-loss", version: "0.1.0", name: "MSE Loss" })
   return new PackageGraphScheduler(host)
 }
 

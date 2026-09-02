@@ -3,9 +3,11 @@ import type { TypeContext, TypeResult } from "../type-inference"
 
 export type PackageKind = "input" | "layer" | "loss" | "join" | "subflow" | "output"
 
+export type BatchSlotSource = `batch.targets.${string}`
+
 export type ObjectiveExternalInput = {
   readonly name: string
-  readonly source: "batch.targets"
+  readonly source: BatchSlotSource
   /** Optional declarative conversion from the dataset target contract. */
   readonly transform?: "flatten_batch"
 }
@@ -75,12 +77,31 @@ export type Manifest = {
   }
 }
 
+/** The only persisted package identity. Display names are never part of it. */
+export type PackageKey = `${string}@${string}`
+
+/** Where an active package record is owned. Model records are ephemeral and
+ * must never be persisted in the installed-package store. */
+export type PackageSource = "bundled" | "external" | "model"
+
 /** Browser resource seam. It deliberately exposes only package-relative reads. */
 export type PackageResourceProvider = {
   readonly read: (path: string) => string | Uint8Array | Promise<string | Uint8Array>
 }
 
 export type PackageResourceMap = Readonly<Record<string, string | Uint8Array>>
+
+/** A validated, immutable package record owned by the installed catalog. */
+export type InstalledPackageRecord = {
+  readonly key: PackageKey
+  readonly source: PackageSource
+  readonly manifest: Manifest
+  readonly definition: Definition
+  /** Every package-relative file, retained byte-for-byte. */
+  readonly resources: Readonly<Record<string, Uint8Array>>
+  readonly digest: string
+  readonly resolvedDependencies: Readonly<Record<string, PackageKey>>
+}
 
 export type PackageBundle = {
   readonly manifest: Manifest
@@ -89,12 +110,20 @@ export type PackageBundle = {
   readonly directory?: string
 }
 
-export type Package = PackageBundle
+export type Package = PackageBundle | InstalledPackageRecord
 
 /** Raw resources exposed only to the package transport/export boundary. */
 export type PackageExportInfo = {
   readonly manifest: Manifest
-  readonly definition: string
+  /** JSON source for legacy bundled exports, or parsed definition on records. */
+  readonly definition: string | Definition
+  /** Complete immutable package-relative resources, when available. */
+  readonly resources?: Readonly<Record<string, string | Uint8Array>>
+  /** Exact dependency resolution persisted by the installed catalog. */
+  readonly resolvedDependencies?: Readonly<Record<string, PackageKey>>
+  /** Runtime state is carried through transport only to reject unusable records. */
+  readonly state?: "installed" | "active" | "failed"
+  readonly active?: boolean
   readonly pytorch?: string
 }
 

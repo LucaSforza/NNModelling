@@ -9,19 +9,17 @@ afterEach(() => {
 describe("training job actions", () => {
   it("submits only parameters from the current dataset schema", () => {
     const dataset = {
-      target: "dataset.autoencoder_mnist.AutoencoderMNIST",
-      name: "AutoencoderMNIST",
-      doc: "",
-      num_classes: null,
-      parameters: [
+      reference: { kind: "project", id: "example.vae-mnist", version: "0.1.0", ref: "project_example_vae_mnist_0_1_0", digest: "a".repeat(64) },
+      manifest: { schemaVersion: 1, id: "example.vae-mnist", version: "0.1.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
+      definition: { schemaVersion: 1, id: "example.vae-mnist", version: "0.1.0", name: "VAE MNIST", parameters: [
         { name: "batch_size", type: "int", default: 32, required: false },
         { name: "num_workers", type: "int", default: 0, required: false },
         { name: "train_size", type: "float", default: 0.8, required: false },
-      ],
+      ], batch: { inputs: { image: { shape: ["B", 1, 28, 28], dtype: "float32" } }, targets: { target: { shape: ["B", 1, 28, 28], dtype: "float32" } } } },
     };
 
     expect(canonicalDatasetParameters(dataset, {
-      batch_size: "128", num_workers: "0", train_size: "0.8", root: "/tmp/old-editor",
+      batch_size: "128", num_workers: "0", train_size: "0.8", unexpected: "ignored",
     })).toEqual({ batch_size: "128", num_workers: "0", train_size: "0.8" });
   });
 
@@ -88,7 +86,7 @@ describe("authenticated training API", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
   });
 
-  it("submits the requested package name", async () => {
+    it("does not put a package name in the training submission", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }),
     );
@@ -101,11 +99,10 @@ describe("authenticated training API", () => {
       training: {},
       resources: {},
       priority: 0,
-      package_name: "nnm_mnist_classifier",
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toMatchObject({ package_name: "nnm_mnist_classifier" });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("package_name");
   });
 
   it("exposes machine-readable authentication errors", async () => {
@@ -149,10 +146,10 @@ describe("authenticated training API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    const wheel = await api.downloadModelPackage("job-1", expected);
+    const wheel = await api.downloadModelPackage("job-1", "nnm_vae");
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.lan:8000/jobs/job-1/package");
+    expect(url).toBe("http://backend.lan:8000/jobs/job-1/package?packageName=nnm_vae");
     expect(url).not.toContain("very-secret-token");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
     expect(await wheel.text()).toBe("wheel");
@@ -168,7 +165,7 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
       code: "package_corrupted",
     });
@@ -185,9 +182,9 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
-      code: "package_digest_mismatch",
+      code: "package_corrupted",
     });
   });
 
@@ -198,7 +195,7 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
       code: "package_digest_missing",
     });
@@ -214,7 +211,7 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
       code: "package_digest_invalid",
     });
@@ -227,7 +224,7 @@ describe("authenticated training API", () => {
 
     await expect(api.downloadModelPackage("job-1", "cazz")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 400,
-      code: "invalid_expected_digest",
+      code: "invalid_package_name",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -238,7 +235,7 @@ describe("authenticated training API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = new TrainingApiClient("http://backend.lan:8000");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 401,
       code: "missing_token",
     });
@@ -252,7 +249,7 @@ describe("authenticated training API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    const error = await api.downloadModelPackage("job-1", expected).catch((caught: unknown) => caught);
+    const error = await api.downloadModelPackage("job-1", "nnm_vae").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(BackendApiError);
     const apiError = error as BackendApiError;
     expect(apiError.status).toBe(400);
@@ -274,7 +271,7 @@ describe("authenticated training API", () => {
     vi.stubGlobal("crypto", { subtle: { digest: digestMock } });
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    const error = await api.downloadModelPackage("job-1", expected).catch((caught: unknown) => caught);
+    const error = await api.downloadModelPackage("job-1", "nnm_vae").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(BackendApiError);
     const apiError = error as BackendApiError;
     expect(apiError.status).toBe(400);

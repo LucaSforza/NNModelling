@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     const packageIds = request.protocolVersion === 1 ? ["core.input"] : request.packages
     const { selections, definitions } = await packageSelections(packageIds)
     host = await TypeSystemHost.create(selections)
-    for (const packageId of packageIds) await host.activate(packageId)
+    for (const packageId of packageIds) await host.activate(ref(packageId))
     outcome = request.protocolVersion === 1
       ? inferLegacy(host, request)
       : inferGraph(host, definitions, request)
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
 }
 
 function inferLegacy(host: TypeSystemHost, request: InputInferenceRequest): ProtocolOutcome {
-  const result = host.inferForEditor(request.packageId, request.context, request.parameters)
+  const result = host.inferForEditor(ref(request.packageId), request.context, request.parameters)
   if (result.status === "fault") return { status: "fault", message: result.fault.message }
   if (result.status === "unresolved") return result
   return result
@@ -71,7 +71,7 @@ function inferGraph(host: TypeSystemHost, definitions: ReadonlyMap<string, Defin
       if (!input) return { status: "error", message: `node '${node.id}' is evaluated before input '${inputId}'` }
       inputs.push(input)
     }
-    const result = host.inferForEditor(node.packageId, typeContext(definition.kind, inputs), node.parameters)
+    const result = host.inferForEditor(ref(node.packageId), typeContext(definition.kind, inputs), node.parameters)
     if (result.status === "success") outputs.set(node.id, result.output)
     else if (result.status === "error") return result
     else if (result.status === "fault") return { status: "fault", message: result.fault.message }
@@ -89,5 +89,7 @@ function typeContext(kind: PackageKind, inputs: readonly TensorType[]): TypeCont
   }
   return { kind, inputs: [inputs[0]!] }
 }
+
+function ref(id: string, version = "0.1.0") { return { id, version, name: id } }
 
 await main()

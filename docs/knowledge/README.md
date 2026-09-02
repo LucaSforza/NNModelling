@@ -1,7 +1,9 @@
 # Current internal knowledge
 
-These documents describe NNModelling as it exists now. Update them when code
-changes their contracts; do not append implementation history.
+These documents describe NNModelling's current contracts and accepted
+transitions. An accepted transition must link its active plan and identify any
+still-present implementation as transitional; do not preserve superseded
+behavior as a second supported contract or append narrative history.
 
 ## Architecture
 
@@ -23,9 +25,17 @@ changes their contracts; do not append implementation history.
 Durable architectural decisions should be added under `decisions/` and linked
 from the affected contract. Historical reasoning belongs under `docs/archive/`.
 
+UML:
+
+- [MCP use-case parity with the editor](uml/mcp-use-case-parity.md) — accepted functional constraint; implementation gaps are tracked separately.
+
 Current decisions:
 
 - [Package type-system cutover](decisions/stereotype-type-system-migration.md)
+- [Upstream Cordis package runtime](decisions/local-package-runtime.md)
+- [Model-scoped custom stereotype packages](decisions/model-scoped-stereotype-packages.md)
+- [Writable project workspaces and stereotype authoring](decisions/project-workspaces-and-stereotype-authoring.md)
+- [Project-owned datasets and named training batches](decisions/project-owned-datasets.md)
 - [Editable edge routing](decisions/editable-edge-routing.md)
 - [Package backend standard and least-privilege execution](decisions/package-backend-standard.md)
 - [Prediction and objective program separation](decisions/prediction-objective-programs.md)

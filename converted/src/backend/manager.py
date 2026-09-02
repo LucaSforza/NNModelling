@@ -18,8 +18,10 @@ from backend.executors import ContainerExecutor, Executor
 from backend.models import JobStatus, JobSubmission, ResourceRequest
 from backend.package_store import PackageStore
 from backend.store import JobStore, ValkeyJobStore, utc_now
-from model_package.adapters import adapter_spec_for_dataset
-from model_package.exporter import build_model_wheel
+from model_package.exporter import build_model_wheel, repackage_model_wheel, validate_package_name
+from model_package.adapters import adapter_spec_from_definition
+from dataset.contracts import DatasetReference
+from backend.dataset_store import DatasetArchiveStore
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
@@ -39,6 +41,7 @@ PACKAGE_SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}\Z")
 # bounded chunks, so a wheel is never loaded into memory on either the
 # copy-and-hash side or the serve side.
 PACKAGE_SNAPSHOT_CHUNK_SIZE = 1024 * 1024
+INTERNAL_PACKAGE_NAME = "nnm_model"
 
 
 class PackageIntegrityError(Exception):
@@ -63,6 +66,7 @@ class JobManager:
         *,
         package_snapshot_dir: str | Path | None = None,
         package_store: PackageStore | None = None,
+        dataset_store: DatasetArchiveStore | None = None,
     ) -> None:
         self.store = store
         self.artifact_root = Path(artifact_root).resolve()
@@ -77,6 +81,7 @@ class JobManager:
             Path(package_snapshot_dir) if package_snapshot_dir is not None else None
         )
         self.package_store = package_store or PackageStore(self.artifact_root / "packages")
+        self.dataset_store = dataset_store or DatasetArchiveStore(self.artifact_root / "datasets")
         self._active: dict[str, tuple[Executor, dict[str, Any]]] = {}
         self._round_robin_cursor = 0
         self._lock = threading.RLock()
@@ -175,7 +180,6 @@ class JobManager:
             )
         job_id = str(uuid.uuid4())
         created_at = utc_now()
-        payload = submission.model_dump(mode="json")
         # Resolve and validate the immutable bundle before creating any job
         # directory.  In particular, validation must never load or execute
         # package Python in the FastAPI process.
@@ -187,6 +191,21 @@ class JobManager:
             raise ValueError("package graph does not match the uploaded bundle")
         artifact_dir = self.artifact_root / job_id
         artifact_dir.mkdir(parents=True, exist_ok=False)
+        dataset_dir: Path | None = None
+        dataset_reference = submission.training.dataset.reference
+        if dataset_reference.kind == "project":
+            submission.training.dataset.parameters = self.dataset_store.validate_parameters(
+                dataset_reference,
+                submission.training.dataset.parameters,
+                owner_connection_id=owner_connection_id,
+            )
+            dataset_dir = artifact_dir / "dataset"
+            self.dataset_store.extract(
+                dataset_reference,
+                owner_connection_id=owner_connection_id,
+                destination=dataset_dir,
+            )
+        payload = submission.model_dump(mode="json")
         payload["id"] = job_id
         payload["created_at"] = created_at
         payload["artifact_dir"] = str(artifact_dir)
@@ -210,6 +229,8 @@ class JobManager:
             "model_package": None,
             "package_error": None,
             "artifact_dir": str(artifact_dir),
+            "dataset": submission.training.dataset.model_dump(mode="json"),
+            "dataset_dir": str(dataset_dir) if dataset_dir is not None else None,
             "owner_connection_id": owner_connection_id,
             "resources": submission.resources.model_dump(mode="json"),
             "submission": payload,
@@ -461,30 +482,33 @@ class JobManager:
             "stderr": _read_text(root / "stderr.log"),
         }
 
-    def package_download(self, job_id: str, *, owner_connection_id: str) -> tuple[Path, str, str]:
-        """Resolve and verify the owned job's wheel for download.
+    def package_download(
+        self,
+        job_id: str,
+        *,
+        package_name: str,
+        owner_connection_id: str,
+    ) -> tuple[Path, str, str]:
+        """Rebuild and verify an owned job's wheel for download.
 
-        The wheel is streamed from a single opened source handle into an
-        immutable backend-private snapshot while its SHA-256 is computed, and
-        the snapshot digest is compared in constant time against the
-        authoritative ``model_package.sha256`` recorded at export time. The
-        download response never reopens the original artifact path: it serves
-        the verified snapshot bytes, so a wheel replaced or modified after
-        verification cannot influence what is transferred. A snapshot whose
-        digest differs from the manifest is deleted and never returned.
+        ``package_name`` is the only user-selected package identity. The
+        server-generated template wheel is verified before it is repackaged,
+        and the newly generated wheel is then copied into an immutable
+        download snapshot whose digest is returned to the API layer.
 
         Returns:
             The verified snapshot path, the safe download filename, and the
-            SHA-256 digest of the snapshot bytes.
+            SHA-256 digest of the generated snapshot bytes.
 
         Raises:
             KeyError: The job does not exist or is not owned by the connection.
             FileNotFoundError: The job has no exported wheel or its declared
                 wheel path escapes the artifact root.
-            PackageIntegrityError: The declared manifest digest is missing or
-                malformed, or the snapshot bytes no longer match it.
+            PackageIntegrityError: The declared template digest is missing or
+                malformed, or the generated snapshot cannot be verified.
         """
 
+        validate_package_name(package_name)
         job = self._owned_job(job_id, owner_connection_id)
         package = job.get("model_package")
         if not isinstance(package, dict) or not isinstance(package.get("wheel"), str):
@@ -496,14 +520,26 @@ class JobManager:
         declared = package.get("sha256")
         if not isinstance(declared, str) or not PACKAGE_SHA256_HEX.fullmatch(declared):
             raise PackageIntegrityError("Model package integrity cannot be verified")
-        snapshot, computed = _create_package_snapshot(
+        template_snapshot, computed = _create_package_snapshot(
             wheel,
             snapshot_dir=self.package_snapshot_dir,
         )
         if not hmac.compare_digest(computed, declared.lower()):
-            _remove_file(snapshot)
+            _remove_file(template_snapshot)
             raise PackageIntegrityError("Model package integrity check failed")
-        return snapshot, wheel.name, computed
+        _remove_file(template_snapshot)
+
+        with tempfile.TemporaryDirectory(prefix="nnm-download-") as temporary:
+            generated = repackage_model_wheel(
+                wheel,
+                temporary,
+                package_name=package_name,
+            )
+            snapshot, generated_digest = _create_package_snapshot(
+                generated,
+                snapshot_dir=self.package_snapshot_dir,
+            )
+        return snapshot, generated.name, generated_digest
 
     def tail_logs(
         self,
@@ -617,14 +653,20 @@ class JobManager:
         if job is None:
             return False
         artifact_dir = Path(job["artifact_dir"])
-        package_name = job["submission"].get("package_name") or f"nnm_job_{job_id.replace('-', '')}"
         try:
             package = json.loads((artifact_dir / "package.json").read_text(encoding="utf-8"))
-            dataset_target = job["submission"]["training"]["dataset"]["target"]
-            input_adapter = adapter_spec_for_dataset(dataset_target)
+            dataset = DatasetReference.model_validate(job["submission"]["training"]["dataset"]["reference"])
+            definition = self.dataset_store.metadata(
+                dataset,
+                owner_connection_id=job["owner_connection_id"],
+            )["definition"]
+            if isinstance(definition, dict):
+                input_adapter = adapter_spec_from_definition(definition)
+            else:
+                input_adapter = adapter_spec_from_definition(definition.model_dump(mode="json"))
             build_model_wheel(
                 artifact_dir,
-                package_name=package_name,
+                package_name=INTERNAL_PACKAGE_NAME,
                 version="0.1.0",
                 package=package,
                 input_adapter=input_adapter,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from nnm_resnet_mnist_reference import Model
+from nnm_resnet_mnist import Model
 
 
 def classify(model: Model, image: Path) -> dict[str, object]:

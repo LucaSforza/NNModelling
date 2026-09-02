@@ -53,6 +53,26 @@ def build(parameters, context: BuildContext, services: NoServices):
     assert tuple(model(torch.ones(4, 2)).shape) == (4, 3)
 
 
+def test_normalized_input_node_preserves_named_binding() -> None:
+    identity_source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    input_package = _package("demo.input", identity_source, definition={"kind": "input"})
+    layer_package = _package("demo.identity", identity_source)
+    bundle = {
+        "packages": [input_package, layer_package],
+        "graph": {
+            "nodes": [
+                {"id": "input", "type": "custom", "package": {"id": "demo.input", "version": "0.1.0"}, "inputBinding": "image"},
+                {"id": "layer", "type": "custom", "package": {"id": "demo.identity", "version": "0.1.0"}},
+            ],
+            "edges": [{"source": "input", "target": "layer", "targetHandle": "in-0"}],
+        },
+    }
+
+    model = compile_package_graph(bundle)
+    value = torch.ones(2, 1)
+    assert torch.equal(model.prediction({"image": value}), value)
+
+
 def test_cross_entropy_objective_receives_target() -> None:
     source = """
 import torch
@@ -61,7 +81,7 @@ def build(parameters, context: BuildContext, services: NoServices):
     return torch.nn.CrossEntropyLoss()
 """
     package = _package("demo.cross-entropy", source, definition={
-        "kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets"}]}
+        "kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets.target"}]}
     })
     output_source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
     output = _package("demo.output", output_source, definition={"kind": "output"})
@@ -81,10 +101,10 @@ def build(parameters, context: BuildContext, services: NoServices):
 
 def test_reparameterize_is_deterministic_in_eval_but_stochastic_in_train() -> None:
     root = Path(__file__).parents[3]
-    source = (root / "stereotype-packages/core/reparameterize/pytorch.py").read_text()
+    source = (root / "examples/diagrams/package/models/variational-autoencoder/packages/sampling/pytorch.py").read_text()
     model = compile_package_graph({
-        "packages": [_package("core.reparameterize", source)],
-        "graph": _graph("core.reparameterize", parameters={"epsilon_scale": 1.0}),
+        "packages": [_package("example.vae.sampling", source)],
+        "graph": _graph("example.vae.sampling", parameters={"epsilon_scale": 1.0}),
     })
     packed = torch.tensor([[1.0, 2.0, 0.0, 0.0]])
     model.eval()
@@ -264,19 +284,20 @@ def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
 
     root = Path(__file__).parents[3]
     diagram = json.loads(
-        (root / "examples/diagrams/package/variational-autoencoder-complete.json").read_text()
+        (root / "examples/diagrams/package/models/variational-autoencoder/model.json").read_text()
     )
     package_ids = sorted({node["data"]["package"]["id"] for node in diagram["nodes"]})
     packages = []
     for package_id in package_ids:
-        package_dir = root / "stereotype-packages" / Path(*package_id.split("."))
+        package_ref = next((entry for entry in diagram["manifest"]["customPackages"] if entry["id"] == package_id), None)
+        package_dir = (
+            root / "examples/diagrams/package/models/variational-autoencoder" / package_ref["path"]
+            if package_ref is not None
+            else root / "stereotype-packages" / Path(*package_id.split("."))
+        )
         manifest = json.loads((package_dir / "manifest.json").read_text())
         files = {}
-        for file_path in ["manifest.json", "stereotype.json", "inference.lua"] + (
-            [manifest["entrypoints"]["pytorch"]["file"]]
-            if "pytorch" in manifest["entrypoints"]
-            else []
-        ):
+        for file_path in sorted(path.relative_to(package_dir).as_posix() for path in package_dir.rglob("*") if path.is_file()):
             content = (package_dir / file_path).read_bytes()
             files[file_path] = {
                 "content": base64.b64encode(content).decode(),
@@ -318,26 +339,23 @@ def test_frontend_vae_fixture_compiles_to_pytorch() -> None:
     objective = model.objective(inputs, targets)
     assert output.shape == targets.flatten(1).shape
     assert objective.ndim == 0
+    package_by_id = {package["manifest"]["id"]: package for package in packages}
+    assert package_by_id["example.vae.sampling"]["files"]["pytorch.py"]["content"]
+    assert package_by_id["example.vae.kl-divergence"]["files"]["pytorch.py"]["content"]
 
 
 def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
     """The package ResNet is an executable ten-class MNIST classifier."""
     root = Path(__file__).parents[3]
-    from package_worker import _load_dataset_class
-
-    assert _load_dataset_class("dataset.mnist.MNISTDataset").__name__ == "MNISTDataset"
-    diagram = json.loads((root / "examples/diagrams/package/resnet.json").read_text())
+    diagram = json.loads((root / "examples/diagrams/package/models/resnet/model.json").read_text())
+    assert diagram["manifest"]["customPackages"] == []
     package_ids = sorted({node["data"]["package"]["id"] for node in diagram["nodes"]})
     packages = []
     for package_id in package_ids:
         package_dir = root / "stereotype-packages" / Path(*package_id.split("."))
         manifest = json.loads((package_dir / "manifest.json").read_text())
         files = {}
-        for file_path in ["manifest.json", "stereotype.json", "inference.lua"] + (
-            [manifest["entrypoints"]["pytorch"]["file"]]
-            if "pytorch" in manifest["entrypoints"]
-            else []
-        ):
+        for file_path in sorted(path.relative_to(package_dir).as_posix() for path in package_dir.rglob("*") if path.is_file()):
             content = (package_dir / file_path).read_bytes()
             files[file_path] = {
                 "content": base64.b64encode(content).decode(),
@@ -365,6 +383,7 @@ def test_resnet_mnist_fixture_forwards_logits_for_registered_mnist() -> None:
     labels = torch.tensor([0, 1, 2, 3])
     assert tuple(logits.shape) == (4, 10)
     assert torch.isfinite(torch.nn.functional.cross_entropy(logits, labels))
+    assert not any(package["manifest"]["id"].startswith("example.vae.") for package in packages)
 
 
 def _role_packages(*, binding: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -373,7 +392,7 @@ def _role_packages(*, binding: dict[str, Any] | None = None) -> tuple[dict[str, 
     loss = _package(
         "demo.loss",
         loss_source,
-        definition={"kind": "loss", "objective": {"externalInputs": [binding or {"name": "reference", "source": "batch.targets"}]}},
+        definition={"kind": "loss", "objective": {"externalInputs": [binding or {"name": "reference", "source": "batch.targets.target"}]}},
     )
     output = _package("demo.output", output_source, definition={"kind": "output"})
     return loss, output
@@ -684,7 +703,7 @@ def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> Non
     loss = _package(
         "demo.loss-with-empty-selection",
         "import torch\ndef build(parameters, context, services): return torch.nn.MSELoss()\n",
-        definition={"kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets"}]}},
+        definition={"kind": "loss", "objective": {"externalInputs": [{"name": "target", "source": "batch.targets.target"}]}},
     )
     output = _package("demo.output-with-empty-selection", "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n", definition={"kind": "output"})
     graph = {"nodes": [
@@ -705,7 +724,7 @@ def test_empty_wheel_adapter_selections_are_ignored_on_non_module_nodes() -> Non
     ("binding", "message"),
     [
         ({"name": "reference", "source": "batch.inputs"}, "binding source"),
-        ({"name": "reference", "source": "batch.targets"}, ""),
+        ({"name": "reference", "source": "batch.targets.target"}, ""),
     ],
 )
 def test_objective_bindings_are_named_and_source_driven(binding: dict[str, Any], message: str) -> None:
@@ -723,8 +742,8 @@ def test_duplicate_objective_binding_names_are_rejected() -> None:
     loss["files"]["stereotype.json"] = _file(json.dumps({
         "kind": "loss",
         "objective": {"externalInputs": [
-            {"name": "reference", "source": "batch.targets"},
-            {"name": "reference", "source": "batch.targets"},
+            {"name": "reference", "source": "batch.targets.target"},
+            {"name": "reference", "source": "batch.targets.target"},
         ]},
     }))
     with pytest.raises(PackageValidationError, match="duplicate or invalid"):

@@ -2,6 +2,7 @@ import type { Node } from "@xyflow/svelte"
 import type { TypeContext } from "../type-inference"
 import { TypeSystemHost } from "../host"
 import { inputsFor, nodeParameters, packageIdentity, type GraphInferenceResult, type GraphNodeResult, type TypeGraphSnapshot } from "./types"
+import { compileGraphBindings } from "./bindings"
 
 /**
  * Schedules only the current DiagramCore snapshot. It owns no graph state and
@@ -34,13 +35,15 @@ export class PackageGraphScheduler {
       objectiveTerminals: roleInfo.objectiveTerminals,
       trainingComplete,
       trainingDiagnostics: roleInfo.diagnostics,
+      inputBindings: roleInfo.inputBindings,
+      objectiveBindings: roleInfo.objectiveBindings,
     }
   }
 
   private trainingRoles(snapshot: TypeGraphSnapshot, topLevel: readonly Node[], terminals: readonly string[]) {
     const kindOf = (node: Node): string | undefined => {
       const identity = packageIdentity(node)
-      return identity ? this.host.packageDefinition(identity.id)?.kind : undefined
+      return identity ? this.host.packageDefinition(identity)?.kind : undefined
     }
     const topLevelIds = new Set(topLevel.map(node => node.id))
     const predictionTerminals = terminals.filter(id => kindOf(topLevel.find(node => node.id === id)!) === "output")
@@ -64,6 +67,7 @@ export class PackageGraphScheduler {
     const objectiveTerminals = [...objectiveIds].filter(id => !(outgoing.get(id) ?? []).some(target => objectiveIds.has(target)))
     const diagnostics: string[] = []
     const topInputs = topLevel.filter(node => kindOf(node) === "input")
+    if (topInputs.length === 0) diagnostics.push("training graph requires at least one top-level Input")
     const reachable = new Set<string>()
     const reachableQueue = topInputs.map(node => node.id)
     while (reachableQueue.length) {
@@ -72,7 +76,12 @@ export class PackageGraphScheduler {
       reachable.add(id)
       reachableQueue.push(...(outgoing.get(id) ?? []))
     }
-    if (topInputs.length !== 1) diagnostics.push(`training graph requires exactly one top-level input; found ${topInputs.length}`)
+    const bindings = compileGraphBindings(
+      topLevel,
+      (identity) => this.host.packageDefinition(identity),
+      new Map([...snapshot.nodes].map((node) => [node.id, { status: "unresolved" as const, reason: "scheduler role validation does not infer inputs" }])),
+    )
+    diagnostics.push(...bindings.diagnostics.map((diagnostic) => diagnostic.message))
     if (predictionTerminals.length !== 1) diagnostics.push(`training graph requires exactly one prediction Output terminal; found ${predictionTerminals.length}`)
     if (objectiveTerminals.length !== 1) diagnostics.push(`training graph requires exactly one objective terminal; found ${objectiveTerminals.length}`)
     for (const node of topLevel) {
@@ -86,7 +95,14 @@ export class PackageGraphScheduler {
         diagnostics.push(`objective join '${id}' has no graph operands`)
       }
     }
-    return { predictionTerminals, objectiveTerminals, diagnostics, trainingComplete: diagnostics.length === 0 && losses.length > 0 }
+    return {
+      predictionTerminals,
+      objectiveTerminals,
+      diagnostics,
+      inputBindings: bindings.inputBindings,
+      objectiveBindings: bindings.objectiveBindings,
+      trainingComplete: diagnostics.length === 0 && losses.length > 0,
+    }
   }
 
   private inferScope(
@@ -139,13 +155,46 @@ export class PackageGraphScheduler {
   ): GraphNodeResult {
     const identity = packageIdentity(node)
     if (!identity) return { status: "unresolved", reason: "node has no versioned package identity" }
-    if (!this.host.isActive(identity.id)) return { status: "unresolved", reason: `package '${identity.id}' is not active` }
-    const version = this.host.packageVersion(identity.id)
-    if (version !== identity.version) return { status: "unresolved", reason: `package '${identity.id}' version '${identity.version}' is not active` }
-    const definition = this.host.packageDefinition(identity.id)
-    if (!definition) return { status: "unresolved", reason: `package '${identity.id}' has no definition` }
+    if (!this.host.isActive(identity)) {
+      const failure = this.host.packageRuntimeFailure(identity)
+      const message = failure?.message ?? `package '${identity.id}@${identity.version}' is unavailable or failed to activate`
+      if (!failure) {
+        this.host.recordDiagnostic({
+          occurrenceId: `activation:${identity.id}@${identity.version}:${node.id}`,
+          phase: "activation",
+          packageId: identity.id,
+          packageVersion: identity.version,
+          nodeId: node.id,
+          message,
+        })
+      }
+      return {
+        status: "fault",
+        fault: { packageId: identity.id, phase: "activation", message },
+      }
+    }
+    const definition = this.host.packageDefinition(identity)
+    if (!definition) {
+      const message = `package '${identity.id}@${identity.version}' has no active definition`
+      this.host.recordDiagnostic({
+        occurrenceId: `activation:${identity.id}@${identity.version}:${node.id}`,
+        phase: "activation",
+        packageId: identity.id,
+        packageVersion: identity.version,
+        nodeId: node.id,
+        message,
+      })
+      return { status: "fault", fault: { packageId: identity.id, phase: "activation", message } }
+    }
 
     const nodeEdges = snapshot.edges.filter((edge) => scopeIds.has(edge.source) && scopeIds.has(edge.target))
+    const dependencies = nodeEdges.filter((edge) => edge.target === node.id)
+      .map((edge) => results.get(edge.source))
+    const failedDependency = dependencies.find((result) => result?.status === "fault")
+    if (failedDependency?.status === "fault") return { status: "fault", fault: failedDependency.fault }
+    if (dependencies.some((result) => !result || result.status === "unresolved")) {
+      return { status: "unresolved", reason: "one or more input regions are unresolved" }
+    }
     let inputs = inputsFor(node.id, nodeEdges, results)
     if (inputs && inputs.length === 0 && boundaryInput && definition.kind !== "input") inputs = [boundaryInput]
     if (!inputs) return { status: "unresolved", reason: "one or more input regions are unresolved" }
@@ -180,6 +229,6 @@ export class PackageGraphScheduler {
         },
       }
     }
-    return this.host.inferForEditor(identity.id, context, nodeParameters(node))
+    return this.host.inferForEditor(identity, context, nodeParameters(node), node.id)
   }
 }

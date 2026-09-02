@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-08-29
 ---
 
 # Remote-training architecture
@@ -12,7 +12,16 @@ least-privilege Podman/Docker controller, is defined in the
 [active implementation plan](../../plans/active/package-backend-standard/plan.md).
 
 ```text
-TrainingSidebar or MCP HTTP client
+TrainingSidebar
+  -> browser TrainingController/API
+  -> FastAPI (`converted/src/backend/app.py`)
+
+Selected-editor MCP workflow
+  -> BrowserRPCHandler -> browser TrainingController/API
+  -> FastAPI (`converted/src/backend/app.py`)
+
+Legacy MCP compatibility tools
+  -> RemoteTrainingClient (`NNM_BACKEND_URL`/`NNM_BACKEND_TOKEN`)
   -> FastAPI (`converted/src/backend/app.py`)
   -> Valkey job store and event streams
   -> JobManager priority/FIFO scheduler
@@ -26,9 +35,10 @@ TrainingSidebar or MCP HTTP client
 contains:
 
 - `network`: a `package` bundle reference plus semantic graph;
-- `training`: dataset, optimizer, trainer, W&B and early stopping;
+- `training`: an opaque resolved dataset reference with typed parameters,
+  optimizer, trainer, W&B and early stopping;
 - `resources`: CPU, memory, GPU and optional controller selectors;
-- `priority` and optional `nnm_<name>` package name.
+- `priority` only; the importable wheel name is selected at download time.
 
 The current public lifecycle is:
 
@@ -46,16 +56,19 @@ and must be reassessed against current code before becoming a new plan.
 
 ## Boundaries
 
-- The frontend and optional MCP client use the same FastAPI state; MCP does not
-  duplicate jobs or scheduling.
+- The frontend and selected-editor MCP workflow share the browser's
+  `TrainingController`; legacy MCP compatibility tools use the process-configured
+  HTTP client. Neither path duplicates jobs or scheduling, and they must not be
+  silently treated as the same connection owner.
 - The API validates typed package/training data and never imports package
   Python in FastAPI.
 - The accepted target launches exactly one short-lived worker container per job
   through a Podman/Docker controller.
 - Artifacts default to `converted/jobs/<job-id>/` and may be relocated with
   `NNM_BACKEND_ARTIFACT_ROOT`.
-- Dataset discovery and package execution follow the registered-dataset and
-  worker-only policy.
+- Project dataset archives are bounded, content-addressed and
+  ownership-scoped; their Python executes only inside the worker. See
+  [Project-owned datasets](../decisions/project-owned-datasets.md).
 - Job access is scoped to an authenticated browser connection; see
   [Pairing and ownership](../contracts/pairing.md).
 - The package path emits the portable wheel contract. See
@@ -71,3 +84,22 @@ and must be reassessed against current code before becoming a new plan.
 - `front-end/src/components/TrainingSidebar.svelte`: browser workflow.
 - `front-end/src/training/api.ts`: browser REST/SSE client.
 - `mcp-server/src/remote-training.ts`: optional authenticated HTTP client.
+
+Wheel downloads require `GET /jobs/{id}/package?packageName=nnm_<suffix>`.
+`packageName` is validated server-side and is never accepted in
+`JobSubmission` or persisted training configuration. The backend rebuilds the
+wheel package directory and dist-info under that name, recomputes `RECORD`,
+and returns the digest of those exact bytes in `X-NNM-SHA256`. Clients must
+verify that response digest and the downloaded body.
+
+## MCP provenance
+
+Connection/configuration/submission operations are editor-scoped only when they
+traverse `BrowserRPCHandler` and the paired browser API. The public
+`read_training_progress` and `download_training_wheel` tools remain compatibility
+operations through `RemoteTrainingClient`. The distinct
+`read_editor_training_progress` and `download_editor_training_wheel` tools route
+through `BrowserRPCHandler` and the paired browser identity. The latter verifies
+the wheel in the browser, then the MCP server writes it to a private,
+non-overwriting artifact path. Results expose only route-safe metadata and never
+bearer tokens.

@@ -1,18 +1,17 @@
 import type { PackageBundleV1 } from "./package-bundle";
+import type { DatasetDefinition, DatasetReference, DatasetSourceManifest } from "../project-workspace/dataset-contract";
 
 export interface DatasetParameter {
   name: string;
   type: string;
-  default: unknown;
   required: boolean;
+  default?: unknown;
 }
 
 export interface DatasetInfo {
-  target: string;
-  name: string;
-  doc: string;
-  parameters: DatasetParameter[];
-  num_classes: number | null;
+  reference: DatasetReference;
+  manifest: DatasetSourceManifest;
+  definition: DatasetDefinition;
 }
 
 /** Keep the submitted constructor arguments aligned with the registered schema.
@@ -25,9 +24,9 @@ export function canonicalDatasetParameters(
   values: Readonly<Record<string, string>>,
 ): Record<string, string> {
   return Object.fromEntries(
-    dataset.parameters
+  dataset.definition.parameters
       .filter((parameter) => Object.hasOwn(values, parameter.name))
-      .map((parameter) => [parameter.name, values[parameter.name]!]),
+    .map((parameter) => [parameter.name, values[parameter.name]!]),
   );
 }
 
@@ -46,6 +45,7 @@ export interface TrainingJobStatus {
   model_package: ModelPackageInfo | null;
   package_error: string | null;
   artifact_dir: string;
+  dataset: { reference: DatasetReference; parameters: Record<string, string | number | boolean> } | null;
 }
 
 export interface ModelPackageInfo {
@@ -73,18 +73,39 @@ export interface TrainingLogChunk {
   reset: boolean;
 }
 
+export interface TrainingProgressOptions {
+  eventCursor?: string;
+  stdoutOffset?: number;
+  stderrOffset?: number;
+  waitMs?: number;
+  maxBytes?: number;
+  signal?: AbortSignal;
+}
+
+export interface TrainingProgressResult {
+  status: "ok";
+  job: TrainingJobStatus;
+  metrics: Record<string, unknown>;
+  diagnostics: string[];
+  events: Record<string, unknown>[];
+  stdout: TrainingLogChunk & { nextOffset: number };
+  stderr: TrainingLogChunk & { nextOffset: number };
+  eventCursor: string | null;
+  nextEventCursor: string | null;
+  timedOut: boolean;
+}
+
 export interface TrainingJobRequest {
   schema_version: number;
   network: { format: "package"; value: { bundle_ref: string; graph: PackageBundleV1["graph"] } };
   training: TrainingRequest;
   resources: ResourceRequest;
   priority: number;
-  package_name?: string;
 }
 
-export interface DatasetRequest { target: string; parameters: Record<string, unknown>; }
+export interface OpaqueDatasetRequest { reference: DatasetReference; parameters: Record<string, string | number | boolean>; }
 export interface TrainingRequest {
-  dataset: DatasetRequest;
+  dataset: OpaqueDatasetRequest;
   seed: number;
   optimizer: { target: string; learning_rate: number };
   trainer: { max_epochs: number; accelerator: "auto" | "cpu" | "cuda"; patience: number; min_delta: number };
@@ -100,6 +121,15 @@ export interface PackageBundleUploadResponse {
   digest: string;
   size: number;
 }
+
+export interface DatasetArchiveUploadResponse {
+  reference: DatasetReference;
+  digest: string;
+  size: number;
+  limit: number;
+}
+
+export interface DatasetArchiveCapabilities { format: "zip"; max_bytes: number }
 
 export interface PairingGrant {
   request_id: string;
@@ -179,8 +209,17 @@ export class TrainingApiClient {
     return this.request("/session", { method: "DELETE" });
   }
 
-  listDatasets(): Promise<DatasetInfo[]> {
-    return this.request("/datasets");
+  datasetArchiveCapabilities(): Promise<DatasetArchiveCapabilities> {
+    return this.request("/dataset-archives/capabilities");
+  }
+
+  async uploadDatasetArchive(bytes: Uint8Array): Promise<DatasetArchiveUploadResponse> {
+    const digest = await sha256Hex(bytes as Uint8Array<ArrayBuffer>);
+    return this.request("/dataset-archives", {
+      method: "POST",
+      headers: { "content-type": "application/zip", "x-nnm-sha256": digest },
+      body: bytes as BodyInit,
+    });
   }
 
   listTrainingJobs(): Promise<TrainingJobStatus[]> {
@@ -233,16 +272,103 @@ export class TrainingApiClient {
     return this.request(`/jobs/${encodeURIComponent(jobId)}/logs/tail?${query}`);
   }
 
+  /** Read one bounded progress window; the event and log cursors are independent. */
+  async readTrainingProgress(jobId: string, options: TrainingProgressOptions = {}): Promise<TrainingProgressResult> {
+    const stdoutOffset = boundedInteger(options.stdoutOffset ?? 0, 0, "stdoutOffset");
+    const stderrOffset = boundedInteger(options.stderrOffset ?? 0, 0, "stderrOffset");
+    const waitMs = boundedInteger(options.waitMs ?? 0, 0, "waitMs", 30000);
+    const maxBytes = boundedInteger(options.maxBytes ?? 262144, 1, "maxBytes", 262144);
+    const eventCursor = options.eventCursor;
+    if (eventCursor !== undefined && eventCursor.length === 0) throw new BackendApiError(400, "invalid_event_cursor", "Il cursore eventi non può essere vuoto");
+
+    const controller = new AbortController();
+    const abort = () => controller.abort(options.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    options.signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), waitMs);
+    try {
+      const [job, logs] = await Promise.all([
+        this.getTrainingJob(jobId),
+        this.tailTrainingJobLogs(jobId, stdoutOffset, stderrOffset),
+      ]);
+      const eventResult = await this.readEventWindow(jobId, eventCursor, waitMs, maxBytes, controller.signal);
+      return {
+        status: "ok",
+        job,
+        metrics: eventResult.metrics,
+        diagnostics: eventResult.diagnostics,
+        events: eventResult.events,
+        stdout: { ...logs.stdout, nextOffset: logs.stdout.offset },
+        stderr: { ...logs.stderr, nextOffset: logs.stderr.offset },
+        eventCursor: eventCursor ?? null,
+        nextEventCursor: eventResult.nextEventCursor,
+        timedOut: eventResult.timedOut,
+      };
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+    }
+  }
+
+  private async readEventWindow(jobId: string, cursor: string | undefined, waitMs: number, maxBytes: number, signal: AbortSignal): Promise<{
+    events: Record<string, unknown>[];
+    metrics: Record<string, unknown>;
+    diagnostics: string[];
+    nextEventCursor: string | null;
+    timedOut: boolean;
+  }> {
+    const query = cursor ? `?after=${encodeURIComponent(cursor)}` : "";
+    const headers = this.authHeaders();
+    headers.set("accept", "text/event-stream");
+    if (cursor) headers.set("last-event-id", cursor);
+    const events: Record<string, unknown>[] = [];
+    let nextEventCursor = cursor ?? null;
+    const metrics: Record<string, unknown> = {};
+    const diagnostics: string[] = [];
+    try {
+      const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/events${query}`, { headers, signal });
+      if (!response.ok) throw await responseError(response);
+      if (!response.body) throw new BackendApiError(502, "events_stream_missing", "Il backend non ha restituito uno stream eventi");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = new SseParser();
+      let bytes = 0;
+      try {
+        while (true) {
+          const item = await reader.read();
+          if (item.done) break;
+          bytes += item.value.byteLength;
+          if (bytes > maxBytes) throw new BackendApiError(413, "progress_too_large", "La finestra di progress supera il limite di byte");
+          for (const message of parser.push(decoder.decode(item.value, { stream: true }))) {
+            if (message.id) nextEventCursor = message.id;
+            const event = JSON.parse(message.data) as Record<string, unknown>;
+            events.push(event);
+            collectProgress(event, metrics, diagnostics);
+          }
+        }
+        for (const message of parser.push(decoder.decode())) {
+          if (message.id) nextEventCursor = message.id;
+          const event = JSON.parse(message.data) as Record<string, unknown>;
+          events.push(event);
+          collectProgress(event, metrics, diagnostics);
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      return { events, metrics, diagnostics, nextEventCursor, timedOut: false };
+    } catch (error) {
+      if (isTimeoutAbort(error, signal)) return { events, metrics, diagnostics, nextEventCursor, timedOut: true };
+      throw error;
+    }
+  }
+
   /**
    * Download the authenticated job's wheel, verifying its integrity before any
    * byte is returned.
    *
-   * The authoritative digest comes from the job manifest (`expectedSha256`).
-   * The server recomputes and exposes the digest of the bytes it serves
-   * through the `X-NNM-SHA256` response header; the header must be present,
-   * well-formed and equal to the expected digest. The body is then digested
-   * client-side with Web Crypto and must match the expected digest too, so a
-   * corrupted or substituted response is never trusted on the header alone.
+   * The selected package name is sent to the backend for download-time wheel
+   * generation. The server exposes the digest of those selected bytes through
+   * the `X-NNM-SHA256` response header; the header must be present and
+   * well-formed, and the body must match it before any Blob is returned.
    *
    * Web Crypto is exposed only in a secure frontend context (HTTPS or
    * localhost). If it is unavailable — or a digest operation rejects — the
@@ -254,11 +380,11 @@ export class TrainingApiClient {
    *   missing/malformed/mismatched header or body digest, or an unavailable
    *   Web Crypto platform. No Blob is produced unless every check passes.
    */
-  async downloadModelPackage(jobId: string, expectedSha256: string): Promise<Blob> {
-    const expected = requireSha256Hex(expectedSha256, 400, "invalid_expected_digest",
-      "Il digest SHA-256 atteso dal manifest del job non è valido");
+  async downloadModelPackage(jobId: string, packageName: string): Promise<Blob> {
+    const selectedPackageName = requirePackageName(packageName);
     requireWebCrypto();
-    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package`, {
+    const query = new URLSearchParams({ packageName: selectedPackageName });
+    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/package?${query}`, {
       headers: this.authHeaders(),
     });
     if (!response.ok) throw await responseError(response);
@@ -270,14 +396,9 @@ export class TrainingApiClient {
     }
     const declared = requireSha256Hex(header, 502, "package_digest_invalid",
       "Il digest SHA-256 restituito dal server non è valido; il download è stato annullato");
-    if (declared !== expected) {
-      throw new BackendApiError(502, "package_digest_mismatch",
-        "Il digest SHA-256 restituito dal server non corrisponde al manifest del job; il download è stato annullato");
-    }
-
     const bytes = new Uint8Array(await response.arrayBuffer());
     const bodyDigest = await sha256Hex(bytes);
-    if (bodyDigest !== expected) {
+    if (bodyDigest !== declared) {
       throw new BackendApiError(502, "package_corrupted",
         "Il package scaricato non ha superato la verifica di integrità SHA-256; il download è stato annullato. Riprova o rigenera il job");
     }
@@ -370,6 +491,19 @@ export function canCancelTrainingJob(status: TrainingJobStatus["status"]): boole
   return status === "queued" || status === "running";
 }
 
+const PACKAGE_NAME = /^nnm_[A-Za-z][A-Za-z0-9_]*$/;
+
+export function requirePackageName(value: string): string {
+  if (!PACKAGE_NAME.test(value)) {
+    throw new BackendApiError(400, "invalid_package_name", "Il nome package deve avere il formato nnm_<nome>");
+  }
+  return value;
+}
+
+export function wheelFilename(packageName: string, version: string): string {
+  return `${requirePackageName(packageName)}-${version}-py3-none-any.whl`;
+}
+
 async function responseError(response: Response): Promise<BackendApiError> {
   const body = await response.json().catch(() => undefined) as ApiErrorBody | undefined;
   const detail = body?.detail;
@@ -418,7 +552,7 @@ function requireWebCrypto(): void {
  * rejecting digest operation is mapped to the same actionable platform error
  * as the upfront availability check, so verification never fails silently.
  */
-async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+export async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   let digest: ArrayBuffer;
   try {
     digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -436,4 +570,24 @@ function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void
       reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
     }, { once: true });
   });
+}
+
+function boundedInteger(value: number, minimum: number, field: string, maximum = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new BackendApiError(400, `invalid_${field}`, `${field} deve essere un intero tra ${minimum} e ${maximum}`);
+  }
+  return value;
+}
+
+function isTimeoutAbort(error: unknown, signal: AbortSignal): boolean {
+  return signal.aborted && (signal.reason instanceof DOMException && signal.reason.name === "TimeoutError");
+}
+
+function collectProgress(event: Record<string, unknown>, metrics: Record<string, unknown>, diagnostics: string[]): void {
+  const eventMetrics = event.metrics;
+  if (eventMetrics && typeof eventMetrics === "object" && !Array.isArray(eventMetrics)) Object.assign(metrics, eventMetrics);
+  if (typeof event.error === "string") diagnostics.push(event.error);
+  if (typeof event.diagnostic === "string") diagnostics.push(event.diagnostic);
+  const packageError = event.package_error;
+  if (typeof packageError === "string") diagnostics.push(packageError);
 }

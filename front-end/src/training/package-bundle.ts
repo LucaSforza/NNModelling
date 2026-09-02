@@ -1,17 +1,27 @@
 import type { Edge, Node } from "@xyflow/svelte"
 import type { PackageExportInfo, WheelAdapterValueSchema } from "../type-system/packages/types"
-import type { PackageIdentity } from "../core/types"
+import type { PackageIdentity, PersistedPackageIdentity } from "../core/types"
 import { parseDefinition } from "../type-system/packages/validation"
 import type { GraphInferenceResult } from "../type-system/graph/types"
+import type { GraphInputBinding, GraphObjectiveBinding } from "../type-system/graph/types"
+import { compileGraphBindings, packageDefinitionResolver, type CompiledGraphBindings } from "../type-system/graph/bindings"
+import type { DatasetDefinition } from "../project-workspace/dataset-contract"
+import { packageKey } from "../type-system/packages/catalog"
+import { satisfies } from "../type-system/packages/semver"
 
 export type PackageBundleGraph = {
+  /** Deterministic named model inputs, sorted by slot then node ID. */
+  readonly inputBindings: readonly GraphInputBinding[]
+  /** Loss package declarations copied into the executable graph boundary. */
+  readonly objectiveBindings: readonly GraphObjectiveBinding[]
   readonly nodes: readonly {
     readonly id: string
     readonly type: string
-    readonly package: PackageIdentity
+    readonly package: PersistedPackageIdentity
     readonly params: Readonly<Record<string, unknown>>
     readonly wheelAdapters: readonly PackageBundleAdapterBinding[]
     readonly parentId: string | null
+    readonly inputBinding?: string
   }[]
   readonly edges: readonly {
     readonly id: string
@@ -39,6 +49,8 @@ export type PackageBundlePackage = {
   readonly id: string
   readonly version: string
   readonly dependencies: Readonly<Record<string, string>>
+  /** Exact dependency identities selected for this bundle. */
+  readonly resolvedDependencies: Readonly<Record<string, string>>
   readonly manifest: PackageExportInfo["manifest"]
   readonly files: Readonly<Record<string, PackageBundleFile>>
 }
@@ -52,8 +64,8 @@ export type PackageBundleV1 = {
   readonly digest: string
 }
 
-type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[] } }
-type SemanticGraph = Omit<PackageBundleGraph, "nodes"> & {
+type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[]; inputBinding?: string } }
+type SemanticGraph = Omit<PackageBundleGraph, "nodes" | "inputBindings" | "objectiveBindings"> & {
   readonly nodes: readonly (Omit<PackageBundleGraph["nodes"][number], "wheelAdapters"> & { readonly wheelAdapters: readonly string[] })[]
 }
 
@@ -63,58 +75,45 @@ export async function buildPackageBundle(
   edges: readonly Edge[],
   exports: ReadonlyMap<string, PackageExportInfo>,
   inference?: GraphInferenceResult | null,
+  dataset?: DatasetDefinition,
 ): Promise<PackageBundleV1> {
   const graphDraft = semanticGraph(nodes, edges)
   const selected = new Map<string, PackageExportInfo>()
-  const visit = (identity: PackageIdentity): void => {
-    const current = selected.get(identity.id)
-    if (current) {
-      if (current.manifest.version !== identity.version) {
-        throw new Error(`package '${identity.id}' has conflicting versions in graph`)
-      }
+  const selectedKeys = new Map<string, string>()
+  const visit = (identity: PersistedPackageIdentity): void => {
+    const key = packageKey(identity.id, identity.version)
+    const currentKey = selectedKeys.get(identity.id)
+    if (currentKey) {
+      if (currentKey !== key) throw new Error(`package '${identity.id}' has conflicting versions in graph`)
       return
     }
-    const packageInfo = exports.get(identity.id)
-    if (!packageInfo) throw new Error(`package '${identity.id}' is not active`)
-    if (packageInfo.manifest.version !== identity.version) {
-      throw new Error(`package '${identity.id}' version '${identity.version}' is not active`)
-    }
-    // Contract v1 treats Input as the graph boundary; it has no executable
-    // factory in the current catalog, while every executable package must.
-    if (packageInfo.manifest.id !== "core.input" && !packageInfo.pytorch) {
-      throw new Error(`package '${identity.id}' has no PyTorch entrypoint`)
-    }
-    selected.set(identity.id, packageInfo)
+    const packageInfo = exactExport(exports, identity)
+    assertUsable(packageInfo, key)
+    selectedKeys.set(identity.id, key)
+    selected.set(key, packageInfo)
     for (const dependency of Object.keys(packageInfo.manifest.dependencies).sort()) {
-      const dependencyInfo = exports.get(dependency)
-      if (!dependencyInfo) throw new Error(`package '${identity.id}' dependency '${dependency}' is not active`)
-      visit({ id: dependency, version: dependencyInfo.manifest.version, name: dependencyInfo.manifest.id })
+      const dependencyKey = resolveDependency(exports, packageInfo, key, dependency)
+      visit(packageDiagnosticIdentity(dependencyKey))
     }
   }
   for (const node of graphDraft.nodes) visit(node.package)
-  const graph = materializeGraph(graphDraft, selected, inference)
+  const bindings = compileGraphBindings(nodes, packageDefinitionResolver(exports), inference?.nodes, dataset)
+  if (bindings.diagnostics.length > 0) {
+    throw new Error(bindings.diagnostics.map((diagnostic) => diagnostic.message).join("; "))
+  }
+  const graph = materializeGraph(graphDraft, selected, inference, bindings)
 
   const packages = await Promise.all([...selected.values()]
     .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
     .map(async (packageInfo) => {
-      const files = [
-        await file("manifest.json", JSON.stringify(packageInfo.manifest)),
-        await file("stereotype.json", packageInfo.definition),
-        ...(packageInfo.pytorch === undefined ? [] : [await file("pytorch.py", packageInfo.pytorch)]),
-      ]
+      const files = await packageFiles(packageInfo)
       return {
         id: packageInfo.manifest.id,
         version: packageInfo.manifest.version,
         dependencies: packageInfo.manifest.dependencies,
+        resolvedDependencies: packageInfo.resolvedDependencies ?? resolveDependencyMap(exports, packageInfo, packageKey(packageInfo.manifest.id, packageInfo.manifest.version)),
         manifest: packageInfo.manifest,
-        files: Object.fromEntries(
-          files
-            .sort((left, right) => left.path.localeCompare(right.path))
-            .map((entry) => [entry.path, {
-              ...entry,
-              content: toBase64(entry.content),
-            }]),
-        ),
+        files: Object.fromEntries(files.map((entry) => [entry.path, entry])),
       }
     }))
   const payload = {
@@ -131,14 +130,18 @@ function materializeGraph(
   graph: SemanticGraph,
   selected: ReadonlyMap<string, PackageExportInfo>,
   inference?: GraphInferenceResult | null,
+  bindings?: CompiledGraphBindings,
 ): PackageBundleGraph {
   const definitions = new Map<string, ReadonlyMap<string, WheelAdapterValueDefinition>>()
-  for (const [id, packageInfo] of selected) {
-    const definition = parseDefinition(JSON.parse(packageInfo.definition))
-    definitions.set(id, new Map((definition.wheelAdapters ?? []).map((adapter) => [adapter.name, adapter])))
+  for (const [key, packageInfo] of selected) {
+    const definition = parseDefinition(typeof packageInfo.definition === "string" ? JSON.parse(packageInfo.definition) : packageInfo.definition)
+    definitions.set(key.slice(0, key.lastIndexOf("@")), new Map((definition.wheelAdapters ?? []).map((adapter) => [adapter.name, adapter])))
   }
   const nodes = graph.nodes.map((node) => ({
     ...node,
+    ...(bindings?.inputBindings.find((binding) => binding.nodeId === node.id) === undefined
+      ? {}
+      : { inputBinding: bindings.inputBindings.find((binding) => binding.nodeId === node.id)!.name }),
     wheelAdapters: node.wheelAdapters.map((name) => {
       if (!name.trim()) throw new Error(`graph node '${node.id}' has an empty wheel adapter binding`)
       const declaration = definitions.get(node.package.id)?.get(name)
@@ -146,7 +149,12 @@ function materializeGraph(
       return bindAdapter(node, name, declaration, graph.edges, inference)
     }),
   }))
-  return { ...graph, nodes }
+  return {
+    ...graph,
+    inputBindings: bindings?.inputBindings ?? [],
+    objectiveBindings: bindings?.objectiveBindings ?? [],
+    nodes,
+  }
 }
 
 type WheelAdapterValueDefinition = {
@@ -227,6 +235,7 @@ function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): Semantic
       params: (node.data?.params ?? {}) as Readonly<Record<string, unknown>>,
       wheelAdapters: [...(node.data?.wheelAdapters ?? [])].sort(),
       parentId: node.parentId ?? null,
+      ...(typeof node.data?.inputBinding === "string" ? { inputBinding: node.data.inputBinding } : {}),
     }
   }).sort((left, right) => left.id.localeCompare(right.id))
 
@@ -244,9 +253,91 @@ function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): Semantic
   return { nodes: graphNodes, edges: graphEdges }
 }
 
-async function file(path: string, content: string): Promise<PackageBundleFile> {
-  const normalized = path.endsWith(".py") ? content.replace(/\r\n/g, "\n") : canonicalJson(JSON.parse(content))
-  return { path, content: normalized, size: new TextEncoder().encode(normalized).byteLength, sha256: await sha256(normalized) }
+async function file(path: string, content: string | Uint8Array): Promise<PackageBundleFile> {
+  const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
+  return { path, content: toBase64(bytes), size: bytes.byteLength, sha256: await sha256Bytes(bytes) }
+}
+
+/** Select one exact installed export; a bare ID can never satisfy this lookup. */
+function exactExport(exports: ReadonlyMap<string, PackageExportInfo>, identity: PersistedPackageIdentity): PackageExportInfo {
+  const matches = [...exports.values()].filter((candidate) => (
+    candidate.manifest.id === identity.id && candidate.manifest.version === identity.version
+  ))
+  if (matches.length === 0) throw new Error(`package '${identity.id}@${identity.version}' is not active`)
+  if (matches.length > 1) throw new Error(`package '${identity.id}@${identity.version}' is ambiguous`)
+  return matches[0]!
+}
+
+function assertUsable(packageInfo: PackageExportInfo, key: string): void {
+  if ((packageInfo.state !== undefined && packageInfo.state !== "active") || packageInfo.active === false) throw new Error(`package '${key}' is not active`)
+  // Contract v1 treats Input as the graph boundary; it has no executable
+  // factory in the current catalog, while every executable package must.
+  const pytorch = packageInfo.manifest.entrypoints.pytorch?.file
+  const hasPytorch = packageInfo.resources
+    ? pytorch !== undefined && packageInfo.resources[pytorch] !== undefined
+    : packageInfo.pytorch !== undefined
+  if (packageInfo.manifest.id !== "core.input" && !hasPytorch) {
+    throw new Error(`package '${key}' has no PyTorch entrypoint`)
+  }
+}
+
+function resolveDependency(
+  exports: ReadonlyMap<string, PackageExportInfo>,
+  packageInfo: PackageExportInfo,
+  packageKeyValue: string,
+  dependency: string,
+): string {
+  const resolved = packageInfo.resolvedDependencies?.[dependency]
+  if (resolved !== undefined) {
+    const separator = resolved.lastIndexOf("@")
+    if (separator <= 0) throw new Error(`package '${packageKeyValue}' has invalid resolved dependency '${resolved}'`)
+    const id = resolved.slice(0, separator)
+    const version = resolved.slice(separator + 1)
+    if (id !== dependency || !satisfies(version, packageInfo.manifest.dependencies[dependency]!)) {
+      throw new Error(`package '${packageKeyValue}' dependency '${dependency}' resolves to wrong version '${resolved}'`)
+    }
+    exactExport(exports, { id, version })
+    return resolved
+  }
+  const candidates = [...exports.values()].filter((candidate) => (
+    candidate.manifest.id === dependency && satisfies(candidate.manifest.version, packageInfo.manifest.dependencies[dependency]!)
+  ))
+  if (candidates.length === 0) throw new Error(`package '${packageKeyValue}' dependency '${dependency}' is not active`)
+  if (candidates.length > 1) throw new Error(`package '${packageKeyValue}' dependency '${dependency}' is ambiguous`)
+  const candidate = candidates[0]!
+  const key = packageKey(candidate.manifest.id, candidate.manifest.version)
+  assertUsable(candidate, key)
+  return key
+}
+
+function resolveDependencyMap(exports: ReadonlyMap<string, PackageExportInfo>, packageInfo: PackageExportInfo, key: string): Readonly<Record<string, string>> {
+  return Object.fromEntries(Object.keys(packageInfo.manifest.dependencies).sort().map((dependency) => [
+    dependency,
+    resolveDependency(exports, packageInfo, key, dependency),
+  ]))
+}
+
+function packageDiagnosticIdentity(key: string): PersistedPackageIdentity {
+  const separator = key.lastIndexOf("@")
+  return { id: key.slice(0, separator), version: key.slice(separator + 1) }
+}
+
+async function packageFiles(packageInfo: PackageExportInfo): Promise<PackageBundleFile[]> {
+  const resources = packageInfo.resources
+  const entries: Array<[string, string | Uint8Array]> = resources
+    ? Object.entries(resources)
+    : [
+        ["manifest.json", JSON.stringify(packageInfo.manifest)],
+        [packageInfo.manifest.entrypoints.definition, typeof packageInfo.definition === "string" ? packageInfo.definition : JSON.stringify(packageInfo.definition)],
+        ...(packageInfo.manifest.entrypoints.inference ? [] : []),
+        ...(packageInfo.pytorch === undefined ? [] : [[packageInfo.manifest.entrypoints.pytorch?.file ?? "pytorch.py", packageInfo.pytorch] as [string, string]]),
+      ]
+  if (resources) {
+    for (const path of ["manifest.json", packageInfo.manifest.entrypoints.definition, packageInfo.manifest.entrypoints.inference?.file, packageInfo.manifest.entrypoints.pytorch?.file]) {
+      if (path !== undefined && !entries.some(([candidate]) => candidate === path)) throw new Error(`package '${packageInfo.manifest.id}@${packageInfo.manifest.version}' resource '${path}' is missing`)
+    }
+  }
+  return Promise.all(entries.sort(([left], [right]) => left.localeCompare(right)).map(([path, content]) => file(path, content)))
 }
 
 function canonicalize(value: unknown): unknown {
@@ -268,13 +359,17 @@ function canonicalize(value: unknown): unknown {
 }
 
 async function sha256(value: string): Promise<string> {
+  return sha256Bytes(new TextEncoder().encode(value))
+}
+
+async function sha256Bytes(value: Uint8Array): Promise<string> {
   if (typeof globalThis.crypto?.subtle?.digest !== "function") throw new Error("Web Crypto is required to build a package bundle")
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", value as unknown as BufferSource)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
-function toBase64(value: string): string {
-  const bytes = new TextEncoder().encode(value)
+function toBase64(value: string | Uint8Array): string {
+  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value
   let binary = ""
   for (let index = 0; index < bytes.length; index += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))

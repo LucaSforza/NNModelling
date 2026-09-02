@@ -24,6 +24,10 @@ import type { Diagram } from "../Diagram.svelte";
 import type { Node, Edge } from "@xyflow/svelte";
 import type { GraphInferenceResult } from "../type-system/graph/types";
 import { packageIdentity } from "../type-system/graph/types";
+import { compileGraphBindings } from "../type-system/graph/bindings";
+import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
+import { TrainingController } from "../training/controller";
+import type { ProjectPathPayload } from "../project-workspace/path";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -36,13 +40,44 @@ interface RPCRequest {
 interface RPCResponse {
   id: string;
   result?: unknown;
-  error?: { message: string };
+  error?: { message: string; code?: string };
+}
+
+export interface ProjectRPCBridge {
+  create: (payload: ProjectPathPayload) => Promise<unknown>;
+  open: (payload: ProjectPathPayload) => Promise<unknown>;
 }
 
 // The WebSocket protocol defines OPEN as readyState 1. Keeping the value
 // local makes response dispatch independent of a global WebSocket constructor,
 // which is absent in Node 20 test environments.
 const WEBSOCKET_OPEN = 1;
+
+function packageLifecycleMetadata(
+  metadata: { readonly id: string; readonly version: string },
+  diagnostics: readonly { readonly packageId?: string; readonly packageVersion?: string; readonly phase?: string }[],
+  states: readonly { readonly id: string; readonly version: string; readonly source?: "bundled" | "external"; readonly state?: "installed" | "active" | "failed" }[] = [],
+): Record<string, unknown> {
+  // ActivePackageMetadata is deliberately small. Newer Diagram owners may
+  // attach catalog lifecycle fields; serialize those fields without making
+  // the RPC handler a second package registry.
+  const attached = metadata as typeof metadata & {
+    readonly source?: "bundled" | "external";
+    readonly state?: "installed" | "active" | "failed";
+    readonly active?: boolean;
+  };
+  const lifecycle = states.find((candidate) => candidate.id === metadata.id && candidate.version === metadata.version);
+  const failed = diagnostics.some((diagnostic) => (
+    diagnostic.packageId === metadata.id && diagnostic.packageVersion === metadata.version && diagnostic.phase === "activation"
+  ));
+  const state = lifecycle?.state ?? attached.state ?? (failed ? "failed" : attached.active === false ? "installed" : "active");
+  return {
+    installed: true,
+    active: state === "active",
+    state,
+    ...(lifecycle?.source === undefined && attached.source === undefined ? {} : { source: lifecycle?.source ?? attached.source }),
+  };
+}
 
 function serializeTypeResult(result: GraphInferenceResult | null): unknown {
   if (!result) return null;
@@ -74,11 +109,14 @@ export interface ViewportController {
 export class BrowserRPCHandler {
   private ws: WebSocket | null = null;
   private diagram: Diagram;
+  private diagramActive: boolean;
   private url: string;
   private reconnectDelay: number = 1000;
   private intentionalClose: boolean = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private viewport?: ViewportController;
+  private training?: TrainingController;
+  private project?: ProjectRPCBridge;
 
   /**
    * @param diagram  The Diagram instance to mutate (single source of truth).
@@ -87,14 +125,27 @@ export class BrowserRPCHandler {
    * @param viewport Optional viewport controller (fitView/setCenter).
    *                 Passed from FlowCanvas.svelte via useSvelteFlow().
    */
-  constructor(diagram: Diagram, url?: string, viewport?: ViewportController) {
-    this.diagram = diagram;
+  constructor(diagram: Diagram | undefined, url?: string, viewport?: ViewportController, training?: TrainingController, project?: ProjectRPCBridge) {
+    this.diagram = diagram as Diagram;
+    this.diagramActive = diagram !== undefined;
     this.url =
       url ??
       (import.meta.env.DEV
         ? `ws://${window.location.host}/ws`
         : `ws://localhost:9339`);
     this.viewport = viewport;
+    this.training = training;
+    this.project = project;
+  }
+
+  bindDiagram(diagram: Diagram | undefined): void {
+    this.diagramActive = diagram !== undefined;
+    if (diagram) this.diagram = diagram;
+  }
+
+  /** Send a fire-and-forget browser-owned notification to the MCP bridge. */
+  notify(method: string, params: Record<string, unknown>): void {
+    if (this.ws?.readyState === WEBSOCKET_OPEN) this.ws.send(JSON.stringify({ method, params }));
   }
 
   // ── Public API ───────────────────────────────────────────────────────
@@ -167,6 +218,9 @@ export class BrowserRPCHandler {
     const { id, method, params = {} } = request;
 
     try {
+      if (!this.diagramActive && method !== "create_project" && method !== "open_project" && method !== "ping") {
+        throw Object.assign(new Error("No active project; open or create a project first"), { code: "NO_ACTIVE_PROJECT" });
+      }
       let result: unknown;
 
       switch (method) {
@@ -191,6 +245,9 @@ export class BrowserRPCHandler {
           break;
         case "list_stereotypes":
           result = this.handleListStereotypes(params);
+          break;
+        case "get_package_diagnostics":
+          result = this.handleGetPackageDiagnostics();
           break;
 
         // ── Mutations ─────────────────────────────────────────────
@@ -268,16 +325,22 @@ export class BrowserRPCHandler {
           result = this.handleValidateGraph();
           break;
         case "validate_connections":
-          result = { valid: true, errors: [], warnings: [] };
+          result = { valid: false, supported: false, errors: ["Connection validation is delegated to each connect_nodes operation."], warnings: [] };
           break;
         case "validate_parameters":
-          result = { valid: true, errors: [], warnings: [] };
+          result = this.handleValidateParameters();
           break;
         case "validate_subflows":
-          result = { valid: true, errors: [], warnings: [] };
+          result = { valid: false, supported: false, errors: ["Subflow validation is not exposed by the editor runtime."], warnings: [] };
           break;
 
         // ── Lifecycle ─────────────────────────────────────────────
+        case "create_project":
+          result = this.project?.create(params as unknown as ProjectPathPayload) ?? Promise.reject(Object.assign(new Error("Project path bridge is unavailable"), { code: "PROJECT_PATH_BRIDGE_UNAVAILABLE" }));
+          break;
+        case "open_project":
+          result = this.project?.open(params as unknown as ProjectPathPayload) ?? Promise.reject(Object.assign(new Error("Project path bridge is unavailable"), { code: "PROJECT_PATH_BRIDGE_UNAVAILABLE" }));
+          break;
         case "reset_diagram":
           result = this.handleResetDiagram();
           break;
@@ -285,17 +348,66 @@ export class BrowserRPCHandler {
           result = this.handlePing();
           break;
 
+        // ── Training session/configuration ───────────────────────
+        case "connect_training_backend":
+          result = this.requireTraining().connect(params.baseUrl as string, params.deviceName as string | undefined);
+          break;
+        case "get_training_connection":
+          result = this.requireTraining().getConnection();
+          break;
+        case "renew_training_connection":
+          result = this.requireTraining().renew();
+          break;
+        case "disconnect_training_backend":
+          result = this.requireTraining().disconnect(params.revoke === true);
+          break;
+        case "get_training_config":
+          result = { status: "ok", config: this.requireTraining().getConfig(), datasets: this.requireTraining().getDatasets() };
+          break;
+        case "update_training_config":
+          result = { status: "ok", config: this.requireTraining().updateConfig((params.patch ?? {}) as Record<string, unknown>) };
+          break;
+        case "start_training":
+          result = this.requireTraining().submitTraining(this.diagram);
+          break;
+        case "read_training_progress":
+          result = this.requireTraining().readTrainingProgress(params.jobId as string, {
+            eventCursor: params.eventCursor as string | undefined,
+            stdoutOffset: params.stdoutOffset as number | undefined,
+            stderrOffset: params.stderrOffset as number | undefined,
+            waitMs: params.waitMs as number | undefined,
+            maxBytes: params.maxBytes as number | undefined,
+          });
+          break;
+        case "download_training_wheel":
+          result = this.requireTraining().downloadTrainingWheel(params.jobId as string, params.packageName as string);
+          break;
+
         default:
           throw new Error(`Unknown method: ${method}`);
       }
 
+      if (result instanceof Promise) {
+        void result.then((resolved) => this.sendResponse({ id, result: resolved })).catch((error) => {
+          this.sendResponse({
+            id,
+            error: { message: error instanceof Error ? error.message : String(error), ...((error as { code?: string }).code ? { code: (error as { code: string }).code } : {}) },
+          });
+        });
+        return;
+      }
       this.sendResponse({ id, result });
     } catch (error) {
       this.sendResponse({
         id,
-        error: { message: error instanceof Error ? error.message : String(error) },
+        error: { message: error instanceof Error ? error.message : String(error), ...((error as { code?: string }).code ? { code: (error as { code: string }).code } : {}) },
       });
     }
+  }
+
+  private requireTraining(): TrainingController {
+    if (!this.training) throw new Error("Training controller unavailable for this editor");
+    return this.training;
   }
 
   // ── Reconnection (exponential backoff) ───────────────────────────────
@@ -322,6 +434,8 @@ export class BrowserRPCHandler {
       nodes: this.diagram.nodes,
       edges: this.diagram.edges,
       typeInfo: serializeTypeResult(typeResult),
+      packageRuntimeReady: this.diagram.packageRuntimeReady,
+      packageRuntimeDiagnostics: this.diagram.packageRuntimeDiagnostics,
     };
   }
 
@@ -348,9 +462,14 @@ export class BrowserRPCHandler {
       ? this.diagram.refreshTypes()
       : this.diagram.typeResult;
 
-    return nodeId
+    const serialized = nodeId
       ? serializeTypeResult({ nodes: new Map([[nodeId, typeResult.nodes.get(nodeId) ?? { status: "unresolved", reason: "node has no type result" }]]), order: [nodeId], terminals: typeResult.terminals, complete: typeResult.complete })
       : serializeTypeResult(typeResult);
+    return {
+      ...((serialized ?? {}) as Record<string, unknown>),
+      packageRuntimeReady: this.diagram.packageRuntimeReady,
+      packageRuntimeDiagnostics: this.diagram.packageRuntimeDiagnostics,
+    };
   }
 
   private handleGetEdges(params: Record<string, unknown>): { edges: Edge[] } {
@@ -416,6 +535,10 @@ export class BrowserRPCHandler {
     const category = params.category as string | undefined;
     let list = this.diagram.packageCatalog;
     if (category) list = list.filter((metadata) => metadata.definition.kind === category);
+    const diagnostics = this.diagram.packageRuntimeDiagnostics;
+    const states = (this.diagram as unknown as {
+      packageActivationStates?: readonly { id: string; version: string; source?: "bundled" | "external"; state?: "installed" | "active" | "failed" }[]
+    }).packageActivationStates ?? [];
     return {
       packages: list.map((metadata) => ({
         id: metadata.id,
@@ -424,13 +547,21 @@ export class BrowserRPCHandler {
         kind: metadata.definition.kind,
         parameters: metadata.definition.parameters,
         view: metadata.definition.view,
+        ...packageLifecycleMetadata(metadata, diagnostics, states),
       })),
+    };
+  }
+
+  private handleGetPackageDiagnostics(): Record<string, unknown> {
+    return {
+      packageRuntimeReady: this.diagram.packageRuntimeReady,
+      packageRuntimeDiagnostics: this.diagram.packageRuntimeDiagnostics,
     };
   }
 
   // ── Mutation Handlers ───────────────────────────────────────────────
 
-  private handleCreateNode(params: Record<string, unknown>): Record<string, unknown> {
+  private handleCreateNode(params: Record<string, unknown>): Record<string, unknown> | Promise<Record<string, unknown>> {
     const position = params.position as { x: number; y: number } | undefined;
     const x = position?.x ?? 0;
     const y = position?.y ?? 0;
@@ -457,30 +588,44 @@ export class BrowserRPCHandler {
       if (metadata.definition.name !== packageSpec.name) {
         throw new Error(`Package name mismatch for ${packageSpec.id}: expected '${metadata.definition.name}'`);
       }
-      const beforeCount = this.diagram.nodes.length;
-      this.diagram.addPackageNode(
-        { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name },
-        metadata.definition.kind,
-        x,
-        y,
-        {
-          name: config.name as string | undefined,
-          color: (config.color as string | undefined) ?? metadata.definition.view.color,
-          width: (config.width as number | undefined) ?? metadata.definition.view.width,
-          height: (config.height as number | undefined) ?? metadata.definition.view.height,
-          params: (config.params as Record<string, unknown>) ?? {},
-          inputsCount: config.inputsCount as number | undefined,
-          parentId: config.parentId as string | undefined,
-        },
-      );
-      const added = this.diagram.nodes[beforeCount];
-      if (!added) throw new Error("Failed to create package node");
-      return {
-        nodeId: added.id,
-        name: added.data.name ?? packageSpec.name,
-        type: added.type ?? "custom",
-        package: added.data.package,
+      const identity = { id: packageSpec.id, version: packageSpec.version, name: packageSpec.name };
+      const suppliedParams = (params.parameters ?? config.params) as Record<string, unknown> | undefined;
+      if (suppliedParams && (typeof suppliedParams !== "object" || Array.isArray(suppliedParams))) {
+        throw new Error("parameters must be an object");
+      }
+      validatePackageParameterValues(metadata.definition, suppliedParams ?? {});
+      const nodeParams = initialPackageParameters(metadata.definition, suppliedParams);
+      const nodeConfig = {
+        name: (params.name ?? config.name) as string | undefined,
+        color: (params.color ?? config.color ?? metadata.definition.view.color) as string | undefined,
+        width: (params.width ?? config.width ?? metadata.definition.view.width) as number | undefined,
+        height: (params.height ?? config.height ?? metadata.definition.view.height) as number | undefined,
+        params: nodeParams,
+        inputsCount: ((params.inputsCount ?? config.inputsCount) as number | undefined) ?? (metadata.definition.kind === "join" ? 2 : undefined),
+        parentId: (params.parentId ?? config.parentId) as string | undefined,
+        wheelAdapters: (params.wheelAdapters ?? config.wheelAdapters) as string[] | undefined,
+        inputBinding: (params.inputBinding ?? config.inputBinding) as string | undefined,
       };
+      const create = () => {
+        const beforeCount = this.diagram.nodes.length;
+        this.diagram.addPackageNode(identity, metadata.definition.kind, x, y, nodeConfig);
+        const added = this.diagram.nodes[beforeCount];
+        if (!added) throw new Error("Failed to create package node");
+        return {
+          nodeId: added.id,
+          name: added.data.name ?? packageSpec.name,
+          type: added.type ?? "custom",
+          package: added.data.package,
+          ...(typeof added.data.inputBinding === "string" ? { inputBinding: added.data.inputBinding } : {}),
+        };
+      };
+      const activatedCreate = (this.diagram as unknown as { addActivatedPackageNode?: Function }).addActivatedPackageNode;
+      if (activatedCreate) return activatedCreate.call(this.diagram, identity, metadata.definition.kind, x, y, nodeConfig).then((added: Node) => ({
+        nodeId: added.id, name: added.data.name ?? packageSpec.name, type: added.type ?? "custom", package: added.data.package,
+        ...(typeof added.data.inputBinding === "string" ? { inputBinding: added.data.inputBinding } : {}),
+      }));
+      if (metadata.state === undefined || metadata.state === "active") return create();
+      return this.diagram.activatePackage(identity).then(create);
     }
 
     throw new Error("create_node requires package {id, version, name, kind}");
@@ -609,7 +754,9 @@ export class BrowserRPCHandler {
     if (!metadata.definition.parameters[key]) throw new Error(`Unknown package parameter: ${key}`);
     const currentParams = (node.data.params as Record<string, unknown> | undefined) ?? {};
     const previousValue = currentParams[key];
-    this.updateNodeParams(node, { ...currentParams, [key]: value });
+    const nextParams = { ...currentParams, [key]: value };
+    validatePackageParameterValues(metadata.definition, nextParams);
+    this.updateNodeParams(node, nextParams);
 
     return { nodeId, key, previousValue: previousValue ?? "", currentValue: value };
   }
@@ -640,6 +787,7 @@ export class BrowserRPCHandler {
       newParams[key] = value;
     }
 
+    validatePackageParameterValues(metadata.definition, newParams);
     this.updateNodeParams(node, newParams);
 
     return { nodeId, updated, unchanged };
@@ -839,11 +987,13 @@ export class BrowserRPCHandler {
     };
     const inputNodes = topLevelNodes.filter((node) => kindOf(node) === "input");
 
-    if (inputNodes.length === 0) {
-      errors.push("No Input node found. Exactly 1 Input node is required.");
-    } else if (inputNodes.length > 1) {
-      errors.push(`Found ${inputNodes.length} Input nodes. Exactly 1 Input node is required.`);
-    }
+    if (inputNodes.length === 0) errors.push("No top-level Input node found.");
+    const definitions = new Map(this.diagram.packageCatalog.map((metadata) => [
+      `${metadata.id}@${metadata.version}`,
+      metadata.definition,
+    ]));
+    const bindings = compileGraphBindings(topLevelNodes, definitions);
+    errors.push(...bindings.diagnostics.map((diagnostic) => diagnostic.message));
 
     const topLevelIds = new Set(topLevelNodes.map((node) => node.id));
     const outgoing = new Map<string, string[]>();
@@ -914,6 +1064,18 @@ export class BrowserRPCHandler {
     };
   }
 
+  private handleValidateParameters(): Record<string, unknown> {
+    const result = this.diagram.typeResult ?? this.diagram.refreshTypes();
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    for (const [nodeId, state] of result.nodes) {
+      if (state.status === "error") errors.push(`${nodeId}: ${state.message}`);
+      else if (state.status === "fault") errors.push(`${nodeId}: ${state.fault.message}`);
+      else if (state.status === "unresolved") warnings.push(`${nodeId}: ${"reason" in state ? state.reason : `Missing: ${state.missingParameters.join(", ")}`}`);
+    }
+    return { valid: errors.length === 0, supported: true, errors, warnings };
+  }
+
   // ── Canvas / Viewport Handlers ─────────────────────────────────────
 
   private handleGetCanvasState(): Record<string, unknown> {
@@ -959,8 +1121,9 @@ export class BrowserRPCHandler {
     return {
       status: "ok",
       uptime: performance.now() / 1000,
-      nodeCount: this.diagram.nodes.length,
-      edgeCount: this.diagram.edges.length,
+      nodeCount: this.diagramActive ? this.diagram.nodes.length : 0,
+      edgeCount: this.diagramActive ? this.diagram.edges.length : 0,
+      projectReady: this.diagramActive,
       activeTransaction: null,
     };
   }

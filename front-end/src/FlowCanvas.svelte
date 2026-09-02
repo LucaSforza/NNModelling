@@ -27,6 +27,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import Sidebar from "./components/Sidebar.svelte";
   import DockedGroup from "./components/DockedGroup.svelte";
   import TrainingSidebar from "./components/TrainingSidebar.svelte";
+  import PackageManager from "./components/PackageManager.svelte";
 
   const {
     getInternalNode,
@@ -47,8 +48,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import {
     checkValidConnection,
     findDockedConnection,
-    handleLoadModel,
-    handleSaveModel,
     onNodeDragStop,
   } from "./utils";
 
@@ -56,6 +55,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // 1. Importiamo la classe Diagram
   import { Diagram, DIAGRAM_CONTEXT_KEY } from "./Diagram.svelte";
   import { setContext, tick } from "svelte";
+  import type { ProjectSaveStatus, ProjectWorkspaceSession } from "./project-workspace";
+  import { ProjectStereotypeAuthoringCoordinator } from "./project-workspace";
+  import type { StereotypeAuthoringRequest } from "./stereotype-authoring";
   import type { LayoutDirection } from "./layout/autoLayout";
   import { toBlob, toPng } from "html-to-image";
   import {
@@ -66,6 +68,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   // RPC handler — receives MCP server requests and dispatches to Diagram
   import { BrowserRPCHandler } from "./sync/BrowserRPCHandler";
+  import { TrainingController } from "./training/controller";
+  import { loadProjectDatasetResources } from "./project-workspace/project-dataset-resources";
 
   const nodeTypes = {
     custom: CustomNode,
@@ -79,9 +83,22 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     editable: EditableEdge,
   };
 
-  // 2. Istanziamo il nostro "Controller/Model"
-  // Grazie a Svelte 5, le sue proprietà interne $state saranno reattive qui dentro!
+  export type FlowCanvasProps = {
+    readonly session: ProjectWorkspaceSession;
+    readonly trainingController?: TrainingController;
+    readonly onInitializationError?: (message: string) => void;
+    readonly rpcHandler?: BrowserRPCHandler;
+    readonly onSessionReady?: () => void;
+  };
+
+  let { session, trainingController = new TrainingController(), onInitializationError, rpcHandler, onSessionReady }: FlowCanvasProps = $props();
+
+  // The Diagram is created only after App has obtained a writable workspace.
+  // It remains the sole graph authority for the lifetime of this editor.
   const diagram = new Diagram();
+  // Training state belongs to the editor session, not to the conditionally
+  // mounted sidebar. MCP and the sidebar therefore share this one owner.
+  const stereotypeAuthoring = new ProjectStereotypeAuthoringCoordinator(session, diagram);
 
   // Context per SubflowNode — gli permette di chiamare diagram.toggleSubflow
   // senza bisogno di callback nel node data
@@ -101,8 +118,17 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   );
 
   let isSidebarOpen = $state(false);
+  let isPackageManagerOpen = $state(false);
   let activeMode = $state<"nodes" | "training">("nodes");
-  let loadError = $state<string | null>(null);
+  let initializationError = $state<string | null>(null);
+  let isSessionReady = $state(false);
+  let saveStatus = $state<ProjectSaveStatus>({
+    state: "idle",
+    pending: 0,
+    latestAcceptedVersion: 0,
+  });
+  let hasUnsavedChanges = $state(false);
+  let dirtyGeneration = 0;
   let layoutError = $state<string | null>(null);
   let isLayoutMenuOpen = $state(false);
   let canvasRef = $state<HTMLDivElement>();
@@ -110,6 +136,85 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let layoutButtonRef: HTMLButtonElement;
   let layoutMenuRef = $state<HTMLDivElement>();
   let canvasSyncGeneration = 0;
+
+  function saveErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  function markModelDirty(): void {
+    dirtyGeneration += 1;
+    hasUnsavedChanges = true;
+  }
+
+  async function saveModel(): Promise<void> {
+    if (!hasUnsavedChanges) return;
+    const generationAtSave = dirtyGeneration;
+    try {
+      await session.save(diagram.exportToJson());
+      // A change made while the write was pending still needs a later save.
+      if (generationAtSave === dirtyGeneration) hasUnsavedChanges = false;
+    } catch (error) {
+      initializationError = saveErrorMessage(error);
+    }
+  }
+
+  function authorStereotype(request: StereotypeAuthoringRequest): Promise<void> {
+    return stereotypeAuthoring.author(request).then(() => undefined);
+  }
+
+  // Stage package-aware import before exposing Svelte Flow. New projects carry
+  // an empty graph, so retain Diagram's normal bootstrap Input and save that
+  // accepted initial graph through the same writer.
+  $effect(() => {
+    let active = true;
+    let unsubscribeSave: (() => void) | undefined;
+    void (async () => {
+      try {
+        await diagram.waitForPackageRuntime();
+        const snapshot = diagram.parseProjectJson(session.modelJson);
+        if (!snapshot) throw new Error("Il progetto contiene un modello non valido.");
+        const projectDatasetResources = loadProjectDatasetResources(session);
+        trainingController.setProjectDatasets(projectDatasetResources.infos, projectDatasetResources.resources);
+
+        const isEmptyProject = snapshot.nodes.length === 0 && snapshot.edges.length === 0 &&
+          snapshot.manifest.customPackages.length === 0;
+        if (isEmptyProject) {
+          diagram.modelManifest = snapshot.manifest;
+          diagram.refreshTypes();
+        } else if (!await diagram.importProjectJson(session.modelJson, session.resources)) {
+          throw new Error("Impossibile attivare le risorse del progetto.");
+        }
+        if (!active) return;
+        unsubscribeSave = session.writer.subscribe((status) => { saveStatus = status; });
+        if (isEmptyProject && diagram.nodes.length > 0) markModelDirty();
+        isSessionReady = true;
+        onSessionReady?.();
+      } catch (error) {
+        if (!active) return;
+        initializationError = saveErrorMessage(error);
+        onInitializationError?.(initializationError);
+      }
+    })();
+
+    return () => {
+      active = false;
+      unsubscribeSave?.();
+    };
+  });
+
+  // DiagramCore notifies synchronously after accepted mutations. Keep the
+  // in-memory model dirty; disk writes happen only from the Save button.
+  $effect(() => {
+    if (!isSessionReady) return;
+    const unsubscribe = diagram.onGraphChanged(markModelDirty);
+    return unsubscribe;
+  });
+
+  let saveLabel = $derived(
+    saveStatus.state === "pending" ? "Salvataggio…" :
+      saveStatus.state === "failed" ? "Salvataggio fallito" :
+        hasUnsavedChanges ? "Da salvare" : "Salvato",
+  );
 
   // Auto-apertura quando si seleziona un nodo
   $effect(() => {
@@ -122,7 +227,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let syncClient: BrowserRPCHandler;
 
   $effect(() => {
-    syncClient = new BrowserRPCHandler(diagram, undefined, { fitView, setCenter });
+    syncClient = rpcHandler ?? new BrowserRPCHandler(diagram, undefined, { fitView, setCenter }, trainingController);
+    if (rpcHandler) {
+      syncClient.bindDiagram(diagram);
+      return () => syncClient.bindDiagram(undefined);
+    }
     syncClient.connect();
     return () => syncClient.disconnect();
   });
@@ -213,7 +322,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       getInternalNode,
       diagram.edges,
     );
-    if (newNodes !== undefined) diagram.nodes = newNodes;
+    if (newNodes !== undefined) {
+      diagram.nodes = newNodes;
+      // Svelte Flow supplies the final positions after the drag outside the
+      // DiagramCore mutation API, so mark this canvas change explicitly.
+      markModelDirty();
+    }
 
     // Wait for Svelte Flow to publish the final handle positions after a
     // reparenting move, then turn a precise handle-over-handle drop into the
@@ -415,6 +529,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 <svelte:window onkeydown={handleKeyDown} />
 <svelte:document onclick={handleDocumentClick} />
 
+{#if initializationError && !isSessionReady}
+  <div class="editor-loading editor-error" role="alert">{initializationError}</div>
+{:else if !isSessionReady}
+  <div class="editor-loading" role="status">Apertura progetto…</div>
+{:else}
 <div class="editor-layout">
   <div class="canvas-container" bind:this={canvasRef}>
     <DockedGroup {diagram} host={canvasRef} />
@@ -432,9 +551,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       onnodedragstop={handleNodeDragStop}
       onconnect={() => {
         diagram.refreshTypes();
+        markModelDirty();
       }}
       ondelete={() => {
         diagram.refreshTypes();
+        markModelDirty();
       }}
       fitView
       fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
@@ -442,27 +563,36 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       <Background />
       <Controls />
       <Panel position="top-left" class="toolbar">
-        <button onclick={() => handleSaveModel(diagram)} class="toolbar-btn"
-          >💾 Salva</button
+        <div class="project-title">
+          <strong>{diagram.modelManifest.name}</strong>
+          <span>{diagram.modelManifest.id}</span>
+        </div>
+        <div
+          class:save-needed={hasUnsavedChanges}
+          class:save-failed={saveStatus.state === "failed"}
+          class="save-status"
+          role="status"
+          aria-live="polite"
         >
+          <span class="save-indicator" aria-hidden="true"></span>{saveLabel}
+          {#if saveStatus.state === "failed" && saveStatus.error}
+            <span class="save-error">{saveErrorMessage(saveStatus.error)}</span>
+          {/if}
+        </div>
         <button
-          onclick={() => {
-            loadError = null;
-            handleLoadModel(
-              diagram,
-              () => diagram.refreshTypes(),
-              (message) => (loadError = message),
-            );
-            isSidebarOpen = false;
-          }}
-          class="toolbar-btn">📂 Carica</button
+          type="button"
+          class="toolbar-btn"
+          onclick={saveModel}
+          disabled={!hasUnsavedChanges}
         >
-        {#if loadError}
-          <div class="load-error" role="alert">{loadError}</div>
-        {/if}
+          💾 Salva
+        </button>
         <button onclick={handleExportPng} class="toolbar-btn"
           >🖼️ Esporta PNG</button
         >
+        <button onclick={() => (isPackageManagerOpen = !isPackageManagerOpen)} class="toolbar-btn">
+          📦 Packages
+        </button>
         <button onclick={handleAddSubGraph} class="toolbar-btn"
           >📦 Aggiungi SubGraph</button
         >
@@ -546,10 +676,20 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   {:else}
     <TrainingSidebar
       {diagram}
+      controller={trainingController}
       onClose={() => (activeMode = "nodes")}
     />
   {/if}
+  {#if isPackageManagerOpen}
+    <div class="package-manager-drawer">
+      <PackageManager
+        packages={diagram.packageCatalog}
+        onAuthoringRequest={authorStereotype}
+      />
+    </div>
+  {/if}
 </div>
+{/if}
 
 <style>
   @import "./styles/flowcanvas.css";
@@ -558,17 +698,54 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     margin-right: 8px;
   }
 
-  .load-error {
-    max-width: 360px;
-    margin-top: 8px;
-    padding: 8px 10px;
-    border: 1px solid #d33;
-    border-radius: 4px;
-    background: #fff1f1;
-    color: #a00;
-    font-size: 0.85rem;
-    white-space: normal;
+  .editor-loading {
+    display: grid;
+    place-items: center;
+    width: 100vw;
+    height: 100vh;
+    color: #59667a;
+    background: #f8f8f8;
+    font: 600 1rem system-ui, sans-serif;
   }
+
+  .editor-error {
+    padding: 24px;
+    box-sizing: border-box;
+    color: #9a2626;
+    background: #fff3f3;
+    text-align: center;
+  }
+
+  .project-title {
+    display: grid;
+    gap: 1px;
+    min-width: 130px;
+    margin-right: 6px;
+    color: #20385d;
+  }
+
+  .project-title span {
+    color: #718097;
+    font-size: 0.72rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .save-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #2e6b3d;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .save-status.save-needed { color: #a96800; }
+  .save-status.save-failed { color: #9a2626; }
+  .save-indicator { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .save-error { max-width: 220px; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 
   .layout-error {
     max-width: 360px;
@@ -579,5 +756,19 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     color: #a00;
     font-size: 0.85rem;
     white-space: normal;
+  }
+
+  .package-manager-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 10;
+    width: min(560px, 100vw);
+    height: 100vh;
+    overflow: auto;
+    padding: 16px;
+    box-sizing: border-box;
+    background: #fff;
+    box-shadow: -4px 0 18px rgba(0, 0, 0, 0.16);
   }
 </style>
