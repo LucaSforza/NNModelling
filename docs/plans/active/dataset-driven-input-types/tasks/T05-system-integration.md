@@ -4,7 +4,7 @@ kind: task
 status: ready
 plan: ../plan.md
 role: integration
-depends_on: [T02, T03, T04]
+depends_on: [T04R]
 parallel_with: []
 write_scope:
   - front-end/
@@ -24,7 +24,7 @@ missing glue or corrections needed for one coherent dataset-driven Input system.
 
 ## Context required
 
-- [Initiative](../plan.md) and every T01–T04 handoff
+- [Initiative](../plan.md) and every T01–T04R handoff
 - Current frontend, bundle, backend, worker, wheel, MCP and example implementations
 - Applicable package-local guidance and verification skills
 
@@ -48,7 +48,7 @@ inaccuracy to the coordinator.
 
 ## Work
 
-1. Read all implementations changed by T01–T04 plus every consumer of Input
+1. Read all implementations changed by T01–T04R plus every consumer of Input
    parameters, dataset slot shapes, graph bindings, adapter metadata, bundle
    schemas, checkpoints and wheel input contracts.
 2. Trace create/open/edit/save, dataset selection, type inference, browser RPC,

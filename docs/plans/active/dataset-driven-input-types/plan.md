@@ -93,7 +93,8 @@ contract; no dataset source, target or loader becomes part of inference.
 | [T02](tasks/T02-frontend-inference.md) | `frontend` | T01 | — | frontend graph inference, UI, focused tests | Dataset-scoped live types and diagnostics |
 | [T03](tasks/T03-compiler-and-wheel.md) | `backend` | T02 | — | bundle/compiler/trainer/wheel, focused tests | Dataset-instantiated training and autonomous wheel |
 | [T04](tasks/T04-migrate-vae-example.md) | `integration` | T02, T03 | — | VAE diagram, dataset, adapter and consumer tests | Migrated and statically validated VAE path |
-| [T05](tasks/T05-system-integration.md) | `integration` | T02, T03, T04 | — | all affected implementation packages and focused tests | Cross-system audit and missing integration completed |
+| [T04R](tasks/T04R-remove-legacy-input-paths.md) | `integration` | T04 | — | active Input/dataset compatibility surfaces and tests | Legacy type and adapter paths removed |
+| [T05](tasks/T05-system-integration.md) | `integration` | T04R | — | all affected implementation packages and focused tests | Cross-system audit and missing integration completed |
 | [T06](tasks/T06-final-vae-wheel-qa.md) | `verification` | T05 | — | QA evidence and only fixes routed to owning tasks | Real browser training and wheel interpolation proof |
 
 T05 and T06 intentionally run near the end. T05 owns the complete integration
@@ -106,7 +107,9 @@ browser-owning execution session rather than a delegated child session.
   backend changes begin.
 - T02 and T03 must use the same resolved dataset contract and diagnostic terms;
   T03 follows T02 so their shared frontend surfaces cannot race.
-- T04 must migrate the VAE dataset before either late integration or real QA.
+- T04 must migrate the VAE dataset before legacy compatibility is deleted.
+- T04R must prove that active code, fixtures and tests no longer contain a
+  second Input typing authority or dataset-owned inference adapter path.
 - T05 reads every affected implementation and test surface, closes missing
   seams, and blocks final QA on duplicate type authorities or stale adapters.
 - T06 is acceptance-only. Product defects return to the owning task for a
@@ -131,6 +134,8 @@ browser-owning execution session rather than a delegated child session.
       adapters, contains no dataset, and accepts a dynamic inference batch axis.
 - [ ] Existing diagrams and the VAE dataset migrate once with no permanent
       legacy fallback.
+- [ ] Active code and tests contain no reachable legacy Input typing or dataset
+      inference-adapter compatibility path after migration.
 - [ ] The migrated VAE trains from NNModelling and its downloaded wheel performs
       interpolation through public APIs in a clean consumer environment.
 

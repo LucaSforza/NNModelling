@@ -62,8 +62,9 @@ available.
 
 For `docs/plans/active/dataset-driven-input-types/`, the user selected
 `gpt-5.6-luna` with `high` reasoning for every implementation task. Pass both
-values explicitly when dispatching T01 through T05 rather than applying the
-default maximum-effort profile above. The user also authorized task commits:
+values explicitly when dispatching T01 through T05, including T04R, rather
+than applying the default maximum-effort profile above. The user also
+authorized task commits:
 after each task passes its validation, instruct its subagent to stage only the
 files inside that task's write scope and create one concise Conventional Commit.
 Never sweep unrelated shared-worktree changes into a task commit.
