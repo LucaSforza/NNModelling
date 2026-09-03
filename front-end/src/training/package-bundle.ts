@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/svelte"
+import type { DType } from "../type-system/tensor-type"
 import type { PackageExportInfo, WheelAdapterValueSchema } from "../type-system/packages/types"
 import type { PackageIdentity, PersistedPackageIdentity } from "../core/types"
 import { parseDefinition } from "../type-system/packages/validation"
@@ -217,13 +218,28 @@ function inferredInput(nodeId: string, edges: SemanticGraph["edges"], inference?
   if (incoming.length !== 1) throw new Error(`graph node '${nodeId}' wheel adapter input requires exactly one inferred source`)
   const result = inference.nodes.get(incoming[0]!.source)
   if (!result || result.status !== "success") throw new Error(`graph node '${nodeId}' wheel adapter input inference is unavailable`)
-  return { type: "tensor", shape: result.output.shape, dtype: result.output.dtype }
+  return inferredAdapterTensor(result.output.shape, result.output.dtype, nodeId)
 }
 
 function inferredOutput(nodeId: string, inference?: GraphInferenceResult | null): WheelAdapterValueSchema {
   const result = inference?.nodes.get(nodeId)
   if (!result || result.status !== "success") throw new Error(`graph node '${nodeId}' wheel adapter output inference is unavailable`)
-  return { type: "tensor", shape: result.output.shape, dtype: result.output.dtype }
+  return inferredAdapterTensor(result.output.shape, result.output.dtype, nodeId)
+}
+
+function inferredAdapterTensor(
+  shape: readonly (number | string)[],
+  dtype: DType,
+  nodeId: string,
+): WheelAdapterValueSchema {
+  const normalizedShape = shape.map((dimension, index) => {
+    if (index === 0) return "B" as const
+    if (typeof dimension !== "number" || !Number.isInteger(dimension) || dimension <= 0) {
+      throw new Error(`graph node '${nodeId}' wheel adapter shape has an unresolved dimension`)
+    }
+    return dimension
+  })
+  return { type: "tensor", shape: normalizedShape, dtype }
 }
 
 function compatibleSchema(

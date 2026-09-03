@@ -653,6 +653,29 @@ def test_wheel_adapter_concrete_schema_accepts_dynamic_batch_symbol() -> None:
     assert tuple(model.adapter("identity")(torch.ones(7, 4)).shape) == (7, 4)
 
 
+def test_wheel_adapter_canonicalizes_resolved_dataset_batch_to_dynamic_B() -> None:
+    source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    definition = {
+        "kind": "layer",
+        "wheelAdapters": [{
+            "name": "forward", "entrypoint": "module.forward",
+            "input": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "output": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+            "targetPolicy": "forbidden",
+        }],
+    }
+    package = _package("demo.resolved-batch", source, definition=definition)
+    graph = _graph("demo.resolved-batch")
+    graph["nodes"][1]["wheelAdapters"] = [{
+        "name": "forward",
+        "input": {"type": "tensor", "shape": [32, 4], "dtype": "float32"},
+        "output": {"type": "tensor", "shape": [32, 4], "dtype": "float32"},
+    }]
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    assert model.adapter_specs[0]["input"]["shape"] == ["B", 4]
+    assert tuple(model.adapter("forward")(torch.ones(7, 4)).shape) == (7, 4)
+
+
 @pytest.mark.parametrize("shape", [["N", 4], [4, "B"], ["B", "M"]])
 def test_wheel_adapter_rejects_noncanonical_concrete_shape_symbols(shape: list[object]) -> None:
     source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"

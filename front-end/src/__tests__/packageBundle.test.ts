@@ -148,6 +148,21 @@ describe("package bundle v1", () => {
     expect(Object.keys(first.packages[1]?.files ?? {})).toEqual(["manifest.json", "pytorch.py", "stereotype.json"])
   })
 
+  it("keeps the resolved batch axis dynamic in adapter bindings", async () => {
+    const nodes = [
+      { ...node("input", { id: "core.input", version: "0.1.0", name: "Input" }) },
+      { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, params: {}, wheelAdapters: ["decode"] } },
+    ]
+    const inference = { ...adapterInference, nodes: new Map([
+      ["input", { status: "success" as const, output: { shape: [32, 4], dtype: "float32" as const } }],
+      ["layer", { status: "success" as const, output: { shape: [32, 8], dtype: "float32" as const } }],
+    ]) }
+    const bundle = await buildPackageBundle(nodes, [{ id: "edge", source: "input", target: "layer", targetHandle: "in" }], new Map([["core.input", input], ["test.layer", layer]]), inference)
+    expect(bundle.graph.nodes.find((candidate) => candidate.id === "layer")?.wheelAdapters).toEqual([{
+      name: "decode", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" },
+    }])
+  })
+
   it("rejects executable packages without a PyTorch entrypoint", async () => {
     const broken = new Map([["test.layer", { ...layer, pytorch: undefined }]])
     await expect(buildPackageBundle(

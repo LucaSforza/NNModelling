@@ -436,16 +436,26 @@ def _bind_adapter_declaration(
 ) -> dict[str, Any]:
     """Bind a concrete node schema to the stereotype's symbolic template."""
 
+    # Training inference resolves B to the selected dataset batch size. Keep
+    # that concrete value for module construction, but canonicalize adapter
+    # metadata back to the public dynamic batch protocol.
+    normalized_selection = {
+        **selection,
+        **{
+            field: _normalize_adapter_binding(selection[field], declaration[field])
+            for field in ("input", "output")
+        },
+    }
     for field in ("input", "output"):
-        concrete = selection.get(field)
+        concrete = normalized_selection.get(field)
         if not isinstance(concrete, Mapping) or concrete.get("type") != "tensor":
             raise PackageValidationError(
                 f"wheel adapter {declaration['name']!r} binding on {node_id} requires a concrete tensor {field}"
             )
         _validate_concrete_tensor_schema(concrete, declaration["name"], field)
 
-    input_shape = selection["input"]["shape"]
-    output_shape = selection["output"]["shape"]
+    input_shape = normalized_selection["input"]["shape"]
+    output_shape = normalized_selection["output"]["shape"]
     input_batch = bool(input_shape and input_shape[0] == "B")
     output_batch = bool(output_shape and output_shape[0] == "B")
     if input_batch != output_batch:
@@ -455,22 +465,34 @@ def _bind_adapter_declaration(
 
     bindings: dict[str, int] = {}
     _match_declared_shape(
-        declaration["input"]["shape"], selection["input"]["shape"], bindings,
+        declaration["input"]["shape"], normalized_selection["input"]["shape"], bindings,
         declaration["name"], "input",
     )
     _match_declared_shape(
-        declaration["output"]["shape"], selection["output"]["shape"], bindings,
+        declaration["output"]["shape"], normalized_selection["output"]["shape"], bindings,
         declaration["name"], "output",
     )
-    if selection["input"]["dtype"] != declaration["input"]["dtype"]:
+    if normalized_selection["input"]["dtype"] != declaration["input"]["dtype"]:
         raise PackageValidationError(f"wheel adapter {declaration['name']!r} input dtype binding is incompatible")
-    if selection["output"]["dtype"] != declaration["output"]["dtype"]:
+    if normalized_selection["output"]["dtype"] != declaration["output"]["dtype"]:
         raise PackageValidationError(f"wheel adapter {declaration['name']!r} output dtype binding is incompatible")
     return {
         **declaration,
-        "input": _concrete_schema(selection["input"]),
-        "output": _concrete_schema(selection["output"]),
+        "input": _concrete_schema(normalized_selection["input"]),
+        "output": _concrete_schema(normalized_selection["output"]),
     }
+
+
+def _normalize_adapter_binding(
+    selection: Mapping[str, Any], declaration: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Normalize a resolved training batch axis to the wheel's dynamic B."""
+
+    shape = selection.get("shape")
+    declared_shape = declaration.get("shape")
+    if isinstance(shape, list) and shape and isinstance(declared_shape, list) and declared_shape[0] == "B":
+        shape = ["B", *shape[1:]] if isinstance(shape[0], int) else list(shape)
+    return {**dict(selection), "shape": shape}
 
 
 def _validate_concrete_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> None:
