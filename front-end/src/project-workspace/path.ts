@@ -23,7 +23,12 @@ export function createPathProjectSession(
 ): ProjectWorkspaceSession {
   const files = new Map<string, string | Uint8Array>()
   for (const [name, resource] of Object.entries(payload.resources)) files.set(name, decode(resource))
-  const directory = new MemoryDirectory(pathName(payload.projectPath), files)
+  const directories = new Set<string>([""])
+  for (const name of files.keys()) {
+    const parts = name.split("/")
+    for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join("/"))
+  }
+  const directory = new MemoryDirectory(pathName(payload.projectPath), files, directories)
   const resources = Object.fromEntries(files) as ModelBundleResources
   const writer = new ProjectModelWriter(async (modelJson) => {
     files.set("model.json", modelJson)
@@ -74,17 +79,36 @@ class MemoryFileHandle implements ProjectFileHandle {
 
 class MemoryDirectory implements ProjectDirectoryHandle {
   readonly kind = "directory" as const
-  constructor(readonly name: string, private readonly files: Map<string, string | Uint8Array>, private readonly prefix = "") {}
-  async getDirectoryHandle(name: string): Promise<ProjectDirectoryHandle> { return new MemoryDirectory(name, this.files, this.key(name)) }
+  constructor(
+    readonly name: string,
+    private readonly files: Map<string, string | Uint8Array>,
+    private readonly directories: Set<string>,
+    private readonly prefix = "",
+  ) {}
+  async getDirectoryHandle(name: string, options?: { readonly create?: boolean }): Promise<ProjectDirectoryHandle> {
+    const next = this.key(name)
+    if (!this.directories.has(next)) {
+      if (options?.create !== true) throw new DOMException(`Directory '${name}' was not found`, "NotFoundError")
+      this.directories.add(next)
+    }
+    return new MemoryDirectory(name, this.files, this.directories, next)
+  }
   async getFileHandle(name: string): Promise<ProjectFileHandle> { return new MemoryFileHandle(this.key(name), this.files) }
   async *entries(): AsyncIterable<[string, ProjectDirectoryHandle | ProjectFileHandle]> {
     const seen = new Set<string>()
     const start = this.prefix ? `${this.prefix}/` : ""
+    for (const directory of this.directories) {
+      if (directory === this.prefix || !directory.startsWith(start)) continue
+      const rest = directory.slice(start.length)
+      if (rest.includes("/")) continue
+      seen.add(rest)
+      yield [rest, new MemoryDirectory(rest, this.files, this.directories, directory)]
+    }
     for (const key of this.files.keys()) {
       if (!key.startsWith(start)) continue
       const rest = key.slice(start.length)
       const [head, ...tail] = rest.split("/")
-      if (tail.length) { if (!seen.has(head)) { seen.add(head); yield [head, new MemoryDirectory(head, this.files, start + head)] } }
+      if (tail.length) { if (!seen.has(head)) { seen.add(head); yield [head, new MemoryDirectory(head, this.files, this.directories, start + head)] } }
       else yield [head, new MemoryFileHandle(key, this.files)]
     }
   }

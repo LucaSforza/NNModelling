@@ -34,7 +34,7 @@ export type DatasetSlotRequest = {
 
 export type DatasetClassRequest = DatasetClassMetadata
 
-/** The serializable form model used by DatasetManager and non-UI callers. */
+/** The serializable form model used by DatasetForm and non-UI callers. */
 export type DatasetAuthoringRequest = {
   readonly id: string
   readonly version: string

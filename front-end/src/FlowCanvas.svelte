@@ -57,7 +57,10 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { setContext, tick } from "svelte";
   import type { ProjectSaveStatus, ProjectWorkspaceSession } from "./project-workspace";
   import { ProjectStereotypeAuthoringCoordinator } from "./project-workspace";
+  import { ProjectDatasetAuthoringCoordinator, type DatasetAuthoringRequest, type GeneratedDatasetResources } from "./project-workspace/dataset-authoring";
+  import type { DatasetReference } from "./project-workspace/dataset-contract";
   import type { StereotypeAuthoringRequest } from "./stereotype-authoring";
+  import type { DatasetInfo } from "./training/api";
   import type { LayoutDirection } from "./layout/autoLayout";
   import { toBlob, toPng } from "html-to-image";
   import {
@@ -99,6 +102,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // Training state belongs to the editor session, not to the conditionally
   // mounted sidebar. MCP and the sidebar therefore share this one owner.
   const stereotypeAuthoring = new ProjectStereotypeAuthoringCoordinator(session, diagram);
+  const datasetAuthoring = new ProjectDatasetAuthoringCoordinator(session);
 
   // Context per SubflowNode — gli permette di chiamare diagram.toggleSubflow
   // senza bisogno di callback nel node data
@@ -119,6 +123,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   let isSidebarOpen = $state(false);
   let isPackageManagerOpen = $state(false);
+  let projectDatasetInfos = $state<readonly DatasetInfo[]>([]);
+  let projectDatasetResources = $state<ReadonlyMap<string, GeneratedDatasetResources>>(new Map());
+  let projectDatasets = $derived(projectDatasetInfos.map((dataset) => ({
+    ...dataset.reference,
+    name: dataset.definition.name,
+  })));
+  let projectDefinitions = $derived(projectDatasetInfos.map((dataset) => dataset.definition));
   let activeMode = $state<"nodes" | "training">("nodes");
   let initializationError = $state<string | null>(null);
   let isSessionReady = $state(false);
@@ -162,6 +173,24 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     return stereotypeAuthoring.author(request).then(() => undefined);
   }
 
+  async function authorDataset(request: DatasetAuthoringRequest): Promise<void> {
+    const { generated } = await datasetAuthoring.author(request);
+    const reference: DatasetReference = {
+      kind: "project",
+      id: generated.modelDataset.id,
+      version: generated.modelDataset.version,
+      ref: `project_${generated.modelDataset.id.replaceAll(".", "_")}_${generated.modelDataset.version.replaceAll(".", "_")}`,
+    };
+    const info: DatasetInfo = {
+      reference,
+      manifest: generated.manifest,
+      definition: generated.definition,
+    };
+    projectDatasetInfos = [...projectDatasetInfos, info];
+    projectDatasetResources = new Map(projectDatasetResources).set(reference.ref, generated);
+    trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+  }
+
   // Stage package-aware import before exposing Svelte Flow. New projects carry
   // an empty graph, so retain Diagram's normal bootstrap Input and save that
   // accepted initial graph through the same writer.
@@ -173,8 +202,10 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         await diagram.waitForPackageRuntime();
         const snapshot = diagram.parseProjectJson(session.modelJson);
         if (!snapshot) throw new Error("Il progetto contiene un modello non valido.");
-        const projectDatasetResources = loadProjectDatasetResources(session);
-        trainingController.setProjectDatasets(projectDatasetResources.infos, projectDatasetResources.resources);
+        const loadedProjectDatasetResources = loadProjectDatasetResources(session);
+        projectDatasetInfos = loadedProjectDatasetResources.infos;
+        projectDatasetResources = loadedProjectDatasetResources.resources;
+        trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
 
         const isEmptyProject = snapshot.nodes.length === 0 && snapshot.edges.length === 0 &&
           snapshot.manifest.customPackages.length === 0;
@@ -682,9 +713,21 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   {/if}
   {#if isPackageManagerOpen}
     <div class="package-manager-drawer">
+      <button
+        class="package-manager-close"
+        type="button"
+        aria-label="Chiudi pannello Packages"
+        title="Chiudi pannello Packages"
+        onclick={() => (isPackageManagerOpen = false)}
+      >
+        ×
+      </button>
       <PackageManager
         packages={diagram.packageCatalog}
         onAuthoringRequest={authorStereotype}
+        {projectDatasets}
+        {projectDefinitions}
+        onDatasetAuthoringRequest={authorDataset}
       />
     </div>
   {/if}
@@ -770,5 +813,33 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     box-sizing: border-box;
     background: #fff;
     box-shadow: -4px 0 18px rgba(0, 0, 0, 0.16);
+  }
+
+  .package-manager-close {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: block;
+    width: 32px;
+    height: 32px;
+    margin: 0 0 -32px auto;
+    border: 0;
+    border-radius: 8px;
+    padding: 0;
+    background: transparent;
+    color: #5f6f87;
+    cursor: pointer;
+    font-size: 1.6rem;
+    line-height: 1;
+  }
+
+  .package-manager-close:hover {
+    background: #f1f4f9;
+    color: #1d2940;
+  }
+
+  .package-manager-close:focus-visible {
+    outline: 0;
+    box-shadow: 0 0 0 4px rgb(134 170 247 / 22%);
   }
 </style>

@@ -1,6 +1,9 @@
 <script lang="ts">
   import "../styles/package-manager.css";
+  import DatasetForm from "./DatasetForm.svelte";
   import StereotypeForm from "./StereotypeForm.svelte";
+  import type { DatasetAuthoringRequest } from "../project-workspace/dataset-authoring";
+  import type { DatasetDefinition, DatasetReference } from "../project-workspace/dataset-contract";
   import type { InstalledPackageRecord } from "../type-system/packages/types";
   import type { StereotypeAuthoringRequest } from "../stereotype-authoring";
 
@@ -9,22 +12,82 @@
   interface Props {
     packages: readonly PackageManagerPackage[];
     onAuthoringRequest?: (request: StereotypeAuthoringRequest) => Promise<void> | void;
+    projectDatasets?: readonly (DatasetReference & { readonly name?: string })[];
+    projectDefinitions?: readonly DatasetDefinition[];
+    onDatasetAuthoringRequest?: (request: DatasetAuthoringRequest) => Promise<void> | void;
     /** Compatibility index until the canvas integration task removes old callers. */
     [key: string]: unknown;
   }
 
-  let { packages, onAuthoringRequest }: Props = $props();
+  let {
+    packages,
+    onAuthoringRequest,
+    projectDatasets = [],
+    projectDefinitions = [],
+    onDatasetAuthoringRequest,
+  }: Props = $props();
   let bundled = $derived(packages.filter((item) => item.source === "bundled"));
   let project = $derived(packages.filter((item) => item.source === "model"));
+  let creationType = $state<"stereotype" | "dataset">("stereotype");
 </script>
 
-<section class="package-manager" aria-label="Stereotype manager">
+<section class="package-manager" aria-label="Package manager">
   <header class="package-manager__header">
     <div>
-      <h2>Stereotypes</h2>
-      <p>Core stereotypes are read-only. Author new stereotypes for the active project below.</p>
+      <h2>Packages</h2>
+      <p>Core stereotypes are read-only. Create project stereotypes or datasets below.</p>
     </div>
   </header>
+
+  {#if project.length > 0}
+    <div class="package-manager__group">
+      <h3>User packages</h3>
+      {#each project as packageInfo (packageInfo.key)}
+        <div class="package-manager__row">
+          <span><strong>{packageInfo.definition.name}</strong><small>{packageInfo.key}</small></span>
+          <em>Project</em>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
+  <div class="package-manager__creation-picker">
+    <h3 id="package-manager-creation-title">Create new</h3>
+    <div class="package-manager__creation-options" role="group" aria-labelledby="package-manager-creation-title">
+      <button
+        type="button"
+        class={[
+          "package-manager__creation-option",
+          { "package-manager__creation-option--selected": creationType === "stereotype" },
+        ]}
+        aria-pressed={creationType === "stereotype"}
+        onclick={() => (creationType = "stereotype")}
+      >
+        Stereotype
+      </button>
+      <button
+        type="button"
+        class={[
+          "package-manager__creation-option",
+          { "package-manager__creation-option--selected": creationType === "dataset" },
+        ]}
+        aria-pressed={creationType === "dataset"}
+        onclick={() => (creationType = "dataset")}
+      >
+        Dataset
+      </button>
+    </div>
+  </div>
+
+  {#if creationType === "stereotype"}
+    <StereotypeForm onAuthoringRequest={onAuthoringRequest} />
+  {:else}
+    <DatasetForm
+      {projectDatasets}
+      {projectDefinitions}
+      onAuthoringRequest={onDatasetAuthoringRequest}
+    />
+  {/if}
 
   <div class="package-manager__group">
     <h3>Core</h3>
@@ -36,17 +99,4 @@
       </div>
     {/each}
   </div>
-
-  <div class="package-manager__group">
-    <h3>Current project</h3>
-    {#if project.length === 0}<p class="package-manager__empty">No project stereotypes yet.</p>{/if}
-    {#each project as packageInfo (packageInfo.key)}
-      <div class="package-manager__row">
-        <span><strong>{packageInfo.definition.name}</strong><small>{packageInfo.key}</small></span>
-        <em>Project</em>
-      </div>
-    {/each}
-  </div>
-
-  <StereotypeForm onAuthoringRequest={onAuthoringRequest} />
 </section>

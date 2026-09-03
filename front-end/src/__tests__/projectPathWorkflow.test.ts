@@ -19,4 +19,23 @@ describe("MCP-selected project workspace", () => {
     expect("projectPath" in session).toBe(false)
     expect("directory" in session).toBe(true)
   })
+
+  test("creates missing directories only when requested", async () => {
+    const session = createPathProjectSession({
+      projectPath: "/projects/demo",
+      modelJson: MODEL,
+      resources: { "model.json": { encoding: "utf8", data: MODEL } },
+    }, async () => undefined)
+
+    await expect(session.directory.getDirectoryHandle("datasets")).rejects.toMatchObject({ name: "NotFoundError" })
+    const datasets = await session.directory.getDirectoryHandle("datasets", { create: true })
+    const projectDataset = await datasets.getDirectoryHandle("minimal", { create: true })
+    await projectDataset.getDirectoryHandle("data", { create: true })
+
+    const entries: string[] = []
+    if (projectDataset.entries) {
+      for await (const [name] of projectDataset.entries()) entries.push(name)
+    }
+    expect(entries).toEqual(["data"])
+  })
 })

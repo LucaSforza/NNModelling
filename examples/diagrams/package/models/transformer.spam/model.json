@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    {
+      "id": "aa59c5eb-2a9f-41fb-a701-b86037c4a4cd",
+      "type": "custom",
+      "position": {
+        "x": 832,
+        "y": 50
+      },
+      "width": 30,
+      "height": 30,
+      "data": {
+        "package": {
+          "id": "core.input",
+          "version": "0.1.0"
+        },
+        "name": "Input",
+        "color": "#ffffff",
+        "params": {
+          "shape": [
+            "B",
+            128
+          ],
+          "dtype": "float32"
+        },
+        "inputBinding": "input",
+        "wheelAdapters": []
+      },
+      "measured": {
+        "width": 30,
+        "height": 30
+      },
+      "selected": true
+    }
+  ],
+  "edges": [],
+  "layoutDirection": "vertical",
+  "manifest": {
+    "schemaVersion": 2,
+    "id": "transformer.spam",
+    "version": "0.1.0",
+    "name": "SpamHam",
+    "description": "Classifier for spam email",
+    "customPackages": [],
+    "customDatasets": [
+      {
+        "id": "qa.minimal.final",
+        "version": "1.0.0",
+        "path": "datasets/qa-minimal-final-20260903"
+      }
+    ]
+  }
+}

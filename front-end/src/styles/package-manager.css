@@ -66,6 +66,48 @@
 .package-manager__group { display: flex; flex-direction: column; gap: 9px; }
 .package-manager__empty, .parameter-form__empty { color: #96a3b7; font-size: 0.79rem; line-height: 1.45; }
 
+.package-manager__creation-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--manager-border);
+  padding-top: 18px;
+}
+
+.package-manager__creation-options {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--manager-border);
+  border-radius: 10px;
+  background: var(--manager-soft);
+}
+
+.package-manager__creation-option {
+  min-height: 30px !important;
+  border-color: transparent !important;
+  padding: 6px 10px !important;
+  background: transparent !important;
+  color: #71809a !important;
+  font-size: 0.72rem !important;
+}
+
+.package-manager__creation-option:hover:not(:disabled) {
+  border-color: transparent !important;
+  background: #eaf0fb !important;
+  color: #315fc4 !important;
+  transform: none !important;
+}
+
+.package-manager__creation-option--selected,
+.package-manager__creation-option--selected:hover:not(:disabled) {
+  border-color: #cbd6e7 !important;
+  background: #fff !important;
+  color: var(--manager-accent) !important;
+  box-shadow: 0 2px 5px rgb(46 67 105 / 8%);
+}
+
 .package-manager__row {
   display: flex;
   align-items: center;
@@ -123,6 +165,20 @@
 .stereotype-form__submit, .parameter-form__add { align-self: flex-start; border-color: var(--manager-accent) !important; background: var(--manager-accent) !important; color: #fff !important; box-shadow: 0 5px 12px rgb(49 95 196 / 18%); }
 .stereotype-form__submit:hover:not(:disabled), .parameter-form__add:hover:not(:disabled) { border-color: #244ba3 !important; background: #244ba3 !important; color: #fff !important; }
 
+.dataset-form__row { display: flex; align-items: center; gap: 7px; }
+.dataset-form__parameter-row input:first-child { flex: 1.2; }
+.dataset-form__parameter-row input { min-width: 0; flex: 1; }
+.dataset-form__parameter-row select { width: 105px; }
+.dataset-form__slot-row input { min-width: 0; flex: 1; }
+.dataset-form__slot-row select { width: 120px; }
+.dataset-form__remove { flex: 0 0 auto; min-height: 28px !important; padding: 5px 7px !important; border-color: #efc5c5 !important; background: #fff5f5 !important; color: #a03535 !important; font-size: 0.67rem !important; }
+.dataset-form__remove:hover:not(:disabled) { border-color: #e6a7a7 !important; background: #ffe9e9 !important; color: #8f2929 !important; transform: none !important; }
+.stereotype-form .dataset-form__file-picker { flex-direction: row; align-items: center; gap: 10px; }
+.stereotype-form .dataset-form__file-picker input { width: auto; border: 0; padding: 0; }
+.dataset-form__file-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--manager-border); border-radius: 9px; padding: 9px 10px; background: #fff; font-size: 0.75rem; }
+.dataset-form__file-row span { min-width: 0; overflow: hidden; color: #334664; text-overflow: ellipsis; white-space: nowrap; }
+.dataset-form__file-row small { color: #8290a6; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.68rem; }
+
 .parameter-form { gap: 13px; }
 .parameter-row { display: flex; flex-direction: column; gap: 11px; border: 1px solid #d6dfed; border-radius: 9px; padding: 12px; background: #fff; }
 .parameter-row__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -134,6 +190,10 @@
 
 @media (max-width: 560px) {
   .package-manager { padding: 16px; }
+  .package-manager__creation-picker { align-items: flex-start; flex-direction: column; }
+  .dataset-form__row { flex-wrap: wrap; }
+  .dataset-form__row > * { flex: 1 1 120px; }
+  .stereotype-form .dataset-form__file-picker { align-items: flex-start; flex-direction: column; }
   .stereotype-form__grid, .parameter-row__grid { grid-template-columns: 1fr; }
   .stereotype-form__wide, .parameter-row__wide { grid-column: auto; }
   .parameter-row__header { align-items: flex-start; flex-direction: column; }
