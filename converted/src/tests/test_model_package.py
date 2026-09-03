@@ -155,6 +155,35 @@ def test_classifier_wheel_exposes_logits_without_a_target(tmp_path: Path) -> Non
         _cleanup("classifier", wheel)
 
 
+def test_wheel_freezes_named_inputs_and_keeps_batch_dynamic(tmp_path: Path) -> None:
+    bundle = _bundle(
+        [
+            {"id": "input", "type": "input", "inputBinding": "features"},
+            {"id": "linear", "type": "layer", "package": {"id": "core.linear", "version": "0.1.0"}, "parameters": {"in_features": 2, "out_features": 2}},
+            {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
+        ],
+        [
+            {"source": "input", "target": "linear", "targetHandle": "in-0"},
+            {"source": "linear", "target": "output", "targetHandle": "in-0"},
+        ],
+        ["core.linear", "core.output"],
+    )
+    bundle["graph"]["inputBindings"] = [{"nodeId": "input", "name": "features", "contract": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}]
+    bundle["graph"]["inputContracts"] = {"features": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}
+    wheel, module = _wheel_model(tmp_path, bundle, "named")
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            architecture = json.loads(archive.read("nnm_named/architecture.json"))
+        assert architecture["input_contract"] == {"inputs": {"features": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"}}}
+        model = module.Model()
+        assert model.predict_tensor({"features": torch.randn(7, 2)}).shape == (7, 2)
+        assert model.predict_tensor(torch.randn(7, 2)).shape == (7, 2)
+        with pytest.raises(ValueError, match="named input map mismatch"):
+            model.predict_tensor({"wrong": torch.randn(7, 2)})
+    finally:
+        _cleanup("named", wheel)
+
+
 def test_wheel_model_facade_loads_embedded_and_compatible_override(tmp_path: Path) -> None:
     bundle = _bundle(
         [

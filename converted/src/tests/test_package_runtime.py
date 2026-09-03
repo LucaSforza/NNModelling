@@ -53,6 +53,53 @@ def build(parameters, context: BuildContext, services: NoServices):
     assert tuple(model(torch.ones(4, 2)).shape) == (4, 3)
 
 
+def test_compile_rejects_unresolved_named_input_contract() -> None:
+    source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    package = _package("demo.identity", source)
+    graph = _graph("demo.identity")
+    graph["nodes"][0]["inputBinding"] = "image"
+    graph["inputBindings"] = [{"nodeId": "input", "name": "image"}]
+    graph["inputContracts"] = {"image": {"type": "tensor", "shape": ["B", "features"], "dtype": "float32"}}
+    with pytest.raises(PackageValidationError, match="unresolved dimensions"):
+        compile_package_graph({"packages": [package], "graph": graph})
+
+
+def test_multiple_named_inputs_are_forwarded_by_binding() -> None:
+    source = """
+import torch
+class Add(torch.nn.Module):
+    def forward(self, left, right): return left + right
+def build(parameters, context, services): return Add()
+"""
+    package = _package("demo.add", source, definition={"kind": "join"})
+    graph = {
+        "nodes": [
+            {"id": "left", "type": "input", "inputBinding": "left"},
+            {"id": "right", "type": "input", "inputBinding": "right"},
+            {"id": "add", "type": "join", "package": {"id": "demo.add", "version": "0.1.0"}},
+        ],
+        "edges": [
+            {"source": "left", "target": "add", "targetHandle": "in-0"},
+            {"source": "right", "target": "add", "targetHandle": "in-1"},
+        ],
+        "inputBindings": [
+            {"nodeId": "left", "name": "left"},
+            {"nodeId": "right", "name": "right"},
+        ],
+        "inputContracts": {
+            "left": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+            "right": {"type": "tensor", "shape": ["B", 2], "dtype": "float32"},
+        },
+    }
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    assert torch.equal(
+        model.prediction({"left": torch.ones(3, 2), "right": torch.full((3, 2), 2)}),
+        torch.full((3, 2), 3),
+    )
+    with pytest.raises(PackageValidationError, match="multiple named inputs"):
+        model.prediction(torch.ones(3, 2))
+
+
 def test_normalized_input_node_preserves_named_binding() -> None:
     identity_source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
     input_package = _package("demo.input", identity_source, definition={"kind": "input"})

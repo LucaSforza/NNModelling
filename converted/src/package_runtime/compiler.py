@@ -69,8 +69,9 @@ def _compile_programs(graph: Mapping[str, Any], catalog: dict[tuple[str, str], V
     edges = _validate_edges(raw_edges, nodes, scope)
     _ensure_acyclic(nodes, edges, scope)
     roots = [node_id for node_id, incoming in edges.items() if not incoming]
-    if len(roots) != 1 or nodes[roots[0]].get("type") != "input":
-        raise PackageValidationError(f"{scope} graph requires exactly one input root")
+    if not roots or any(nodes[node_id].get("type") != "input" for node_id in roots):
+        raise PackageValidationError(f"{scope} graph requires exactly one input root or multiple named input roots")
+    _validate_input_contracts(graph, nodes, roots, scope)
     modules: dict[str, torch.nn.Module] = {}
     kinds: dict[str, str | None] = {}
     for node_id, node in nodes.items():
@@ -101,7 +102,7 @@ def _compile_programs(graph: Mapping[str, Any], catalog: dict[tuple[str, str], V
         for node_id, node in nodes.items()
         if kinds.get(node_id) == "loss"
     }
-    graph_module = _GraphModule(nodes, edges, modules, kinds, roots[0], objective_bindings)
+    graph_module = _GraphModule(nodes, edges, modules, kinds, tuple(roots), objective_bindings)
     programs = _make_programs(graph_module)
     if scope == "root":
         programs._set_adapters(_compile_adapters(graph, catalog, graph_module, programs._objective_nodes))
@@ -114,6 +115,49 @@ def _compile_graph(graph: Mapping[str, Any], catalog: dict[tuple[str, str], Vali
     """Compile a nested graph used by a subflow builder."""
 
     return _compile_programs(graph, catalog, scope).module
+
+
+def _validate_input_contracts(
+    graph: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+    roots: list[str],
+    scope: str,
+) -> None:
+    """Reject unresolved dataset contracts before any package builder runs."""
+
+    raw_contracts = graph.get("inputContracts")
+    raw_bindings = graph.get("inputBindings")
+    if raw_contracts is None and raw_bindings is None:
+        return
+    if not isinstance(raw_contracts, Mapping):
+        raise PackageValidationError(f"{scope} graph inputContracts must be a named object")
+    expected_names: set[str] = set()
+    for node_id in roots:
+        binding = nodes[node_id].get("inputBinding")
+        if not isinstance(binding, str) or not binding:
+            raise PackageValidationError(f"{scope} input node {node_id} has no input binding")
+        if binding in expected_names:
+            raise PackageValidationError(f"{scope} graph has duplicate input binding {binding!r}")
+        expected_names.add(binding)
+        contract = raw_contracts.get(binding)
+        if not isinstance(contract, Mapping):
+            raise PackageValidationError(f"{scope} graph is missing resolved input contract for {binding!r}")
+        shape = contract.get("shape")
+        if not isinstance(shape, list) or any(
+            not ((item == "B" and index == 0) or (isinstance(item, int) and not isinstance(item, bool) and item > 0))
+            for index, item in enumerate(shape)
+        ):
+            raise PackageValidationError(f"{scope} input contract {binding!r} contains unresolved dimensions")
+        if contract.get("dtype") not in {"float16", "bfloat16", "float32", "float64", "int8", "uint8", "int16", "int32", "int64", "bool"}:
+            raise PackageValidationError(f"{scope} input contract {binding!r} has an unsupported dtype")
+    if set(raw_contracts) != expected_names:
+        raise PackageValidationError(f"{scope} graph inputContracts do not match input roots")
+    if raw_bindings is not None:
+        if not isinstance(raw_bindings, list):
+            raise PackageValidationError(f"{scope} graph inputBindings must be a list")
+        declared = {(item.get("nodeId"), item.get("name")) for item in raw_bindings if isinstance(item, Mapping)}
+        if declared != {(node_id, nodes[node_id].get("inputBinding")) for node_id in roots}:
+            raise PackageValidationError(f"{scope} graph inputBindings do not match input roots")
 
 
 def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[str, str], ValidatedPackage]) -> Mapping[str, Any]:
@@ -207,7 +251,13 @@ def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[s
             ],
         }
 
-    return make_scope(None, scope)
+    normalized = make_scope(None, scope)
+    # Boundary metadata belongs to the root graph. Keep it alongside the
+    # normalized nodes so dataset-resolved contracts survive flat diagrams.
+    for key in ("inputBindings", "inputContracts"):
+        if key in graph:
+            normalized[key] = graph[key]
+    return normalized
 
 
 def _runtime_handle(handle: Any) -> str:
@@ -588,10 +638,10 @@ class ObjectiveProgram:
 
 
 class _GraphModule(torch.nn.Module):
-    def __init__(self, nodes: dict[str, Mapping[str, Any]], edges: dict[str, list[dict[str, Any]]], modules: dict[str, torch.nn.Module], kinds: dict[str, str | None], root: str, objective_bindings: dict[str, tuple[_ObjectiveBinding, ...]]) -> None:
+    def __init__(self, nodes: dict[str, Mapping[str, Any]], edges: dict[str, list[dict[str, Any]]], modules: dict[str, torch.nn.Module], kinds: dict[str, str | None], roots: tuple[str, ...], objective_bindings: dict[str, tuple[_ObjectiveBinding, ...]]) -> None:
         super().__init__()
         self.modules_by_id = torch.nn.ModuleDict(modules)
-        self._nodes, self._edges, self._kinds, self._root = nodes, edges, kinds, root
+        self._nodes, self._edges, self._kinds, self._roots = nodes, edges, kinds, roots
         self._objective_bindings = objective_bindings
 
     def forward(self, value: torch.Tensor) -> torch.Tensor:
@@ -609,9 +659,12 @@ class _GraphModule(torch.nn.Module):
         terminal: str,
         excluded: set[str],
     ) -> dict[str, torch.Tensor]:
-        values: dict[str, torch.Tensor] = {self._root: _root_input(value, self._nodes[self._root], self._root)}
-        pending = [self._root]
-        queued = {self._root}
+        values = {
+            root: _root_input(value, self._nodes[root], root, len(self._roots))
+            for root in self._roots
+        }
+        pending = list(self._roots)
+        queued = set(self._roots)
         while pending:
             ready_index = next(
                 (
@@ -626,7 +679,7 @@ class _GraphModule(torch.nn.Module):
             node_id = pending.pop(ready_index)
             node = self._nodes[node_id]
             inputs = [values[edge["source"]] for edge in self._edges[node_id]]
-            if node_id != self._root:
+            if node_id not in self._roots:
                 if node_id in excluded:
                     continue
                 module = self.modules_by_id[node_id]
@@ -652,8 +705,15 @@ class _GraphModule(torch.nn.Module):
         raise PackageValidationError(f"graph cannot reach terminal node {terminal}")
 
 
-def _root_input(value: Mapping[str, torch.Tensor] | torch.Tensor, node: Mapping[str, Any], node_id: str) -> torch.Tensor:
+def _root_input(
+    value: Mapping[str, torch.Tensor] | torch.Tensor,
+    node: Mapping[str, Any],
+    node_id: str,
+    root_count: int,
+) -> torch.Tensor:
     if isinstance(value, torch.Tensor):
+        if root_count != 1:
+            raise PackageValidationError("multiple named inputs require a tensor map")
         return value
     if not isinstance(value, Mapping):
         raise PackageValidationError(f"input binding for node {node_id} must be a tensor map")

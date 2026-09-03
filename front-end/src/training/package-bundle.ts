@@ -12,6 +12,12 @@ import { satisfies } from "../type-system/packages/semver"
 export type PackageBundleGraph = {
   /** Deterministic named model inputs, sorted by slot then node ID. */
   readonly inputBindings: readonly GraphInputBinding[]
+  /** Concrete input schemas resolved from the selected dataset. */
+  readonly inputContracts: Readonly<Record<string, {
+    readonly type: "tensor"
+    readonly shape: readonly (number | "B")[]
+    readonly dtype: string
+  }>>
   /** Loss package declarations copied into the executable graph boundary. */
   readonly objectiveBindings: readonly GraphObjectiveBinding[]
   readonly nodes: readonly {
@@ -65,7 +71,7 @@ export type PackageBundleV1 = {
 }
 
 type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[]; inputBinding?: string } }
-type SemanticGraph = Omit<PackageBundleGraph, "nodes" | "inputBindings" | "objectiveBindings"> & {
+type SemanticGraph = Omit<PackageBundleGraph, "nodes" | "inputBindings" | "inputContracts" | "objectiveBindings"> & {
   readonly nodes: readonly (Omit<PackageBundleGraph["nodes"][number], "wheelAdapters"> & { readonly wheelAdapters: readonly string[] })[]
 }
 
@@ -149,9 +155,31 @@ function materializeGraph(
       return bindAdapter(node, name, declaration, graph.edges, inference)
     }),
   }))
+  const inputContracts = inference
+    ? Object.fromEntries((bindings?.inputBindings ?? []).map((binding) => {
+      const result = inference.nodes.get(binding.nodeId)
+      if (!result || result.status !== "success") {
+        throw new Error(`Input binding '${binding.name}' has no resolved tensor contract`)
+      }
+      return [binding.name, {
+        type: "tensor" as const,
+        // A training batch may resolve B to a concrete value, but the exported
+        // inference protocol keeps that leading axis dynamic.
+        shape: result.output.shape.map((dimension, index) => {
+          if (index === 0) return "B" as const
+          if (typeof dimension !== "number" || !Number.isInteger(dimension) || dimension <= 0) {
+            throw new Error(`Input binding '${binding.name}' has an unresolved dimension`)
+          }
+          return dimension
+        }),
+        dtype: result.output.dtype,
+      }]
+    }))
+    : {}
   return {
     ...graph,
     inputBindings: bindings?.inputBindings ?? [],
+    inputContracts,
     objectiveBindings: bindings?.objectiveBindings ?? [],
     nodes,
   }

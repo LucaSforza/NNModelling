@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from dataset.contracts import DatasetBatchContract, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
 from package_runtime import PackageValidationError
-from package_worker import _dataset_loaders, _normalized_training, _validate_graph_bindings, run, train
+from package_worker import _dataset_loaders, _materialize_dataset_inputs, _normalized_training, _validate_graph_bindings, run, train
 
 REFERENCE = DatasetReference(
     kind="project", id="demo.dataset", version="1.0.0",
@@ -121,6 +121,30 @@ def test_graph_bindings_reject_incompatible_input_shape() -> None:
 
     with pytest.raises(ValueError, match="incompatible shape"):
         _validate_graph_bindings(package, DEFINITION)
+
+
+def test_materialize_dataset_inputs_resolves_symbols_and_keeps_batch_dynamic() -> None:
+    definition = DatasetDefinition(
+        id="demo.dataset", version="1.0.0", name="Demo dataset",
+        parameters=(
+            {"name": "B", "type": "integer", "required": True},
+            {"name": "features", "type": "integer", "required": True},
+        ),
+        batch=DatasetBatchContract(
+            inputs={"image": TensorSlotContract(shape=("B", "features"), dtype="float32")},
+            targets={"label": TensorSlotContract(shape=("B",), dtype="int64")},
+        ),
+    )
+    package = {"graph": {
+        "nodes": [{"id": "input", "type": "input", "inputBinding": "image"}],
+        "inputBindings": [{"nodeId": "input", "name": "image"}],
+        "edges": [],
+    }}
+    materialized = _materialize_dataset_inputs(package, definition, {"B": 32, "features": 4})
+    assert materialized["graph"]["inputContracts"] == {
+        "image": {"type": "tensor", "shape": ["B", 4], "dtype": "float32"},
+    }
+    assert materialized["graph"]["inputBindings"][0]["contract"] == materialized["graph"]["inputContracts"]["image"]
 
 
 def test_graph_bindings_reject_incompatible_input_dtype() -> None:

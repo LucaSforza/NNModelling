@@ -27,8 +27,14 @@ def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
     training = _training_config(request)
     seed = _seed_from_training(training)
     _seed_everything(seed)
+    dataset, definition, _reference, parameters = resolve_dataset(training)
+    del dataset
+    package = _materialize_dataset_inputs(package, definition, parameters)
     model = compile_package_graph(package)
+    request = {**request, "package": package}
     summary = train(model, request, artifacts_path)
+    artifacts_path.mkdir(parents=True, exist_ok=True)
+    (artifacts_path / "package.json").write_text(json.dumps(package, sort_keys=True), encoding="utf-8")
     result = {
         "schema_version": 1,
         "format": "package-training-result/v1",
@@ -263,6 +269,72 @@ def _validate_graph_bindings(package: Any, definition: DatasetDefinition) -> Non
             if expected is not None:
                 actual = _transformed_contract(definition.batch.targets[slot], binding.get("transform"))
                 _compare_declared_contract(actual, expected, f"objective target '{slot}'")
+
+
+def _materialize_dataset_inputs(
+    package: Mapping[str, Any],
+    definition: DatasetDefinition,
+    parameters: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach the resolved named Input contract before package compilation."""
+
+    graph = package.get("graph")
+    if not isinstance(graph, Mapping):
+        raise ValueError("package graph is required")
+    raw_bindings = graph.get("inputBindings")
+    if not isinstance(raw_bindings, list) or not raw_bindings:
+        raise ValueError("package graph requires resolved inputBindings")
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        raise ValueError("package graph nodes must be a list")
+    node_ids = {node.get("id") for node in nodes if isinstance(node, Mapping)}
+    contracts: dict[str, dict[str, Any]] = {}
+    bindings: list[dict[str, Any]] = []
+    for raw in raw_bindings:
+        if not isinstance(raw, Mapping):
+            raise ValueError("package graph contains an invalid input binding")
+        name, node_id = raw.get("name"), raw.get("nodeId")
+        if not isinstance(name, str) or not name or not isinstance(node_id, str) or node_id not in node_ids:
+            raise ValueError("package graph contains an invalid input binding")
+        if name in contracts:
+            raise ValueError(f"package graph has duplicate input binding: {name}")
+        slot = definition.batch.inputs.get(name)
+        if slot is None:
+            raise ValueError(f"dataset is missing input slot: {name}")
+        shape = _resolved_export_shape(slot.shape, parameters, f"batch.inputs.{name}")
+        contract = {"type": "tensor", "shape": shape, "dtype": slot.dtype}
+        contracts[name] = contract
+        bindings.append({**dict(raw), "contract": contract})
+
+    # Target dimensions are also part of the dataset-instantiated graph even
+    # though they do not enter the prediction wheel.
+    for name, slot in definition.batch.targets.items():
+        _resolved_export_shape(slot.shape, parameters, f"batch.targets.{name}")
+
+    previous = graph.get("inputContracts")
+    if previous is not None and previous != contracts:
+        raise ValueError("package graph input contract does not match the selected dataset")
+    materialized_graph = {**dict(graph), "inputBindings": bindings, "inputContracts": contracts}
+    return {**dict(package), "graph": materialized_graph}
+
+
+def _resolved_export_shape(
+    shape: tuple[str | int, ...],
+    parameters: Mapping[str, Any],
+    label: str,
+) -> list[str | int]:
+    """Resolve symbols and preserve only the protocol's dynamic batch axis."""
+
+    resolved: list[str | int] = []
+    for index, dimension in enumerate(shape):
+        if isinstance(dimension, int):
+            resolved.append("B" if index == 0 else dimension)
+            continue
+        value = parameters.get(dimension)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{label}.shape[{index}] symbol '{dimension}' must resolve to a positive integer")
+        resolved.append("B" if index == 0 else value)
+    return resolved
 
 
 def _binding_tensor_contract(binding: Mapping[str, Any], node: Mapping[str, Any], label: str) -> TensorSlotContract:

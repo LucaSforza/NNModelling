@@ -52,12 +52,14 @@ def build_model_wheel(
         raise FileNotFoundError(f"model weights not found: {weights_path}")
     _validate_safe_weights(weights_path)
     module_name = package_name
+    input_contract = _input_contract(package)
     architecture = {
         "schema_version": 3,
         "format": "package-model/v1",
         "package": _json_safe(package),
         "prediction": {"program": "prediction"},
         "input_adapter": dict(input_adapter or {"kind": "tensor", "version": 1}),
+        "input_contract": input_contract,
         "adapters": adapter_descriptors(package),
     }
     architecture["architecture_fingerprint"] = _architecture_fingerprint(architecture)
@@ -198,6 +200,37 @@ def _validate_safe_weights(weights_path: Path) -> None:
     with safe_open(str(weights_path), framework="pt") as handle:
         if not handle.keys():
             raise ValueError("weights.safetensors contains no tensors")
+
+
+def _input_contract(package: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and copy the resolved named inputs into wheel metadata."""
+
+    graph = package.get("graph")
+    if not isinstance(graph, Mapping):
+        raise ValueError("package must contain a graph mapping")
+    raw = graph.get("inputContracts")
+    bindings = graph.get("inputBindings")
+    if bindings is not None and raw is None:
+        raise ValueError("package graph inputBindings require resolved inputContracts")
+    if raw is None:
+        return {"inputs": {}}
+    if not isinstance(raw, Mapping) or not raw:
+        raise ValueError("package graph inputContracts must be a non-empty named object")
+    inputs: dict[str, dict[str, Any]] = {}
+    for name, candidate in raw.items():
+        if not isinstance(name, str) or not name or not isinstance(candidate, Mapping):
+            raise ValueError("package graph inputContracts contains an invalid binding")
+        shape = candidate.get("shape")
+        if not isinstance(shape, list) or any(
+            not ((item == "B" and index == 0) or (isinstance(item, int) and not isinstance(item, bool) and item > 0))
+            for index, item in enumerate(shape)
+        ):
+            raise ValueError(f"input contract {name!r} contains unresolved dimensions")
+        dtype = candidate.get("dtype")
+        if dtype not in {"float16", "bfloat16", "float32", "float64", "int8", "uint8", "int16", "int32", "int64", "bool"}:
+            raise ValueError(f"input contract {name!r} has an unsupported dtype")
+        inputs[name] = {"type": "tensor", "shape": list(shape), "dtype": dtype}
+    return {"inputs": inputs}
 
 
 def _vendor_weights(source: Path, destination: Path, fingerprint: str) -> None:
