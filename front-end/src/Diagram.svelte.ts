@@ -27,6 +27,7 @@ import type { DiagramCoreSnapshot } from "./core/types";
 import {
   PackageRuntimeDiagnosticCollection,
   packageDiagnosticIdentity,
+  type PackageRuntimeDiagnosticInput,
   type PackageRuntimeDiagnostic,
 } from "./type-system/diagnostics";
 
@@ -174,6 +175,12 @@ export class Diagram extends DiagramCore {
 
   /** Wait for bootstrap before package-aware project operations. */
   public waitForPackageRuntime(): Promise<void> { return this.packageRuntimeReadyPromise; }
+
+  /** Publish a project-level runtime issue through the existing diagnostics UI. */
+  public recordPackageRuntimeDiagnostic(input: PackageRuntimeDiagnosticInput): void {
+    this.diagnosticCollection.record(input);
+    this.publishDiagnostics();
+  }
 
   /** Activate one exact package identity before a package node is created. */
   public async activatePackage(identity: PackageIdentity): Promise<void> {
