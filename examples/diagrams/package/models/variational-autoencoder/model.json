@@ -17,15 +17,7 @@
         },
         "name": "Input",
         "color": "#ffffff",
-        "params": {
-          "shape": [
-            "B",
-            1,
-            28,
-            28
-          ],
-          "dtype": "float32"
-        },
+        "params": {},
         "inputBinding": "image"
       },
       "measured": {

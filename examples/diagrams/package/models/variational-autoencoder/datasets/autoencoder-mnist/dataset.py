@@ -14,19 +14,18 @@ from torch.utils.data import DataLoader, Dataset, random_split
 
 MEAN = 0.1307
 STD = 0.3081
-DEFAULT_BATCH_SIZE = 32
 DEFAULT_NUM_WORKERS = 0
 DEFAULT_TRAIN_SIZE = 0.8
 
 
 def _validate_parameters(parameters: Mapping[str, object]) -> dict[str, object]:
     values = {
-        "batch_size": parameters.get("batch_size", DEFAULT_BATCH_SIZE),
+        "B": parameters.get("B"),
         "num_workers": parameters.get("num_workers", DEFAULT_NUM_WORKERS),
         "train_size": parameters.get("train_size", DEFAULT_TRAIN_SIZE),
     }
-    if isinstance(values["batch_size"], bool) or not isinstance(values["batch_size"], int) or values["batch_size"] < 1:
-        raise ValueError("batch_size must be a positive integer")
+    if isinstance(values["B"], bool) or not isinstance(values["B"], int) or values["B"] < 1:
+        raise ValueError("B must be a positive integer")
     if isinstance(values["num_workers"], bool) or not isinstance(values["num_workers"], int) or values["num_workers"] < 0:
         raise ValueError("num_workers must be a non-negative integer")
     if isinstance(values["train_size"], bool) or not isinstance(values["train_size"], (int, float)) or not 0 < values["train_size"] <= 1:
@@ -103,7 +102,7 @@ def build(parameters: Mapping[str, object], context: Any) -> AutoencoderMNIST:
     values = _validate_parameters(parameters)
     return AutoencoderMNIST(
         resource_root=Path(context.resource_root),
-        batch_size=values["batch_size"],
+        batch_size=values["B"],
         num_workers=values["num_workers"],
         train_size=values["train_size"],
     )

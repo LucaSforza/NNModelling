@@ -12,8 +12,9 @@ uv sync
 uv run python interpolate.py
 ```
 
-The script imports `Model` directly from the downloaded job package. It reconstructs
-two local MNIST fixtures through `Model.predict`, obtains their posterior means
+The script imports `Model` directly from the downloaded job package. It prepares
+two local MNIST fixtures using the dataset's documented tensor contract and
+reconstructs them through `Model.predict_tensor`, obtains their posterior means
 through the public `encode` adapter, and decodes several interpolated latent
 points through the public `forward` adapter. The result is written to
 `generated/interpolation-1-to-7.png`.

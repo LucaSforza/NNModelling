@@ -6,10 +6,9 @@
   "description": "MNIST images paired with themselves for reconstruction.",
   "parameters": [
     {
-      "name": "batch_size",
+      "name": "B",
       "type": "integer",
-      "required": false,
-      "default": 32
+      "required": true
     },
     {
       "name": "num_workers",
@@ -37,13 +36,5 @@
         "dtype": "float32"
       }
     }
-  },
-  "inferenceAdapter": {
-    "kind": "image",
-    "version": 1,
-    "channels": 1,
-    "size": [28, 28],
-    "mean": [0.1307],
-    "std": [0.3081]
   }
 }
