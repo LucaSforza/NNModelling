@@ -1,4 +1,4 @@
-import type { TypeGraphSnapshot, GraphInferenceResult } from "./graph/types"
+import type { DatasetInferenceContext, TypeGraphSnapshot, GraphInferenceResult } from "./graph/types"
 import { PackageGraphScheduler } from "./graph/scheduler"
 import { TypeSystemHost, type ActivePackageMetadata, type PackageSelection } from "./host"
 import { bundledCoreRecords } from "./bundled/catalog"
@@ -172,7 +172,9 @@ export class EditorTypeSystemRuntime {
     return runtime
   }
 
-  infer(snapshot: TypeGraphSnapshot): GraphInferenceResult { return this.scheduler.infer(snapshot) }
+  infer(snapshot: TypeGraphSnapshot, datasetContext?: DatasetInferenceContext): GraphInferenceResult {
+    return this.scheduler.infer(snapshot, datasetContext)
+  }
   packages(): ActivePackageMetadata[] { return this.host.activePackages() }
   /** Export the current core + model scope without exposing filesystem paths. */
   packageExports(): ReadonlyMap<string, PackageExportInfo> {

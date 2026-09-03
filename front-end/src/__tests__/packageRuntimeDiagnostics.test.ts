@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest"
 import { PackageRuntimeDiagnosticCollection } from "../type-system/diagnostics"
 import { TypeSystemHost } from "../type-system/host"
 import { coreInputPackage } from "../type-system/bundled/core-input"
+import { PackageGraphScheduler } from "../type-system/graph/scheduler"
 
 const hosts: TypeSystemHost[] = []
 
@@ -36,7 +37,7 @@ describe("package/runtime diagnostics", () => {
     expect(diagnostics.snapshot()).toEqual([])
   })
 
-  test("retains the original Lua cause as a fatal inference diagnostic", async () => {
+  test("dataset-scoped Input inference bypasses legacy Lua", async () => {
     const host = await TypeSystemHost.create([{
       resources: {
         ...coreInputPackage.resources as Record<string, string>,
@@ -46,21 +47,17 @@ describe("package/runtime diagnostics", () => {
     hosts.push(host)
     await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
-    const result = host.inferForEditor(
-      { id: "core.input", version: "0.1.0", name: "Input" },
-      { kind: "input", inputs: [] },
-      { shape: ["B", 4], dtype: "float32" },
-      "input-node",
-    )
-    expect(result.status).toBe("fault")
-    expect(host.runtimeDiagnostics()).toEqual([expect.objectContaining({
-      occurrenceId: "inference:core.input@0.1.0:input-node",
-      severity: "fatal",
-      phase: "inference",
-      packageId: "core.input",
-      packageVersion: "0.1.0",
-      nodeId: "input-node",
-      message: expect.stringContaining("diagnostic Lua cause"),
-    })])
+    const scheduler = new PackageGraphScheduler(host)
+    const result = scheduler.infer({
+      nodes: [{ id: "input-node", type: "custom", position: { x: 0, y: 0 }, data: {
+        package: { id: "core.input", version: "0.1.0", name: "Input" }, inputBinding: "image", params: {},
+      } }],
+      edges: [],
+    }, {
+      definition: { schemaVersion: 1, id: "test.images", version: "1.0.0", name: "Images", parameters: [{ name: "B", type: "integer", required: true }], batch: { inputs: { image: { shape: ["B", 4], dtype: "float32" } }, targets: {} } },
+      parameters: { B: 4 },
+    })
+    expect(result.nodes.get("input-node")).toEqual({ status: "success", output: { shape: [4, 4], dtype: "float32" } })
+    expect(host.runtimeDiagnostics()).toEqual([])
   })
 })

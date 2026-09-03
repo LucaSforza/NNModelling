@@ -28,6 +28,7 @@ import { compileGraphBindings } from "../type-system/graph/bindings";
 import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
 import { TrainingController } from "../training/controller";
 import type { ProjectPathPayload } from "../project-workspace/path";
+import type { DatasetParameterValue } from "../project-workspace/dataset-contract";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -362,10 +363,12 @@ export class BrowserRPCHandler {
           result = this.requireTraining().disconnect(params.revoke === true);
           break;
         case "get_training_config":
+          this.syncDatasetInference();
           result = { status: "ok", config: this.requireTraining().getConfig(), datasets: this.requireTraining().getDatasets() };
           break;
         case "update_training_config":
           result = { status: "ok", config: this.requireTraining().updateConfig((params.patch ?? {}) as Record<string, unknown>) };
+          this.syncDatasetInference();
           break;
         case "start_training":
           result = this.requireTraining().submitTraining(this.diagram);
@@ -408,6 +411,16 @@ export class BrowserRPCHandler {
   private requireTraining(): TrainingController {
     if (!this.training) throw new Error("Training controller unavailable for this editor");
     return this.training;
+  }
+
+  private syncDatasetInference(): void {
+    const training = this.training;
+    if (!training) return;
+    const snapshot = training.snapshot();
+    const selected = snapshot.datasets.find((dataset) => dataset.reference.ref === snapshot.config.selectedDataset);
+    this.diagram.setDatasetInferenceContext(selected
+      ? { definition: selected.definition, parameters: snapshot.config.datasetParams as Record<string, DatasetParameterValue> }
+      : null);
   }
 
   // ── Reconnection (exponential backoff) ───────────────────────────────

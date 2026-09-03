@@ -94,9 +94,7 @@ describe("new core standard-library packages", () => {
     ])
     expect(host.packageDefinition(ref("core.subflow-proxy"))?.wheelAdapters).toBeUndefined()
 
-    expect(host.inferForEditor(ref("core.input"), { kind: "input", inputs: [] }, {
-      shape: ["B", 3, 32, 32], dtype: "float32",
-    })).toEqual({ status: "success", output: { shape: ["B", 3, 32, 32], dtype: "float32" } })
+    expect(host.packageDefinition(ref("core.input"))?.parameters).toEqual({})
 
     expect(host.inferForEditor(ref("core.linear"), { kind: "layer", inputs: [{ shape: ["B", 128], dtype: "float32" }] }, {
       in_features: 128, out_features: 64,

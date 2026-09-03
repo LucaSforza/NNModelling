@@ -2,11 +2,20 @@ import type { Edge, Node } from "@xyflow/svelte"
 import type { EditorInferenceState } from "../host"
 import type { TensorType } from "../tensor-type"
 import type { PackageIdentity } from "../../core/types"
+import type { DatasetDefinition, DatasetParameterValue, ResolvedDatasetContract } from "../../project-workspace/dataset-contract"
 
 export type TypeGraphSnapshot = {
   readonly nodes: readonly Node[]
   readonly edges: readonly Edge[]
 }
+
+/** Dataset selection supplied by the editor to dataset-scoped inference. */
+export type DatasetInferenceContext = {
+  readonly definition: DatasetDefinition
+  readonly parameters: Readonly<Record<string, DatasetParameterValue>>
+}
+
+export type ResolvedGraphDataset = ResolvedDatasetContract
 
 /** Stable batch slot assigned to one top-level Input node. */
 export type GraphInputBinding = {

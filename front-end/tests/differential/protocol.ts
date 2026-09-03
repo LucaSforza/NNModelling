@@ -17,6 +17,11 @@ export type ModelNode = {
   readonly packageId: string
   readonly parameters: Readonly<Record<string, unknown>>
   readonly inputs: readonly string[]
+  readonly inputBinding?: string
+}
+
+export type ResolvedDataset = {
+  readonly inputs: Readonly<Record<string, TensorType>>
 }
 
 /** Minimal semantic graph wire format; it intentionally excludes editor/NNTree state. */
@@ -27,18 +32,10 @@ export type ModelInferenceRequest = {
   readonly packages: readonly string[]
   readonly nodes: readonly ModelNode[]
   readonly output: string
+  readonly dataset: ResolvedDataset
 }
 
-/** Kept for the T01 regression while model protocol v2 is introduced. */
-export type InputInferenceRequest = {
-  readonly protocolVersion: 1
-  readonly operation: "infer"
-  readonly packageId: "core.input"
-  readonly context: { readonly kind: "input"; readonly inputs: readonly [] }
-  readonly parameters: Readonly<Record<string, unknown>>
-}
-
-export type ProtocolRequest = ModelInferenceRequest | InputInferenceRequest
+export type ProtocolRequest = ModelInferenceRequest
 
 export type ProtocolOutcome =
   | { readonly status: "success"; readonly output: TensorType }
@@ -47,7 +44,7 @@ export type ProtocolOutcome =
   | { readonly status: "fault"; readonly message: string }
 
 export type ProtocolResponse = {
-  readonly protocolVersion: 1 | typeof PROTOCOL_VERSION
+  readonly protocolVersion: typeof PROTOCOL_VERSION
   readonly implementation: "candidate" | "oracle"
   readonly modelId?: ModelId
   readonly revision?: string
@@ -57,15 +54,6 @@ export type ProtocolResponse = {
 export function parseRequest(value: unknown): ProtocolRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("request must be an object")
   const request = value as Partial<ModelInferenceRequest>
-  if (request.protocolVersion === 1) {
-    const legacy = value as Partial<InputInferenceRequest>
-    if (legacy.operation !== "infer" || legacy.packageId !== "core.input") throw new Error("unsupported legacy operation")
-    if (legacy.context?.kind !== "input" || !Array.isArray(legacy.context.inputs) || legacy.context.inputs.length !== 0) {
-      throw new Error("core.input requires an empty input context")
-    }
-    if (!legacy.parameters || typeof legacy.parameters !== "object" || Array.isArray(legacy.parameters)) throw new Error("parameters must be an object")
-    return legacy as InputInferenceRequest
-  }
   if (request.protocolVersion !== PROTOCOL_VERSION) throw new Error(`unsupported protocol version '${String(request.protocolVersion)}'`)
   if (request.operation !== "infer-model") throw new Error("unsupported model operation")
   if (!isModelId(request.modelId)) throw new Error("unsupported model id")
@@ -74,6 +62,7 @@ export function parseRequest(value: unknown): ProtocolRequest {
   }
   if (!Array.isArray(request.nodes) || request.nodes.length === 0) throw new Error("nodes must be non-empty")
   if (typeof request.output !== "string") throw new Error("output must be a node id")
+  if (!request.dataset || typeof request.dataset !== "object" || Array.isArray(request.dataset) || !request.dataset.inputs || typeof request.dataset.inputs !== "object" || Array.isArray(request.dataset.inputs)) throw new Error("dataset.inputs must be an object")
 
   const ids = new Set<string>()
   for (const node of request.nodes) {
@@ -89,6 +78,7 @@ export function parseRequest(value: unknown): ProtocolRequest {
     if (!Array.isArray(node.inputs) || node.inputs.some(input => typeof input !== "string")) {
       throw new Error(`node '${node.id}' inputs must be an array of node ids`)
     }
+    if (node.inputBinding !== undefined && typeof node.inputBinding !== "string") throw new Error(`node '${node.id}' inputBinding must be a string`)
   }
   if (!ids.has(request.output)) throw new Error(`output node '${request.output}' is missing`)
   for (const node of request.nodes) {

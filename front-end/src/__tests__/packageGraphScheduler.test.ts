@@ -18,7 +18,7 @@ function node(id: string, packageId: string, params: Record<string, unknown> = {
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: ref(packageId), name: id, params },
+    data: { package: ref(packageId), name: id, params, ...(packageId === "core.input" ? { inputBinding: "input" } : {}) },
   } as Node
 }
 
@@ -29,6 +29,10 @@ describe("package graph failure scope", () => {
     await host.activate(ref("core.input"))
     await host.activate(ref("core.fork"))
     const scheduler = new PackageGraphScheduler(host)
+    const datasetContext = {
+      definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", 4], dtype: "float32" as const } }, targets: {} } },
+      parameters: { B: 1 },
+    }
     const result = scheduler.infer({
       nodes: [
         node("input", "core.input", { shape: ["B", 4], dtype: "float32" }),
@@ -40,7 +44,7 @@ describe("package graph failure scope", () => {
         { id: "good-edge", source: "input", target: "good", sourceHandle: "out", targetHandle: "in" },
         { id: "missing-edge", source: "missing", target: "after-missing", sourceHandle: "out", targetHandle: "in" },
       ],
-    })
+    }, datasetContext)
 
     expect(result.nodes.get("input")?.status).toBe("success")
     expect(result.nodes.get("good")?.status).toBe("success")

@@ -24,7 +24,7 @@ function requestFor(value: ShapeCase): ModelInferenceRequest {
     id, packageId: "core.linear", parameters: { in_features: inputFeatures, out_features: outputFeatures, dtype: value.dtype }, inputs: [input],
   })
   const nodes: ModelInferenceRequest["nodes"] = [
-    { id: "input", packageId: "core.input", parameters: { shape: ["B", value.input], dtype: value.dtype }, inputs: [] },
+    { id: "input", packageId: "core.input", inputBinding: "input", parameters: {}, inputs: [] },
   ]
   if (value.branch) {
     nodes.push(linear("left", "input", value.input, value.middle))
@@ -35,7 +35,15 @@ function requestFor(value: ShapeCase): ModelInferenceRequest {
     nodes.push(linear("middle", "input", value.input, value.middle))
     nodes.push(linear("output", "middle", value.middle, value.output))
   }
-  return { protocolVersion: 2, operation: "infer-model", modelId: "transformer", packages: ["core.input", "core.linear", "core.add"], nodes, output: "output" }
+  return {
+    protocolVersion: 2,
+    operation: "infer-model",
+    modelId: "transformer",
+    packages: ["core.input", "core.linear", "core.add"],
+    nodes,
+    output: "output",
+    dataset: { inputs: { input: { shape: ["B", value.input], dtype: value.dtype } } },
+  }
 }
 
 describe("differential graph fuzzing", () => {

@@ -13,6 +13,7 @@
   import { TrainingController, type TrainingControllerSnapshot } from "../training/controller";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
+  import type { DatasetParameterValue } from "../project-workspace/dataset-contract";
 
   interface Props {
     diagram: Diagram;
@@ -106,6 +107,10 @@
     api = view.status === "active" ? controller.getApi() : null;
     errorMessage = view.error ?? "";
     const config = snapshot.config;
+    const selectedDefinition = snapshot.datasets.find((dataset) => dataset.reference.ref === config.selectedDataset)?.definition;
+    diagram.setDatasetInferenceContext(selectedDefinition
+      ? { definition: selectedDefinition, parameters: config.datasetParams as Record<string, DatasetParameterValue> }
+      : null);
     selectedDataset = config.selectedDataset;
     datasetParams = Object.fromEntries(Object.entries(config.datasetParams).map(([key, value]) => [key, String(value ?? "")]));
     seed = String(config.seed); optimizerTarget = config.optimizerTarget; learningRate = String(config.learningRate);

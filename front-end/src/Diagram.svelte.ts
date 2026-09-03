@@ -18,7 +18,7 @@
 import { type Node, type Edge } from "@xyflow/svelte";
 import { DiagramCore } from "./core/DiagramCore";
 import type { LayoutDirection } from "./layout/autoLayout";
-import type { GraphInferenceResult } from "./type-system/graph/types";
+import type { DatasetInferenceContext, GraphInferenceResult } from "./type-system/graph/types";
 import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
 import type { ModelBundleResources, PackageCatalogMetadata, PreparedModelScope } from "./type-system/editor-runtime";
 import type { PackageExportInfo } from "./type-system/packages/types";
@@ -43,6 +43,8 @@ export class Diagram extends DiagramCore {
   /** Reactive readiness and fatal diagnostics for the browser-owned runtime. */
   public packageRuntimeReady = $state(false);
   public packageRuntimeDiagnostics: PackageRuntimeDiagnostic[] = $state.raw([]);
+  /** Current dataset instance used to resolve top-level Input nodes. */
+  public datasetInferenceContext: DatasetInferenceContext | null = $state.raw(null);
   private packageTypeRuntime: EditorTypeSystemRuntime | null = null;
   private readonly packageRuntimeReadyPromise: Promise<void>;
   private readonly diagnosticCollection = new PackageRuntimeDiagnosticCollection();
@@ -87,7 +89,10 @@ export class Diagram extends DiagramCore {
       this.publishDiagnostics();
       return result;
     }
-    const result = this.packageTypeRuntime.infer({ nodes: this.nodes, edges: this.edges });
+    const result = this.packageTypeRuntime.infer(
+      { nodes: this.nodes, edges: this.edges },
+      this.datasetInferenceContext ?? undefined,
+    );
     this.typeResult = result;
     this.syncRuntimeDiagnostics();
     const liveFaultOccurrences = new Set<string>();
@@ -112,6 +117,12 @@ export class Diagram extends DiagramCore {
     ));
     this.publishDiagnostics();
     return result;
+  }
+
+  /** Select the dataset instance that owns top-level Input tensor types. */
+  public setDatasetInferenceContext(context: DatasetInferenceContext | null): void {
+    this.datasetInferenceContext = context;
+    if (this.packageTypeRuntime) this.refreshTypes();
   }
 
   /** Presentation docking is intentionally limited to ordinary layer nodes. */
