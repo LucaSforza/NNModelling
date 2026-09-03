@@ -163,7 +163,6 @@ class DatasetDefinition(BaseModel):
     parameters: tuple[DatasetParameter, ...] = ()
     batch: DatasetBatchContract
     classes: DatasetClassMetadata | None = None
-    inferenceAdapter: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def unique_parameters(self) -> "DatasetDefinition":

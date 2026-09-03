@@ -89,6 +89,14 @@ def test_slots_reject_unknown_dtypes_and_duplicates() -> None:
         )
 
 
+def test_dataset_definition_rejects_dataset_owned_inference_adapter() -> None:
+    with pytest.raises(ValidationError):
+        DatasetDefinition.model_validate({
+            **_definition(),
+            "inferenceAdapter": {"kind": "image", "version": 1},
+        })
+
+
 def test_training_batch_is_flat_named_tensor_maps_and_moves_device() -> None:
     batch = normalize_training_batch({
         "inputs": {"tokens": torch.ones(2, 3, dtype=torch.int64)},

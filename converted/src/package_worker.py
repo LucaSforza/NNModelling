@@ -243,7 +243,7 @@ def _validate_graph_bindings(package: Any, definition: DatasetDefinition) -> Non
         node = nodes_by_id.get(binding["nodeId"])
         if node is None:
             raise ValueError(f"input binding refers to missing graph node: {binding['nodeId']}")
-        expected = _binding_tensor_contract(binding, node, f"input binding {name}")
+        expected = _binding_tensor_contract(binding, f"input binding {name}")
         _compare_declared_contract(
             definition.batch.inputs[name], expected, f"input binding '{name}'"
         )
@@ -337,18 +337,12 @@ def _resolved_export_shape(
     return resolved
 
 
-def _binding_tensor_contract(binding: Mapping[str, Any], node: Mapping[str, Any], label: str) -> TensorSlotContract:
-    """Read a tensor contract from semantic bundle metadata, never from names."""
+def _binding_tensor_contract(binding: Mapping[str, Any], label: str) -> TensorSlotContract:
+    """Read a resolved tensor contract from semantic bundle metadata."""
     contract = _optional_binding_tensor_contract(binding, label)
-    if contract is not None:
-        return contract
-    params = node.get("params", node.get("parameters", {}))
-    if not isinstance(params, Mapping):
-        raise ValueError(f"{label} is missing shape/dtype metadata")
-    try:
-        return TensorSlotContract(shape=tuple(params["shape"]), dtype=params["dtype"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"{label} is missing valid shape/dtype metadata") from exc
+    if contract is None:
+        raise ValueError(f"{label} is missing a resolved tensor contract")
+    return contract
 
 
 def _optional_binding_tensor_contract(binding: Any, label: str) -> TensorSlotContract | None:

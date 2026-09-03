@@ -90,7 +90,6 @@ export type DatasetDefinition = {
   readonly parameters: readonly DatasetParameter[]
   readonly batch: DatasetBatchContract
   readonly classes?: DatasetClassMetadata
-  readonly inferenceAdapter?: Readonly<Record<string, unknown>>
 }
 
 /** Values after a dataset selection has instantiated every symbolic dimension. */
@@ -177,7 +176,7 @@ export function upgradeModelManifest(value: unknown): ModelManifestV2 {
 
 export function parseDatasetDefinition(value: unknown): DatasetDefinition {
   const object = record(value, "dataset definition")
-  assertKnownKeys(object, ["schemaVersion", "id", "version", "name", "description", "parameters", "batch", "classes", "inferenceAdapter"], "dataset definition")
+  assertKnownKeys(object, ["schemaVersion", "id", "version", "name", "description", "parameters", "batch", "classes"], "dataset definition")
   if (object.schemaVersion !== DATASET_SCHEMA_VERSION) fail("dataset definition schemaVersion is unsupported", "unknown-version", "schemaVersion")
   const id = identity(object.id, "dataset definition id")
   const version = versionOf(object.version, "dataset definition version")
@@ -211,7 +210,6 @@ export function parseDatasetDefinition(value: unknown): DatasetDefinition {
     names.add(name)
   }
   const classes = object.classes === undefined ? undefined : parseClasses(object.classes)
-  const inferenceAdapter = object.inferenceAdapter === undefined ? undefined : record(object.inferenceAdapter, "inferenceAdapter")
   return {
     schemaVersion: DATASET_SCHEMA_VERSION,
     id,
@@ -221,7 +219,6 @@ export function parseDatasetDefinition(value: unknown): DatasetDefinition {
     parameters,
     batch: { inputs, targets },
     ...(classes === undefined ? {} : { classes }),
-    ...(inferenceAdapter === undefined ? {} : { inferenceAdapter }),
   }
 }
 

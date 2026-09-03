@@ -61,6 +61,18 @@ describe("dataset-driven Input contract", () => {
     expect(() => resolveDatasetContract(invalid, { T: 4 })).toThrow(/integer parameter/)
   })
 
+  test("rejects dataset-owned inference adapters in the active contract", () => {
+    expect(() => parseDatasetDefinition({
+      schemaVersion: 1,
+      id: "demo.adapter",
+      version: "1.0.0",
+      name: "Adapter metadata is model-owned",
+      parameters: [],
+      batch: { inputs: {}, targets: {} },
+      inferenceAdapter: { kind: "image", version: 1 },
+    })).toThrow(/unknown-field/)
+  })
+
   test("migrates top-level legacy Input parameters but preserves subflow boundaries", () => {
     const topLevel = {
       id: "input",

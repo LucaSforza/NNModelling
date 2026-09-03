@@ -28,8 +28,8 @@ DEFINITION = DatasetDefinition(
 
 def training_package() -> dict[str, object]:
     return {"graph": {
-        "nodes": [{"id": "input", "params": {"shape": ["B", 1], "dtype": "float32"}}],
-        "inputBindings": [{"nodeId": "input", "name": "image"}],
+        "nodes": [{"id": "input", "type": "input", "inputBinding": "image"}],
+        "inputBindings": [{"nodeId": "input", "name": "image", "contract": {"shape": ["B", 1], "dtype": "float32"}}],
         "objectiveBindings": [],
     }}
 
@@ -117,9 +117,18 @@ def test_dataset_loaders_require_all_named_splits() -> None:
 
 def test_graph_bindings_reject_incompatible_input_shape() -> None:
     package = training_package()
-    package["graph"]["nodes"][0]["params"]["shape"] = ["B", 2]
+    package["graph"]["inputBindings"][0]["contract"]["shape"] = ["B", 2]
 
     with pytest.raises(ValueError, match="incompatible shape"):
+        _validate_graph_bindings(package, DEFINITION)
+
+
+def test_graph_bindings_reject_legacy_input_parameters_without_contract() -> None:
+    package = training_package()
+    package["graph"]["inputBindings"][0].pop("contract")
+    package["graph"]["nodes"][0]["params"] = {"shape": ["B", 1], "dtype": "float32"}
+
+    with pytest.raises(ValueError, match="missing a resolved tensor contract"):
         _validate_graph_bindings(package, DEFINITION)
 
 
@@ -149,7 +158,7 @@ def test_materialize_dataset_inputs_resolves_symbols_and_keeps_batch_dynamic() -
 
 def test_graph_bindings_reject_incompatible_input_dtype() -> None:
     package = training_package()
-    package["graph"]["nodes"][0]["params"]["dtype"] = "int64"
+    package["graph"]["inputBindings"][0]["contract"]["dtype"] = "int64"
 
     with pytest.raises(ValueError, match="incompatible dtype"):
         _validate_graph_bindings(package, DEFINITION)

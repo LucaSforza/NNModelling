@@ -46,7 +46,6 @@ export type DatasetAuthoringRequest = {
   readonly inputs: readonly DatasetSlotRequest[]
   readonly targets: readonly DatasetSlotRequest[]
   readonly classes?: DatasetClassRequest
-  readonly inferenceAdapter?: Readonly<Record<string, unknown>>
   readonly dataFiles?: readonly DatasetDataFile[]
 }
 
@@ -150,7 +149,6 @@ export function validateDatasetAuthoringRequest(input: DatasetAuthoringRequest):
       targets: Object.fromEntries(targets.map((slot) => [slot.name, { shape: slot.shape, dtype: slot.dtype }])),
     },
     ...(classes === undefined ? {} : { classes }),
-    ...(input.inferenceAdapter === undefined ? {} : { inferenceAdapter: structuredClone(input.inferenceAdapter) }),
   })
   return {
     id: input.id,
@@ -162,7 +160,6 @@ export function validateDatasetAuthoringRequest(input: DatasetAuthoringRequest):
     inputs,
     targets,
     ...(classes === undefined ? {} : { classes }),
-    ...(input.inferenceAdapter === undefined ? {} : { inferenceAdapter: structuredClone(input.inferenceAdapter) }),
     dataFiles,
   }
 }
@@ -182,7 +179,6 @@ export function generateDatasetResources(input: DatasetAuthoringRequest): Genera
       targets: Object.fromEntries(request.targets.map((slot) => [slot.name, { shape: slot.shape, dtype: slot.dtype }])),
     },
     ...(request.classes === undefined ? {} : { classes: request.classes }),
-    ...(request.inferenceAdapter === undefined ? {} : { inferenceAdapter: request.inferenceAdapter }),
   })
   const manifest = parseDatasetSourceManifest({
     schemaVersion: 1,

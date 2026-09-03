@@ -19,8 +19,6 @@ from backend.models import JobStatus, JobSubmission, ResourceRequest
 from backend.package_store import PackageStore
 from backend.store import JobStore, ValkeyJobStore, utc_now
 from model_package.exporter import build_model_wheel, repackage_model_wheel, validate_package_name
-from model_package.adapters import adapter_spec_from_definition
-from dataset.contracts import DatasetReference
 from backend.dataset_store import DatasetArchiveStore
 
 
@@ -655,21 +653,11 @@ class JobManager:
         artifact_dir = Path(job["artifact_dir"])
         try:
             package = json.loads((artifact_dir / "package.json").read_text(encoding="utf-8"))
-            dataset = DatasetReference.model_validate(job["submission"]["training"]["dataset"]["reference"])
-            definition = self.dataset_store.metadata(
-                dataset,
-                owner_connection_id=job["owner_connection_id"],
-            )["definition"]
-            if isinstance(definition, dict):
-                input_adapter = adapter_spec_from_definition(definition)
-            else:
-                input_adapter = adapter_spec_from_definition(definition.model_dump(mode="json"))
             build_model_wheel(
                 artifact_dir,
                 package_name=INTERNAL_PACKAGE_NAME,
                 version="0.1.0",
                 package=package,
-                input_adapter=input_adapter,
             )
             manifest_path = artifact_dir / "model-package.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

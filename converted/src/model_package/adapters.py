@@ -115,16 +115,6 @@ def adapter_from_spec(spec: Mapping[str, Any]) -> InputAdapter:
     raise ValueError(f"unsupported input adapter kind: {kind!r}")
 
 
-def adapter_spec_from_definition(definition: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the explicitly declared adapter from a dataset definition."""
-    spec = definition.get("inferenceAdapter")
-    if spec is None:
-        return {"kind": "tensor", "version": 1}
-    if not isinstance(spec, Mapping):
-        raise TypeError("dataset inferenceAdapter must be an object")
-    return dict(spec)
-
-
 def _integer(spec: Mapping[str, Any], name: str) -> int:
     value = spec.get(name)
     if not isinstance(value, int):
