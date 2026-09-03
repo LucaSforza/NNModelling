@@ -119,6 +119,15 @@ dataset target; objective nodes such as Cross Entropy, MSE, and KL are not
 executed. `predict` uses the packaged adapter specification. Adapters are
 declarative, so the browser cannot inject Python code into a package.
 
+Under the accepted [dataset-driven Input contract](../decisions/dataset-driven-input-types.md),
+the exporter freezes the resolved named input shapes and dtypes used to compile
+the trained model. It preserves the leading batch dimension as dynamic and
+packages only explicitly selected model/package wheel adapters. The training
+dataset, its source and its runtime parameters are not wheel dependencies.
+Multiple-input `predict_tensor` calls use the stable binding names; the
+single-tensor convenience form remains valid only for a model with exactly one
+input binding.
+
 Safetensors are restored with strict state-dict loading against the one shared
 compiled module store. A missing, extra, or incompatible tensor therefore
 fails package loading instead of silently producing a partially initialized

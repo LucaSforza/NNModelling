@@ -14,3 +14,6 @@ Current package and project ownership is defined by:
 - [model-scoped custom stereotype packages](model-scoped-stereotype-packages.md);
 - [writable project workspaces and model-owned stereotype authoring](project-workspaces-and-stereotype-authoring.md);
 - [project-owned datasets and named training batches](project-owned-datasets.md).
+
+The accepted typing relationship between model Inputs and selected datasets is
+defined by [dataset-driven model input types](dataset-driven-input-types.md).
