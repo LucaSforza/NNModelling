@@ -15,6 +15,9 @@ export type DatasetContractErrorCode =
   | "invalid-slot"
   | "unsupported-dtype"
   | "invalid-reference"
+  | "unknown-parameter"
+  | "missing-parameter-value"
+  | "invalid-dimension-value"
 
 export class DatasetContractError extends Error {
   constructor(
@@ -88,6 +91,25 @@ export type DatasetDefinition = {
   readonly batch: DatasetBatchContract
   readonly classes?: DatasetClassMetadata
   readonly inferenceAdapter?: Readonly<Record<string, unknown>>
+}
+
+/** Values after a dataset selection has instantiated every symbolic dimension. */
+export type ResolvedDatasetTensorContract = {
+  readonly shape: readonly number[]
+  readonly dtype: DType
+}
+
+export type ResolvedDatasetBatchContract = {
+  readonly inputs: Readonly<Record<string, ResolvedDatasetTensorContract>>
+  readonly targets: Readonly<Record<string, ResolvedDatasetTensorContract>>
+}
+
+/** The dataset-scoped boundary consumed by graph inference and compilation. */
+export type ResolvedDatasetContract = {
+  readonly id: string
+  readonly version: string
+  readonly parameters: Readonly<Record<string, DatasetParameterValue>>
+  readonly batch: ResolvedDatasetBatchContract
 }
 
 export type DatasetSourceManifest = {
@@ -200,6 +222,77 @@ export function parseDatasetDefinition(value: unknown): DatasetDefinition {
     batch: { inputs, targets },
     ...(classes === undefined ? {} : { classes }),
     ...(inferenceAdapter === undefined ? {} : { inferenceAdapter }),
+  }
+}
+
+/**
+ * Apply a typed dataset selection to a parsed definition. This is the only
+ * operation that turns symbolic slot dimensions into concrete dimensions.
+ * Defaults are materialized, required values must be supplied, and unknown
+ * selection keys are rejected so the result is deterministic.
+ */
+export function resolveDatasetContract(
+  definition: DatasetDefinition,
+  selection: Readonly<Record<string, DatasetParameterValue>> = {},
+): ResolvedDatasetContract {
+  validateDimensionParameters([...Object.values(definition.batch.inputs), ...Object.values(definition.batch.targets)], definition.parameters)
+  const parameterByName = new Map(definition.parameters.map((parameter) => [parameter.name, parameter]))
+  const parameters: Record<string, DatasetParameterValue> = {}
+  for (const [name, value] of Object.entries(selection)) {
+    const parameter = parameterByName.get(name)
+    if (!parameter) fail(`unknown dataset parameter '${name}'`, "unknown-parameter", `parameters.${name}`)
+    if (!parameterValueMatches(parameter.type, value)) fail(`value does not match parameter type '${parameter.type}'`, "invalid-parameter", `parameters.${name}`)
+    if (typeof value === "number" && !Number.isFinite(value)) fail("value must be finite", "invalid-parameter", `parameters.${name}`)
+    parameters[name] = value
+  }
+  for (const parameter of definition.parameters) {
+    if (parameters[parameter.name] !== undefined) continue
+    if (parameter.default !== undefined) {
+      parameters[parameter.name] = parameter.default
+      continue
+    }
+    if (parameter.required) fail("required parameter value is missing", "missing-parameter-value", `parameters.${parameter.name}`)
+  }
+
+  const resolveSlots = (slots: Readonly<Record<string, DatasetTensorContract>>, label: string): Record<string, ResolvedDatasetTensorContract> =>
+    Object.fromEntries(Object.entries(slots).map(([name, tensor]) => [name, {
+      shape: tensor.shape.map((dimension, index) => {
+        if (typeof dimension === "number") return dimension
+        const value = parameters[dimension]
+        if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+          fail(`symbol '${dimension}' must resolve to a positive integer`, "invalid-dimension-value", `${label}.${name}.shape[${index}]`)
+        }
+        return value
+      }),
+      dtype: tensor.dtype,
+    }]))
+
+  return {
+    id: definition.id,
+    version: definition.version,
+    parameters,
+    batch: {
+      inputs: resolveSlots(definition.batch.inputs, "batch.inputs"),
+      targets: resolveSlots(definition.batch.targets, "batch.targets"),
+    },
+  }
+}
+
+function validateDimensionParameters(
+  tensors: readonly DatasetTensorContract[],
+  parameters: readonly DatasetParameter[],
+): void {
+  const parameterByName = new Map(parameters.map((parameter) => [parameter.name, parameter]))
+  const symbols = new Set<string>()
+  for (const tensor of tensors) {
+    for (const dimension of tensor.shape) if (typeof dimension === "string") symbols.add(dimension)
+  }
+  for (const symbol of [...symbols].sort()) {
+    const parameter = parameterByName.get(symbol)
+    if (!parameter) fail(`symbolic dimension '${symbol}' requires a same-named parameter`, "missing-parameter-value", `parameters.${symbol}`)
+    if (parameter.type !== "integer") fail(`symbolic dimension '${symbol}' requires an integer parameter`, "invalid-parameter", `parameters.${symbol}.type`)
+    if (!parameter.required) fail(`symbolic dimension '${symbol}' requires a required parameter`, "invalid-parameter", `parameters.${symbol}.required`)
+    if (parameter.default !== undefined) fail(`symbolic dimension '${symbol}' cannot have a default`, "invalid-parameter", `parameters.${symbol}.default`)
   }
 }
 

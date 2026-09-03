@@ -32,6 +32,7 @@ import {
   routePointsFromData,
   sameRoutePoints,
 } from "./edgeRoute";
+import { migrateLegacyInputNodes } from "../project-workspace/dataset-migration";
 
 /** Convert Svelte's reactive proxy payloads into persisted JSON primitives. */
 function clonePackageParams(value: Record<string, unknown> | undefined): Record<string, unknown> {
@@ -1021,7 +1022,9 @@ export class DiagramCore {
       };
       const manifest = parseModelManifest(imported.manifest);
       imported.nodes.forEach(validatePackageNode);
-      const normalizedNodes = imported.nodes.map((node) => canonicalizePackageNode(node as Node));
+      const normalizedNodes = [...migrateLegacyInputNodes(
+        imported.nodes.map((node) => canonicalizePackageNode(node as Node)),
+      )];
       // Normalize edge handle IDs before validation, but keep the imported
       // graph entirely off-state until containment validation succeeds.
       const normalizedEdges = imported.edges.map((candidate) => {
