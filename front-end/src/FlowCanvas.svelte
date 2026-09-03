@@ -132,6 +132,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let projectDefinitions = $derived(projectDatasetInfos.map((dataset) => dataset.definition));
   let activeMode = $state<"nodes" | "training">("nodes");
   let initializationError = $state<string | null>(null);
+  let projectResourceError = $state<string | null>(null);
   let isSessionReady = $state(false);
   let saveStatus = $state<ProjectSaveStatus>({
     state: "idle",
@@ -197,15 +198,26 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   $effect(() => {
     let active = true;
     let unsubscribeSave: (() => void) | undefined;
+    initializationError = null;
+    projectResourceError = null;
     void (async () => {
       try {
         await diagram.waitForPackageRuntime();
         const snapshot = diagram.parseProjectJson(session.modelJson);
         if (!snapshot) throw new Error("Il progetto contiene un modello non valido.");
-        const loadedProjectDatasetResources = loadProjectDatasetResources(session);
-        projectDatasetInfos = loadedProjectDatasetResources.infos;
-        projectDatasetResources = loadedProjectDatasetResources.resources;
-        trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+        try {
+          const loadedProjectDatasetResources = loadProjectDatasetResources(session);
+          projectDatasetInfos = loadedProjectDatasetResources.infos;
+          projectDatasetResources = loadedProjectDatasetResources.resources;
+          trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+        } catch (error) {
+          // Keep the graph editable when optional project-owned dataset files
+          // are incomplete; the user can repair the files from the editor.
+          projectDatasetInfos = [];
+          projectDatasetResources = new Map();
+          trainingController.setProjectDatasets([], new Map());
+          projectResourceError = `Risorse dataset non valide: ${saveErrorMessage(error)}`;
+        }
 
         const isEmptyProject = snapshot.nodes.length === 0 && snapshot.edges.length === 0 &&
           snapshot.manifest.customPackages.length === 0;
@@ -566,6 +578,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   <div class="editor-loading" role="status">Apertura progetto…</div>
 {:else}
 <div class="editor-layout">
+  {#if projectResourceError}
+    <div class="project-resource-error" role="alert">
+      <strong>Errore nelle risorse del progetto</strong>
+      <span>{projectResourceError}</span>
+    </div>
+  {/if}
   <div class="canvas-container" bind:this={canvasRef}>
     <DockedGroup {diagram} host={canvasRef} />
     <SvelteFlow
