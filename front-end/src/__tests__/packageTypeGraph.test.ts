@@ -49,7 +49,7 @@ describe("versioned package graph inference", () => {
     const scheduler = await createScheduler()
     const result = scheduler.infer({
       nodes: [
-        packageNode("input", inputIdentity, { shape: ["B", 32], dtype: "float32" }),
+        packageNode("input", inputIdentity),
         packageNode("fork", forkIdentity),
       ],
       edges: [{ id: "e1", source: "input", target: "fork", sourceHandle: "out", targetHandle: "in" }],
@@ -66,7 +66,7 @@ describe("versioned package graph inference", () => {
     const scheduler = await createScheduler()
     const result = scheduler.infer({
       nodes: [
-        packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float16" }),
+        packageNode("input", inputIdentity),
         packageNode("fork", forkIdentity),
       ],
       edges: [],
@@ -80,7 +80,7 @@ describe("versioned package graph inference", () => {
 
   test("classifies zero, one, and multiple terminal states", async () => {
     const scheduler = await createScheduler()
-    const input = packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float32" })
+    const input = packageNode("input", inputIdentity)
     const fork = packageNode("fork", forkIdentity)
     expect(scheduler.infer({ nodes: [input], edges: [{ id: "cycle", source: "input", target: "input" }] }, datasetContext).complete).toBe(false)
     expect(scheduler.infer({ nodes: [input], edges: [] }, datasetContext).terminals).toEqual(["input"])
@@ -89,7 +89,7 @@ describe("versioned package graph inference", () => {
 
   test("accepts explicit prediction and objective terminals", async () => {
     const scheduler = await createScheduler()
-    const input = packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float32" })
+    const input = packageNode("input", inputIdentity)
     const fork = packageNode("fork", forkIdentity)
     const output = packageNode("output", { id: "core.output", version: "0.1.0", name: "Output" })
     const loss = packageNode("loss", { id: "core.mse-loss", version: "0.1.0", name: "MSE Loss" })
@@ -128,7 +128,6 @@ describe("versioned package graph inference", () => {
     }
     const source = new MemoryDiagram()
     const created = source.addPackageModule(inputIdentity, "input", 10, 20, {
-      params: { shape: ["B", 4], dtype: "float32" },
     })
     const target = new MemoryDiagram()
     expect(target.importFromJson(source.exportToJson())).toBe(true)

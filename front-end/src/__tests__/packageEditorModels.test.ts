@@ -70,7 +70,7 @@ describe("package model editor acceptance", () => {
       },
     })
     const nodes: Node[] = [
-      packageNode("input", "core.input", "Input", { shape: ["B", "T", 128], dtype: "float32" }),
+      packageNode("input", "core.input", "Input", {}),
       packageNode("mha", "core.horizontal-repeat", "Horizontal Repeat", {
         times: 2,
         join: { id: "core.concat", version: "^0.1.0", parameters: { dim: -1 } },
@@ -118,7 +118,6 @@ describe("package model editor acceptance", () => {
     runtime = await EditorTypeSystemRuntime.create()
     const source = new MemoryDiagram()
     const input = source.addPackageNode({ id: "core.input", version: "0.1.0", name: "Input" }, "input", 0, 0, {
-      params: { shape: ["B", 8], dtype: "float32" },
     })
     const linear = source.addPackageNode({ id: "core.linear", version: "0.1.0", name: "Linear" }, "layer", 0, 100, {
       params: { in_features: 8, out_features: 4, dtype: "float32" },

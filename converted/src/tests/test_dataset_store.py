@@ -37,7 +37,7 @@ def make_archive(*, extra: dict[str, bytes] | None = None, names: list[str] | No
             "id": "demo.tokens",
             "version": "1.0.0",
             "name": "Tokens",
-            "parameters": [],
+            "parameters": [{"name": "B", "type": "integer", "required": True}],
             "batch": {"inputs": {"tokens": {"shape": ["B"], "dtype": "int64"}}, "targets": {}},
         }).encode(),
         "dataset.py": b"raise RuntimeError('must only run in worker')\n",
@@ -65,6 +65,14 @@ def test_archive_round_trip_deduplicates_and_scopes_owners(tmp_path: Path) -> No
     assert store.resolve(reference, owner_connection_id="bob").is_file()
     with pytest.raises(DatasetArchiveNotFoundError):
         store.resolve(reference, owner_connection_id="mallory")
+
+
+def test_parameter_validation_rejects_nonpositive_dimension_values(tmp_path: Path) -> None:
+    store = DatasetArchiveStore(tmp_path)
+    uploaded = store.put(make_archive(), owner_connection_id="owner")
+    reference = DatasetReference.model_validate(uploaded["reference"])
+    with pytest.raises(DatasetArchiveValidationError, match="invalid-dimension-value"):
+        store.validate_parameters(reference, {"B": 0}, owner_connection_id="owner")
 
 
 def test_archive_rejects_invalid_digest_and_size_before_publication(tmp_path: Path) -> None:

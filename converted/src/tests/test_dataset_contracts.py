@@ -18,6 +18,7 @@ from dataset.contracts import (
     normalize_training_batch,
     parse_model_manifest,
     serialize_dataset_definition,
+    validate_dimension_values,
 )
 from backend.models import JobSubmission, OpaqueDatasetRequest
 
@@ -28,7 +29,11 @@ def _definition() -> dict[str, object]:
         "id": "demo.tokens",
         "version": "1.0.0",
         "name": "Tokens",
-        "parameters": [{"name": "max_length", "type": "integer", "default": 128}],
+        "parameters": [
+            {"name": "B", "type": "integer", "required": True},
+            {"name": "T", "type": "integer", "required": True},
+            {"name": "max_length", "type": "integer", "default": 128},
+        ],
         "batch": {
             "inputs": {"tokens": {"shape": ["B", "T"], "dtype": "int64"}},
             "targets": {"next_tokens": {"shape": ["B", "T"], "dtype": "int64"}},
@@ -39,7 +44,11 @@ def _definition() -> dict[str, object]:
 def test_definition_round_trip_and_canonical_json() -> None:
     definition = DatasetDefinition.model_validate(_definition())
     expected = _definition()
-    expected["parameters"] = [{"name": "max_length", "type": "integer", "required": False, "default": 128}]
+    expected["parameters"] = [
+        {"name": "B", "type": "integer", "required": True},
+        {"name": "T", "type": "integer", "required": True},
+        {"name": "max_length", "type": "integer", "required": False, "default": 128},
+    ]
     assert definition.model_dump(mode="json", exclude_none=True) == expected
     assert '"batch"' in serialize_dataset_definition(definition)
 
@@ -87,6 +96,29 @@ def test_slots_reject_unknown_dtypes_and_duplicates() -> None:
             inputs={"tokens": {"shape": ["B"], "dtype": "int64"}},
             targets={"tokens": {"shape": ["B"], "dtype": "int64"}},
         )
+
+
+@pytest.mark.parametrize("parameter, message", [
+    ({"name": "T", "type": "number", "required": True}, "symbolic dimension"),
+    ({"name": "T", "type": "integer", "required": False}, "symbolic dimension"),
+    ({"name": "T", "type": "integer", "required": True, "default": 4}, "required parameters"),
+])
+def test_symbolic_dimensions_require_required_integer_parameters(parameter: dict[str, object], message: str) -> None:
+    with pytest.raises((ValidationError, DatasetContractError), match=message):
+        DatasetDefinition.model_validate({
+            **_definition(),
+            "parameters": [parameter],
+            "batch": {"inputs": {"tokens": {"shape": ["B", "T"], "dtype": "int64"}}, "targets": {}},
+        })
+
+
+def test_symbolic_dimensions_require_positive_values() -> None:
+    definition = DatasetDefinition.model_validate(_definition() | {
+        "parameters": [{"name": "B", "type": "integer", "required": True}],
+        "batch": {"inputs": {"tokens": {"shape": ["B"], "dtype": "int64"}}, "targets": {}},
+    })
+    with pytest.raises(DatasetContractError, match="invalid-dimension-value"):
+        validate_dimension_values(definition, {"B": 0})
 
 
 def test_dataset_definition_rejects_dataset_owned_inference_adapter() -> None:

@@ -169,6 +169,28 @@ class DatasetDefinition(BaseModel):
         names = [item.name for item in self.parameters]
         if len(names) != len(set(names)):
             raise DatasetContractError("parameter names must be unique", "duplicate-entry", "parameters")
+        declarations = {item.name: item for item in self.parameters}
+        symbols = {
+            dimension
+            for slots in (self.batch.inputs, self.batch.targets)
+            for tensor in slots.values()
+            for dimension in tensor.shape
+            if isinstance(dimension, str)
+        }
+        for symbol in sorted(symbols):
+            parameter = declarations.get(symbol)
+            if parameter is None:
+                raise DatasetContractError(
+                    f"symbolic dimension '{symbol}' requires a same-named parameter",
+                    "missing-parameter-value",
+                    f"parameters.{symbol}",
+                )
+            if parameter.type != "integer" or not parameter.required or parameter.default is not None:
+                raise DatasetContractError(
+                    f"symbolic dimension '{symbol}' requires a required integer parameter",
+                    "invalid-parameter",
+                    f"parameters.{symbol}",
+                )
         return self
 
 
@@ -210,6 +232,29 @@ class DatasetReference(BaseModel):
         if self.kind == "project" and self.digest is None:
             raise DatasetContractError("project references require a digest", "invalid-reference", "digest")
         return self
+
+
+def validate_dimension_values(
+    definition: DatasetDefinition,
+    parameters: Mapping[str, object],
+) -> None:
+    """Require every symbolic dataset dimension to resolve positively."""
+
+    symbols = {
+        dimension
+        for slots in (definition.batch.inputs, definition.batch.targets)
+        for tensor in slots.values()
+        for dimension in tensor.shape
+        if isinstance(dimension, str)
+    }
+    for symbol in sorted(symbols):
+        value = parameters.get(symbol)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise DatasetContractError(
+                f"symbol '{symbol}' must resolve to a positive integer",
+                "invalid-dimension-value",
+                f"parameters.{symbol}",
+            )
 
 
 @dataclass(frozen=True)

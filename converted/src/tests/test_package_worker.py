@@ -19,6 +19,7 @@ REFERENCE = DatasetReference(
 )
 DEFINITION = DatasetDefinition(
     id="demo.dataset", version="1.0.0", name="Demo dataset",
+    parameters=({"name": "B", "type": "integer", "required": True},),
     batch=DatasetBatchContract(
         inputs={"image": TensorSlotContract(shape=("B", 1), dtype="float32")},
         targets={"label": TensorSlotContract(shape=("B",), dtype="int64")},
@@ -180,6 +181,7 @@ def test_graph_bindings_compare_transformed_objective_target_contract() -> None:
     with pytest.raises(ValueError, match="objective target 'label'.*incompatible shape"):
         _validate_graph_bindings(package, DatasetDefinition(
             id="demo.dataset", version="1.0.0", name="Demo dataset",
+            parameters=({"name": "B", "type": "integer", "required": True},),
             batch=DatasetBatchContract(
                 inputs={"image": TensorSlotContract(shape=("B", 1), dtype="float32")},
                 targets={"label": TensorSlotContract(shape=("B", 1, 2), dtype="int64")},

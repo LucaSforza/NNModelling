@@ -60,8 +60,10 @@ export function scenarioSnapshot(
   })
   const inputBinding = input?.id ?? "input"
   const datasetTensor = scenario.dataset?.inputs[inputBinding]
-  const inputShape = datasetTensor?.shape ?? input?.parameters.shape
-  const inputDtype = datasetTensor?.dtype ?? input?.parameters.dtype
+  // Dataset slots are the only source of top-level Input tensor metadata.
+  // Scenarios without a dataset intentionally remain unresolved.
+  const inputShape = datasetTensor?.shape
+  const inputDtype = datasetTensor?.dtype
   const symbols = Array.isArray(inputShape)
     ? [...new Set(inputShape.filter((dimension): dimension is string => typeof dimension === "string"))]
     : []

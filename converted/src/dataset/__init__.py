@@ -26,6 +26,7 @@ from .contracts import (
     normalize_training_batch,
     parse_model_manifest,
     serialize_dataset_definition,
+    validate_dimension_values,
 )
 __all__ = [
     "DatasetBatchContract", "DatasetBuilder", "DatasetClassMetadata", "DatasetContext",
@@ -33,4 +34,5 @@ __all__ = [
     "DatasetSourceManifest", "ModelDatasetReference", "ModelManifestV2",
     "ModelPackageReference", "TensorSlotContract", "TrainingBatch",
     "normalize_training_batch", "parse_model_manifest", "serialize_dataset_definition",
+    "validate_dimension_values",
 ]

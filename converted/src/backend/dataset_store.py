@@ -18,7 +18,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from collections.abc import Mapping
 
-from dataset.contracts import DatasetDefinition, DatasetReference, DatasetSourceManifest
+from dataset.contracts import (
+    DatasetContractError,
+    DatasetDefinition,
+    DatasetReference,
+    DatasetSourceManifest,
+    validate_dimension_values,
+)
 
 
 MAX_DATASET_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -177,6 +183,10 @@ class DatasetArchiveStore:
             if not valid:
                 raise DatasetArchiveValidationError(f"invalid dataset parameter {parameter.name}")
             normalized[parameter.name] = value
+        try:
+            validate_dimension_values(definition, normalized)
+        except DatasetContractError as exc:
+            raise DatasetArchiveValidationError(str(exc)) from exc
         return normalized
 
     def extract(self, reference: DatasetReference, *, owner_connection_id: str, destination: str | Path) -> Path:

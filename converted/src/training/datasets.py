@@ -10,7 +10,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from dataset.contracts import DatasetContext, DatasetDefinition, DatasetReference
+from dataset.contracts import (
+    DatasetContext,
+    DatasetDefinition,
+    DatasetReference,
+    validate_dimension_values,
+)
 
 
 def resolve_dataset(request: Mapping[str, Any]) -> tuple[Any, DatasetDefinition, DatasetReference, dict[str, Any]]:
@@ -27,6 +32,7 @@ def resolve_dataset(request: Mapping[str, Any]) -> tuple[Any, DatasetDefinition,
     if (definition.id, definition.version) != (reference.id, reference.version):
         raise ValueError("project dataset definition does not match its opaque reference")
     normalized = _project_parameters(definition, parameters)
+    validate_dimension_values(definition, normalized)
     module = _load_project_module(root / "dataset.py")
     builder = getattr(module, "build", None)
     if not callable(builder):

@@ -22,6 +22,7 @@ def _write_project_dataset(root: Path) -> None:
                 "version": "1.0.0",
                 "name": "Project dataset",
                 "parameters": [
+                    {"name": "B", "type": "integer", "required": True},
                     {"name": "batch_size", "type": "integer", "default": 2}
                 ],
                 "batch": {
@@ -73,7 +74,7 @@ class ProjectDataset:
 
 
 def build(parameters: Mapping[str, object], context):
-    assert parameters == {"batch_size": 2}
+    assert parameters == {"B": 2, "batch_size": 2}
     return ProjectDataset(context.resource_root, context.reference)
 """.strip()
         + "\n",
@@ -95,12 +96,12 @@ def test_resolve_project_dataset_loads_context_and_all_splits(
     )
 
     dataset, definition, resolved, parameters = resolve_dataset(
-        {"dataset": {"reference": reference.model_dump(), "parameters": {}}}
+        {"dataset": {"reference": reference.model_dump(), "parameters": {"B": 2}}}
     )
 
     assert definition.id == reference.id
     assert resolved == reference
-    assert parameters == {"batch_size": 2}
+    assert parameters == {"B": 2, "batch_size": 2}
     assert dataset.reference == reference
     splits = dataset.division()
     assert set(splits) == {"train", "validation", "test"}
