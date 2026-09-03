@@ -58,23 +58,6 @@ are unsafe even when the product supports concurrent agents. Route review
 findings back to the subagent that owns the affected task when it is still
 available.
 
-### Dataset-driven Input initiative
-
-For `docs/plans/active/dataset-driven-input-types/`, the user selected
-`gpt-5.6-luna` with `high` reasoning for every implementation task. Pass both
-values explicitly when dispatching T01 through T05, including T04R, rather
-than applying the default maximum-effort profile above. The user also
-authorized task commits:
-after each task passes its validation, instruct its subagent to stage only the
-files inside that task's write scope and create one concise Conventional Commit.
-Never sweep unrelated shared-worktree changes into a task commit.
-
-T06 is intentionally not a subagent assignment. After T05 reports readiness,
-create a separate user-visible top-level Codex task with `gpt-5.6-luna` and
-`high` reasoning, copy the complete T06 contract into its initial prompt, and
-wait for that task's independent browser-owned result. This preserves access
-to the Codex in-app Browser and satisfies the task's execution-isolation gate.
-
 ## Git and external actions
 
 Commit, push, pull-request, issue, credential, and other external-write policy

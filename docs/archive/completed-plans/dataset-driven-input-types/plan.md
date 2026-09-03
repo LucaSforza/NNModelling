@@ -1,7 +1,7 @@
 ---
 id: dataset-driven-input-types
 kind: plan
-status: ready
+status: done
 updated: 2026-09-03
 areas:
   - architecture

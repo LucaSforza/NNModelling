@@ -1,7 +1,7 @@
 ---
 id: T06
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: verification
 depends_on: [T05]

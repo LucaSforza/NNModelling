@@ -112,17 +112,13 @@ Expected errors and runtime faults remain distinct. Nested inference preserves
 the innermost cause and adds compositional context frames; stable diagnostic
 codes, multiple causes, warnings and source spans are not current requirements.
 
-The accepted [dataset-driven Input decision](../decisions/dataset-driven-input-types.md)
+The implemented [dataset-driven Input decision](../decisions/dataset-driven-input-types.md)
 changes the top-level boundary without changing package-owned propagation:
-`core.input` will carry only a named dataset binding, and the selected
+`core.input` carries only a named dataset binding, and the selected
 dataset's slot will supply its shape and dtype. With no selected dataset,
 Input-dependent regions remain unresolved while topology and independent
 regions may still be analyzed. Internal subflow boundaries continue to receive
 their types from graph composition and do not resolve dataset slots directly.
-
-The current implementation still stores `shape` and `dtype` on Input nodes.
-That representation remains factual until the linked migration plan lands; it
-must then be removed rather than retained as a fallback source.
 
 ## Graph semantics
 

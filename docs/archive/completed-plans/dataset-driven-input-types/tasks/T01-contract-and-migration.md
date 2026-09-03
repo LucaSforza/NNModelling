@@ -1,7 +1,7 @@
 ---
 id: T01
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: architecture
 depends_on: []
