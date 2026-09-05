@@ -15,7 +15,10 @@ const COLOR = /^#[0-9a-fA-F]{6}$/
 const KINDS = new Set<PackageKind>(["input", "layer", "loss", "join", "subflow", "output"])
 
 /** Validate the complete in-memory authoring request before rendering anything. */
-export function validateStereotypeAuthoringRequest(input: StereotypeAuthoringRequest): ValidatedStereotypeAuthoringRequest {
+export function validateStereotypeAuthoringRequest(rawInput: StereotypeAuthoringRequest): ValidatedStereotypeAuthoringRequest {
+  // Svelte's deep state is Proxy-backed. Normalize at the domain boundary so
+  // validation and generation only ever clone ordinary data structures.
+  const input = toPlainValue(rawInput) as StereotypeAuthoringRequest
   if (!input || typeof input !== "object") throw new Error("stereotype authoring request must be an object")
   if (!PACKAGE_ID.test(input.id)) throw new Error("stereotype id is invalid")
   if (!isVersion(input.version)) throw new Error("stereotype version is invalid")
@@ -153,6 +156,11 @@ function renderPython(kind: PackageKind): string {
 }
 
 function serialize(value: unknown): string { return `${JSON.stringify(stableValue(value), null, 2)}\n` }
+function toPlainValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => toPlainValue(item)) as T
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, toPlainValue(entry)])) as T
+}
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue)
   if (!value || typeof value !== "object") return value

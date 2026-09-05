@@ -7,16 +7,18 @@
     type DatasetDataFile,
     type DatasetSlotRequest,
   } from "../project-workspace/dataset-authoring";
-  import type { DatasetDefinition, DatasetReference } from "../project-workspace/dataset-contract";
+  import type { GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
+  import type { ModelDatasetReference } from "../project-workspace/dataset-contract";
   import type { DType, Dimension } from "../type-system/tensor-type";
 
   interface Props {
-    readonly projectDatasets?: readonly (DatasetReference & { readonly name?: string })[];
-    readonly projectDefinitions?: readonly DatasetDefinition[];
+    readonly projectDatasets?: readonly GeneratedDatasetResources[];
     readonly onAuthoringRequest?: (request: DatasetAuthoringRequest) => Promise<void> | void;
+    readonly onUpdateRequest?: (target: ModelDatasetReference, request: DatasetAuthoringRequest) => Promise<void> | void;
+    readonly onDeleteRequest?: (target: ModelDatasetReference) => Promise<void> | void;
   }
 
-  let { projectDatasets = [], projectDefinitions = [], onAuthoringRequest }: Props = $props();
+  let { projectDatasets = [], onAuthoringRequest, onUpdateRequest, onDeleteRequest }: Props = $props();
   let id = $state("project.dataset");
   let version = $state("1.0.0");
   let directory = $state("datasets/project-dataset");
@@ -25,13 +27,19 @@
   let parameters = $state<ParameterRow[]>([]);
   let inputs = $state<SlotRow[]>([{ name: "features", shape: "B", dtype: "float32" }]);
   let targets = $state<SlotRow[]>([{ name: "labels", shape: "B", dtype: "int64" }]);
-  let classCount = $state("");
+  // `bind:value` on a number input yields a number (or undefined when empty).
+  // Keep both representations at the UI boundary and let the domain validator
+  // reject malformed values instead of silently dropping the classes metadata.
+  let classCount = $state<string | number | undefined>("");
   let classNames = $state("");
   let files = $state<DatasetDataFile[]>([]);
   let submitting = $state(false);
   let readingFiles = $state(false);
   let error = $state<string | null>(null);
   let success = $state(false);
+  let selectedDataset = $state<GeneratedDatasetResources | null>(null);
+  let pendingDeletion = $state<GeneratedDatasetResources | null>(null);
+  let deleting = $state(false);
 
   type ParameterRow = { name: string; type: "string" | "integer" | "number" | "boolean"; required: boolean; defaultValue: string };
   type SlotRow = { name: string; shape: string; dtype: DType };
@@ -62,8 +70,66 @@
     return value.split(",").map((item) => item.trim()).filter(Boolean).map((item) => /^\d+$/.test(item) ? Number(item) : item);
   }
 
-  function projectDatasetName(dataset: DatasetReference & { readonly name?: string }): string {
-    return dataset.name ?? projectDefinitions.find((definition) => definition.id === dataset.id && definition.version === dataset.version)?.name ?? dataset.id;
+  let isEditing = $derived(selectedDataset !== null);
+
+  function resetForm(): void {
+    selectedDataset = null;
+    pendingDeletion = null;
+    id = "project.dataset";
+    version = "1.0.0";
+    directory = "datasets/project-dataset";
+    name = "Project dataset";
+    description = "";
+    parameters = [];
+    inputs = [{ name: "features", shape: "B", dtype: "float32" }];
+    targets = [{ name: "labels", shape: "B", dtype: "int64" }];
+    classCount = "";
+    classNames = "";
+    files = [];
+    error = null;
+    success = false;
+  }
+
+  function editDataset(dataset: GeneratedDatasetResources): void {
+    selectedDataset = dataset;
+    pendingDeletion = null;
+    id = dataset.modelDataset.id;
+    version = dataset.modelDataset.version;
+    directory = dataset.modelDataset.path;
+    name = dataset.definition.name;
+    description = dataset.definition.description ?? "";
+    parameters = dataset.definition.parameters.map((parameter) => ({
+      name: parameter.name,
+      type: parameter.type,
+      required: parameter.required,
+      defaultValue: parameter.default === undefined ? "" : String(parameter.default),
+    }));
+    inputs = Object.entries(dataset.definition.batch.inputs).map(([name, slot]) => ({ name, shape: slot.shape.join(", "), dtype: slot.dtype }));
+    targets = Object.entries(dataset.definition.batch.targets).map(([name, slot]) => ({ name, shape: slot.shape.join(", "), dtype: slot.dtype }));
+    classCount = dataset.definition.classes ? String(dataset.definition.classes.count) : "";
+    classNames = dataset.definition.classes?.names?.join(", ") ?? "";
+    files = dataset.dataFiles.map((file) => ({ path: file.path, bytes: new Uint8Array(file.bytes) }));
+    error = null;
+    success = false;
+  }
+
+  async function deleteDataset(): Promise<void> {
+    if (!pendingDeletion || deleting) return;
+    deleting = true;
+    error = null;
+    try {
+      if (onDeleteRequest) await onDeleteRequest(pendingDeletion.modelDataset);
+      if (selectedDataset && sameDatasetIdentity(selectedDataset.modelDataset, pendingDeletion.modelDataset)) resetForm();
+      else pendingDeletion = null;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      deleting = false;
+    }
+  }
+
+  function sameDatasetIdentity(left: ModelDatasetReference, right: ModelDatasetReference): boolean {
+    return left.id === right.id && left.version === right.version && left.path === right.path;
   }
 
   async function handleFileSelection(event: Event) {
@@ -86,14 +152,26 @@
 
   function requestFromForm(): DatasetAuthoringRequest {
     const descriptionValue = typeof description === "string" ? description : "";
-    const classCountValue = typeof classCount === "string" ? classCount : "";
+    const classCountValue = typeof classCount === "number" ? String(classCount) : classCount ?? "";
     const classNamesValue = typeof classNames === "string" ? classNames : "";
-    const parsedParameters = parameters.map((row) => ({
-      name: row.name,
-      type: row.type,
-      required: row.required,
-      ...(row.required || !row.defaultValue.trim() ? {} : { default: row.type === "integer" ? Number(row.defaultValue) : row.type === "number" ? Number(row.defaultValue) : row.type === "boolean" ? row.defaultValue === "true" : row.defaultValue }),
-    }));
+    const parsedParameters = parameters.map((row) => {
+      if (row.required || !row.defaultValue.trim()) {
+        return { name: row.name, type: row.type, required: row.required };
+      }
+      if (row.type === "boolean") {
+        const value = row.defaultValue.trim();
+        if (value !== "true" && value !== "false") {
+          throw new Error(`dataset parameter '${row.name}' boolean default must be true or false`);
+        }
+        return { name: row.name, type: row.type, required: row.required, default: value === "true" };
+      }
+      return {
+        name: row.name,
+        type: row.type,
+        required: row.required,
+        default: row.type === "integer" || row.type === "number" ? Number(row.defaultValue) : row.defaultValue,
+      };
+    });
     const makeSlots = (rows: readonly SlotRow[]): DatasetSlotRequest[] => rows.map((row) => ({ name: row.name, shape: shapeFromText(row.shape), dtype: row.dtype }));
     const count = classCountValue.trim() ? Number(classCountValue) : undefined;
     return {
@@ -115,7 +193,9 @@
     success = false;
     try {
       const request = validateDatasetAuthoringRequest(requestFromForm());
-      if (onAuthoringRequest) await onAuthoringRequest(request);
+      if (selectedDataset) {
+        if (onUpdateRequest) await onUpdateRequest(selectedDataset.modelDataset, request);
+      } else if (onAuthoringRequest) await onAuthoringRequest(request);
       success = true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
@@ -129,17 +209,29 @@
   <div class="dataset-form__catalog package-manager__group">
     <h3>Current project datasets</h3>
     {#if projectDatasets.length === 0}<p class="package-manager__empty">No project datasets yet.</p>{/if}
-    {#each projectDatasets as dataset (`${dataset.id}@${dataset.version}`)}
-      <div class="package-manager__row"><span><strong>{projectDatasetName(dataset)}</strong><small>{dataset.id}@{dataset.version}</small></span><em>Project</em></div>
+    {#each projectDatasets as dataset (`${dataset.modelDataset.id}@${dataset.modelDataset.version}`)}
+      <div class="package-manager__row">
+        <span><strong>{dataset.definition.name}</strong><small>{dataset.modelDataset.id}@{dataset.modelDataset.version}</small></span>
+        <div class="dataset-form__catalog-actions">
+          <button type="button" onclick={() => editDataset(dataset)}>Edit</button>
+          <button type="button" class="dataset-form__delete" onclick={() => (pendingDeletion = dataset)}>Delete</button>
+        </div>
+      </div>
     {/each}
   </div>
-  <div class="stereotype-form__heading"><div><h3 id="dataset-form-title">Author dataset</h3><p>Generate a manifest, editable Python scaffold, and project-local data directory.</p></div></div>
-  {#if error}<p class="package-manager__message package-manager__message--error" role="alert">{error}</p>{:else if success}<p class="package-manager__message" role="status">Dataset request submitted.</p>{/if}
+  <div class="stereotype-form__heading"><div><h3 id="dataset-form-title">{isEditing ? "Edit dataset" : "Author dataset"}</h3><p>{isEditing ? "Update the dataset contract while preserving its Python source and existing data files." : "Generate a manifest, editable Python scaffold, and project-local data directory."}</p></div>{#if isEditing}<button type="button" onclick={resetForm}>New dataset</button>{/if}</div>
+  {#if pendingDeletion}
+    <div class="package-manager__message package-manager__message--error" role="alert">
+      Delete <strong>{pendingDeletion.definition.name}</strong>, its project folder, and its active training entry?
+      <div class="dataset-form__confirmation-actions"><button type="button" onclick={() => (pendingDeletion = null)} disabled={deleting}>Cancel</button><button type="button" class="dataset-form__delete" onclick={deleteDataset} disabled={deleting}>{deleting ? "Deleting…" : "Delete dataset"}</button></div>
+    </div>
+  {/if}
+  {#if error}<p class="package-manager__message package-manager__message--error" role="alert">{error}</p>{:else if success}<p class="package-manager__message" role="status">{isEditing ? "Dataset updated." : "Dataset created."}</p>{/if}
 
   <fieldset disabled={submitting || readingFiles}><legend>Identity and metadata</legend><div class="stereotype-form__grid">
-    <label>ID <input required bind:value={id} autocomplete="off" /></label>
-    <label>Version <input required bind:value={version} autocomplete="off" /></label>
-    <label class="stereotype-form__wide">Directory <input required bind:value={directory} autocomplete="off" aria-describedby="dataset-directory-help" /></label>
+    <label>ID <input required bind:value={id} autocomplete="off" readonly={isEditing} /></label>
+    <label>Version <input required bind:value={version} autocomplete="off" readonly={isEditing} /></label>
+    <label class="stereotype-form__wide">Directory <input required bind:value={directory} autocomplete="off" readonly={isEditing} aria-describedby="dataset-directory-help" /></label>
     <label class="stereotype-form__wide">Name <input required bind:value={name} /></label>
     <label class="stereotype-form__wide">Description <textarea bind:value={description} rows="2"></textarea></label>
   </div><small id="dataset-directory-help" class="stereotype-form__help">Normalized path under <code>datasets/</code>; generated source never reads outside it.</small></fieldset>
@@ -175,5 +267,5 @@
     {#each fileFeedback as file (file.path)}<div class="dataset-form__file-row"><span>{file.path}</span><small>{file.size.toLocaleString()} bytes · {file.totalSize.toLocaleString()} bytes total</small></div>{/each}
     <small class="stereotype-form__help">Files are copied into the dataset directory. Symlinks and external paths are not accepted.</small>
   </fieldset>
-  <button class="stereotype-form__submit" type="submit" disabled={submitting || readingFiles} aria-busy={submitting}>{submitting ? "Creating…" : "Create project dataset"}</button>
+  <button class="stereotype-form__submit" type="submit" disabled={submitting || readingFiles || deleting} aria-busy={submitting}>{submitting ? (isEditing ? "Saving…" : "Creating…") : (isEditing ? "Save dataset" : "Create project dataset")}</button>
 </form>

@@ -58,6 +58,18 @@ describe("stereotype authoring domain", () => {
     expect(generated.definition.parameters.list).toEqual({ type: "list", items: { type: "integer", minimum: 0 }, minItems: 1, maxItems: 3, default: [1], position: "top" })
   })
 
+  test("accepts deeply proxied form state at the authoring boundary", () => {
+    const proxied = deepProxy(request({
+      parameters: [{
+        name: "shape",
+        definition: { type: "shape", default: ["B", 4], position: "top" },
+      }],
+    })) as StereotypeAuthoringRequest
+
+    expect(() => generateStereotypePackage(proxied)).not.toThrow()
+    expect(generateStereotypePackage(proxied).definition.parameters.shape).toEqual({ type: "shape", default: ["B", 4], position: "top" })
+  })
+
   test("requires unique names, explicit position, safe identity and dependencies", () => {
     expect(() => generateStereotypePackage(request({ parameters: [
       { name: "same", definition: { type: "boolean", position: "top" } },
@@ -100,3 +112,9 @@ describe("stereotype authoring domain", () => {
     })).kind).toBe("loss")
   })
 })
+
+function deepProxy<T>(value: T): T {
+  if (Array.isArray(value)) return new Proxy(value.map(deepProxy), {}) as T
+  if (!value || typeof value !== "object") return value
+  return new Proxy(Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, deepProxy(entry)])), {}) as T
+}
