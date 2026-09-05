@@ -58,7 +58,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import type { ProjectSaveStatus, ProjectWorkspaceSession } from "./project-workspace";
   import { ProjectStereotypeAuthoringCoordinator } from "./project-workspace";
   import { ProjectDatasetAuthoringCoordinator, type DatasetAuthoringRequest, type GeneratedDatasetResources } from "./project-workspace/dataset-authoring";
-  import type { DatasetReference } from "./project-workspace/dataset-contract";
+  import type { DatasetParameterValue, DatasetReference, ModelDatasetReference } from "./project-workspace/dataset-contract";
   import type { StereotypeAuthoringRequest } from "./stereotype-authoring";
   import type { DatasetInfo } from "./training/api";
   import type { LayoutDirection } from "./layout/autoLayout";
@@ -102,7 +102,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // Training state belongs to the editor session, not to the conditionally
   // mounted sidebar. MCP and the sidebar therefore share this one owner.
   const stereotypeAuthoring = new ProjectStereotypeAuthoringCoordinator(session, diagram);
-  const datasetAuthoring = new ProjectDatasetAuthoringCoordinator(session);
+  const datasetAuthoring = new ProjectDatasetAuthoringCoordinator(session, diagram);
 
   // Context per SubflowNode — gli permette di chiamare diagram.toggleSubflow
   // senza bisogno di callback nel node data
@@ -125,11 +125,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let isPackageManagerOpen = $state(false);
   let projectDatasetInfos = $state<readonly DatasetInfo[]>([]);
   let projectDatasetResources = $state<ReadonlyMap<string, GeneratedDatasetResources>>(new Map());
-  let projectDatasets = $derived(projectDatasetInfos.map((dataset) => ({
-    ...dataset.reference,
-    name: dataset.definition.name,
-  })));
-  let projectDefinitions = $derived(projectDatasetInfos.map((dataset) => dataset.definition));
+  let projectDatasets = $derived([...projectDatasetResources.values()]);
   let activeMode = $state<"nodes" | "training">("nodes");
   let initializationError = $state<string | null>(null);
   let isSessionReady = $state(false);
@@ -173,21 +169,47 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     return stereotypeAuthoring.author(request).then(() => undefined);
   }
 
-  async function authorDataset(request: DatasetAuthoringRequest): Promise<void> {
-    const { generated } = await datasetAuthoring.author(request);
-    const reference: DatasetReference = {
+  function datasetReference(modelDataset: ModelDatasetReference): DatasetReference {
+    return {
       kind: "project",
-      id: generated.modelDataset.id,
-      version: generated.modelDataset.version,
-      ref: `project_${generated.modelDataset.id.replaceAll(".", "_")}_${generated.modelDataset.version.replaceAll(".", "_")}`,
+      id: modelDataset.id,
+      version: modelDataset.version,
+      ref: `project_${modelDataset.id.replaceAll(".", "_")}_${modelDataset.version.replaceAll(".", "_")}`,
     };
+  }
+
+  function installProjectDataset(generated: GeneratedDatasetResources): void {
+    const reference = datasetReference(generated.modelDataset);
     const info: DatasetInfo = {
       reference,
       manifest: generated.manifest,
       definition: generated.definition,
     };
-    projectDatasetInfos = [...projectDatasetInfos, info];
+    projectDatasetInfos = [
+      ...projectDatasetInfos.filter((dataset) => dataset.reference.ref !== reference.ref),
+      info,
+    ];
     projectDatasetResources = new Map(projectDatasetResources).set(reference.ref, generated);
+    trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+  }
+
+  async function authorDataset(request: DatasetAuthoringRequest): Promise<void> {
+    const { generated } = await datasetAuthoring.author(request);
+    installProjectDataset(generated);
+  }
+
+  async function updateDataset(target: ModelDatasetReference, request: DatasetAuthoringRequest): Promise<void> {
+    const { generated } = await datasetAuthoring.update(target, request);
+    installProjectDataset(generated);
+  }
+
+  async function deleteDataset(target: ModelDatasetReference): Promise<void> {
+    await datasetAuthoring.delete(target);
+    const reference = datasetReference(target);
+    projectDatasetInfos = projectDatasetInfos.filter((dataset) => dataset.reference.ref !== reference.ref);
+    const nextResources = new Map(projectDatasetResources);
+    nextResources.delete(reference.ref);
+    projectDatasetResources = nextResources;
     trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
   }
 
@@ -255,6 +277,18 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   $effect(() => {
     if (!isSessionReady) return;
     const unsubscribe = diagram.onGraphChanged(markModelDirty);
+    return unsubscribe;
+  });
+
+  // Dataset selection is editor state, not sidebar state. Keep inference in
+  // sync while the Training panel is closed and when MCP reads nothing.
+  $effect(() => {
+    const unsubscribe = trainingController.subscribe((snapshot) => {
+      const selected = snapshot.datasets.find((dataset) => dataset.reference.ref === snapshot.config.selectedDataset);
+      diagram.setDatasetInferenceContext(selected
+        ? { definition: selected.definition, parameters: snapshot.config.datasetParams as Record<string, DatasetParameterValue> }
+        : null);
+    });
     return unsubscribe;
   });
 
@@ -743,8 +777,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         packages={diagram.packageCatalog}
         onAuthoringRequest={authorStereotype}
         {projectDatasets}
-        {projectDefinitions}
         onDatasetAuthoringRequest={authorDataset}
+        onDatasetUpdateRequest={updateDataset}
+        onDatasetDeleteRequest={deleteDataset}
       />
     </div>
   {/if}

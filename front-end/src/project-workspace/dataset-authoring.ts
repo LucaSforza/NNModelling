@@ -77,6 +77,12 @@ export type GeneratedDatasetResources = {
   readonly dataFiles: readonly DatasetDataFile[]
 }
 
+/** The live model boundary used by the editor-owned authoring coordinator. */
+export type ProjectDatasetAuthoringModel = {
+  modelManifest: ModelManifestV2
+  exportToJson(): string
+}
+
 /** A browser File or a test double with the same read-only surface. */
 export type DatasetFileLike = Pick<ProjectFile, "arrayBuffer" | "text"> & {
   readonly name?: string
@@ -209,7 +215,7 @@ export interface ProjectDatasetAuthoringResult {
   readonly modelJson: string
 }
 
-export type ProjectDatasetAuthoringPhase = "validation" | "manifest" | "dataset-write" | "model-write" | "rollback"
+export type ProjectDatasetAuthoringPhase = "validation" | "manifest" | "dataset-write" | "model-write" | "dataset-delete" | "rollback"
 
 export class ProjectDatasetAuthoringError extends Error {
   constructor(message: string, readonly phase: ProjectDatasetAuthoringPhase, readonly cause?: unknown) {
@@ -231,13 +237,16 @@ export class ProjectDatasetAuthoringCoordinator {
   private modelJson: string
   private tail: Promise<void> = Promise.resolve()
 
-  constructor(private readonly session: ProjectWorkspaceSession) {
+  constructor(
+    private readonly session: ProjectWorkspaceSession,
+    private readonly model?: ProjectDatasetAuthoringModel,
+  ) {
     this.resources = { ...session.resources }
     this.modelJson = session.modelJson
   }
 
   listProjectDatasets(): readonly ModelDatasetReference[] {
-    return parseModelDocument(this.modelJson).manifest.customDatasets
+    return parseModelDocument(this.currentModelJson()).manifest.customDatasets
   }
 
   author(request: DatasetAuthoringRequest): Promise<ProjectDatasetAuthoringResult> {
@@ -246,7 +255,20 @@ export class ProjectDatasetAuthoringCoordinator {
     return operation
   }
 
+  update(target: ModelDatasetReference, request: DatasetAuthoringRequest): Promise<ProjectDatasetAuthoringResult> {
+    const operation = this.tail.then(() => this.runUpdate(target, request))
+    this.tail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  delete(target: ModelDatasetReference): Promise<void> {
+    const operation = this.tail.then(() => this.runDelete(target))
+    this.tail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
   private async run(input: DatasetAuthoringRequest): Promise<ProjectDatasetAuthoringResult> {
+    const previousModelJson = this.currentModelJson()
     let generated: GeneratedDatasetResources
     try {
       generated = generateDatasetResources(input)
@@ -254,7 +276,7 @@ export class ProjectDatasetAuthoringCoordinator {
       throw new ProjectDatasetAuthoringError(messageOf(cause), "validation", cause)
     }
 
-    const current = parseModelDocument(this.modelJson)
+    const current = parseModelDocument(previousModelJson)
     if (current.manifest.customDatasets.some((dataset) => dataset.id === generated.modelDataset.id || dataset.path === generated.modelDataset.path)) {
       throw new ProjectDatasetAuthoringError(`Dataset '${generated.modelDataset.id}@${generated.modelDataset.version}' or path '${generated.modelDataset.path}' already exists`, "manifest")
     }
@@ -268,13 +290,6 @@ export class ProjectDatasetAuthoringCoordinator {
       throw new ProjectDatasetAuthoringError(messageOf(cause), "dataset-write", cause)
     }
 
-    const nextManifest: ModelManifestV2 = {
-      ...current.manifest,
-      schemaVersion: 2,
-      customDatasets: [...current.manifest.customDatasets, generated.modelDataset],
-    }
-    const nextProject = { ...current.document, manifest: nextManifest }
-    const nextModelJson = JSON.stringify(nextProject, null, 2)
     const nextResources = {
       ...this.resources,
       ...Object.fromEntries(Object.entries(generated.files).map(([path, value]) => [`${prefix}${path}`, value])),
@@ -283,17 +298,43 @@ export class ProjectDatasetAuthoringCoordinator {
 
     let created: CreatedDatasetDirectory | undefined
     let modelWriteAttempted = false
+    let modelManifestInstalled = false
+    let modelBeforeCommit = previousModelJson
+    let manifestBeforeCommit = current.manifest
+    let nextManifest = current.manifest
+    let nextModelJson = previousModelJson
     try {
       created = await createDatasetDirectory(this.session.directory, generated.modelDataset.path)
       await created.directory.getDirectoryHandle("data", { create: true })
       await writeProjectFiles(created.directory, generated.files)
       for (const file of generated.dataFiles) await writeProjectFiles(created.directory, { [`data/${file.path}`]: file.bytes })
       modelWriteAttempted = true
+      // Re-read the live graph after filesystem I/O: the user may have saved
+      // a draft while the dataset files were being written.
+      modelBeforeCommit = this.currentModelJson()
+      const commitModel = parseModelDocument(modelBeforeCommit)
+      if (commitModel.manifest.customDatasets.some((dataset) => dataset.id === generated.modelDataset.id || dataset.path === generated.modelDataset.path)) {
+        throw new ProjectDatasetAuthoringError(`Dataset '${generated.modelDataset.id}@${generated.modelDataset.version}' or path '${generated.modelDataset.path}' already exists`, "manifest")
+      }
+      manifestBeforeCommit = commitModel.manifest
+      nextManifest = {
+        ...commitModel.manifest,
+        schemaVersion: 2,
+        customDatasets: [...commitModel.manifest.customDatasets, generated.modelDataset],
+      }
+      nextModelJson = JSON.stringify({ ...commitModel.document, manifest: nextManifest }, null, 2)
+      // Install the manifest before awaiting the writer so a concurrent graph
+      // save exports the same dataset-aware snapshot rather than stale state.
+      if (this.model) {
+        this.model.modelManifest = nextManifest
+        modelManifestInstalled = true
+      }
       await this.session.save(nextModelJson)
     } catch (cause) {
+      if (modelManifestInstalled) this.model!.modelManifest = manifestBeforeCommit
       const rollbackErrors: unknown[] = []
       if (modelWriteAttempted) {
-        try { await this.session.save(this.modelJson) } catch (rollbackCause) { rollbackErrors.push(new Error(`model restore: ${messageOf(rollbackCause)}`)) }
+        try { await this.session.save(modelBeforeCommit) } catch (rollbackCause) { rollbackErrors.push(new Error(`model restore: ${messageOf(rollbackCause)}`)) }
       }
       if (created) {
         try { await removeCreatedDatasetDirectory(created) } catch (rollbackCause) { rollbackErrors.push(new Error(`dataset removal: ${messageOf(rollbackCause)}`)) }
@@ -305,6 +346,143 @@ export class ProjectDatasetAuthoringCoordinator {
     this.resources = nextResources
     this.modelJson = nextModelJson
     return { generated, modelJson: nextModelJson }
+  }
+
+  private async runUpdate(target: ModelDatasetReference, input: DatasetAuthoringRequest): Promise<ProjectDatasetAuthoringResult> {
+    const previousModelJson = this.currentModelJson()
+    let generated: GeneratedDatasetResources
+    try {
+      generated = generateDatasetResources(input)
+    } catch (cause) {
+      throw new ProjectDatasetAuthoringError(messageOf(cause), "validation", cause)
+    }
+
+    const current = parseModelDocument(previousModelJson)
+    const existing = findDataset(current.manifest, target)
+    if (!existing) throw new ProjectDatasetAuthoringError(`Dataset '${target.id}@${target.version}' no longer exists`, "manifest")
+    if (!sameDatasetIdentity(existing, generated.modelDataset)) {
+      throw new ProjectDatasetAuthoringError("A dataset's ID, version, and directory cannot be changed while editing it", "validation")
+    }
+
+    const prefix = `${existing.path}/`
+    const existingPython = this.resources[`${prefix}dataset.py`]
+    const existingManifest = this.resources[`${prefix}manifest.json`]
+    const existingDefinition = this.resources[`${prefix}dataset.json`]
+    if (existingPython === undefined || existingManifest === undefined || existingDefinition === undefined) {
+      throw new ProjectDatasetAuthoringError(`Dataset '${existing.id}@${existing.version}' is incomplete and cannot be updated`, "manifest")
+    }
+    const previousDataFiles = datasetDataFiles(this.resources, prefix)
+    const nextDataFiles = mergeDatasetDataFiles(previousDataFiles, generated.dataFiles)
+    let updated: GeneratedDatasetResources = {
+      ...generated,
+      files: {
+        "manifest.json": generated.files["manifest.json"],
+        "dataset.json": generated.files["dataset.json"],
+        // Source is intentionally user-owned once the scaffold exists.
+        "dataset.py": readResourceText(existingPython),
+      },
+      dataFiles: nextDataFiles,
+    }
+
+    let writeStarted = false
+    try {
+      await ensureProjectPermission(this.session.directory)
+      const directory = await openDatasetDirectory(this.session.directory, existing.path)
+      updated = {
+        ...updated,
+        files: { ...updated.files, "dataset.py": await readProjectText(directory, "dataset.py") },
+      }
+      writeStarted = true
+      await writeProjectFiles(directory, {
+        "manifest.json": updated.files["manifest.json"],
+        "dataset.json": updated.files["dataset.json"],
+      })
+      for (const file of generated.dataFiles) await writeProjectFiles(directory, { [`data/${file.path}`]: file.bytes })
+    } catch (cause) {
+      if (!writeStarted) throw new ProjectDatasetAuthoringError(messageOf(cause), "dataset-write", cause)
+      const rollbackError = await restoreDatasetUpdate(
+        this.session.directory,
+        existing.path,
+        existingManifest,
+        existingDefinition,
+        previousDataFiles,
+        generated.dataFiles,
+      )
+      if (rollbackError) throw new ProjectDatasetAuthoringRollbackError(cause, rollbackError)
+      throw new ProjectDatasetAuthoringError(messageOf(cause), "dataset-write", cause)
+    }
+
+    this.resources = {
+      ...this.resources,
+      [`${prefix}manifest.json`]: updated.files["manifest.json"],
+      [`${prefix}dataset.json`]: updated.files["dataset.json"],
+      [`${prefix}dataset.py`]: updated.files["dataset.py"],
+      ...Object.fromEntries(generated.dataFiles.map((file) => [`${prefix}data/${file.path}`, file.bytes] as const)),
+    }
+    this.modelJson = previousModelJson
+    return { generated: updated, modelJson: this.modelJson }
+  }
+
+  private async runDelete(target: ModelDatasetReference): Promise<void> {
+    const previousModelJson = this.currentModelJson()
+    const current = parseModelDocument(previousModelJson)
+    const existing = findDataset(current.manifest, target)
+    if (!existing) throw new ProjectDatasetAuthoringError(`Dataset '${target.id}@${target.version}' no longer exists`, "manifest")
+    if (!this.session.directory.removeEntry) {
+      throw new ProjectDatasetAuthoringError("The browser cannot remove project dataset directories", "dataset-delete")
+    }
+
+    try {
+      await ensureProjectPermission(this.session.directory)
+    } catch (cause) {
+      throw new ProjectDatasetAuthoringError(messageOf(cause), "dataset-delete", cause)
+    }
+
+    let manifestRemoved = false
+    let modelManifestInstalled = false
+    let modelBeforeCommit = previousModelJson
+    let manifestBeforeCommit = current.manifest
+    let nextManifest = current.manifest
+    let nextModelJson = previousModelJson
+    try {
+      // Remove the catalog entry first. If folder deletion fails, restoring the
+      // manifest keeps the dataset available rather than leaving a broken entry.
+      modelBeforeCommit = this.currentModelJson()
+      const commitModel = parseModelDocument(modelBeforeCommit)
+      const commitExisting = findDataset(commitModel.manifest, target)
+      if (!commitExisting) throw new ProjectDatasetAuthoringError(`Dataset '${target.id}@${target.version}' no longer exists`, "manifest")
+      manifestBeforeCommit = commitModel.manifest
+      nextManifest = {
+        ...commitModel.manifest,
+        customDatasets: commitModel.manifest.customDatasets.filter((dataset) => !sameDatasetIdentity(dataset, commitExisting)),
+      }
+      nextModelJson = JSON.stringify({ ...commitModel.document, manifest: nextManifest }, null, 2)
+      if (this.model) {
+        this.model.modelManifest = nextManifest
+        modelManifestInstalled = true
+      }
+      await this.session.save(nextModelJson)
+      manifestRemoved = true
+      await removeDatasetDirectory(this.session.directory, existing.path)
+    } catch (cause) {
+      if (modelManifestInstalled) this.model!.modelManifest = manifestBeforeCommit
+      if (manifestRemoved) {
+        try {
+          await this.session.save(modelBeforeCommit)
+        } catch (rollbackCause) {
+          throw new ProjectDatasetAuthoringRollbackError(cause, rollbackCause)
+        }
+      }
+      throw new ProjectDatasetAuthoringError(messageOf(cause), "dataset-delete", cause)
+    }
+
+    const prefix = `${existing.path}/`
+    this.resources = Object.fromEntries(Object.entries(this.resources).filter(([path]) => !path.startsWith(prefix)))
+    this.modelJson = nextModelJson
+  }
+
+  private currentModelJson(): string {
+    return this.model?.exportToJson() ?? this.modelJson
   }
 }
 
@@ -334,9 +512,90 @@ async function createDatasetDirectory(root: ProjectDirectoryHandle, path: string
   throw new Error(`Project dataset directory '${path}' already exists`)
 }
 
+async function openDatasetDirectory(root: ProjectDirectoryHandle, path: string): Promise<ProjectDirectoryHandle> {
+  let directory = root
+  for (const part of path.split("/")) directory = await directory.getDirectoryHandle(part)
+  return directory
+}
+
+async function removeDatasetDirectory(root: ProjectDirectoryHandle, path: string): Promise<void> {
+  const parts = path.split("/")
+  const name = parts.pop()!
+  let parent = root
+  for (const part of parts) parent = await parent.getDirectoryHandle(part)
+  if (!parent.removeEntry) throw new Error("The browser cannot remove project dataset directories")
+  await parent.removeEntry(name, { recursive: true })
+}
+
 async function removeCreatedDatasetDirectory(created: CreatedDatasetDirectory): Promise<void> {
   if (!created.parent.removeEntry) throw new Error(`Cannot remove newly created dataset directory '${created.name}'`)
   await created.parent.removeEntry(created.name, { recursive: true })
+}
+
+function findDataset(manifest: ModelManifestV2, target: ModelDatasetReference): ModelDatasetReference | undefined {
+  return manifest.customDatasets.find((dataset) => sameDatasetIdentity(dataset, target))
+}
+
+function sameDatasetIdentity(left: ModelDatasetReference, right: ModelDatasetReference): boolean {
+  return left.id === right.id && left.version === right.version && left.path === right.path
+}
+
+function readResourceText(value: string | Uint8Array): string {
+  return typeof value === "string" ? value : new TextDecoder().decode(value)
+}
+
+function datasetDataFiles(resources: Record<string, string | Uint8Array>, prefix: string): DatasetDataFile[] {
+  return Object.entries(resources)
+    .filter(([path]) => path.startsWith(`${prefix}data/`))
+    .map(([path, bytes]) => ({
+      path: path.slice(`${prefix}data/`.length),
+      bytes: typeof bytes === "string" ? new TextEncoder().encode(bytes) : new Uint8Array(bytes),
+    }))
+}
+
+function mergeDatasetDataFiles(previous: readonly DatasetDataFile[], next: readonly DatasetDataFile[]): DatasetDataFile[] {
+  const files = new Map(previous.map((file) => [file.path, file]))
+  for (const file of next) files.set(file.path, file)
+  return [...files.values()]
+}
+
+async function restoreDatasetUpdate(
+  root: ProjectDirectoryHandle,
+  path: string,
+  manifest: string | Uint8Array,
+  definition: string | Uint8Array,
+  previousDataFiles: readonly DatasetDataFile[],
+  requestedDataFiles: readonly DatasetDataFile[],
+): Promise<unknown | undefined> {
+  try {
+    const directory = await openDatasetDirectory(root, path)
+    await writeProjectFiles(directory, { "manifest.json": manifest, "dataset.json": definition })
+    for (const file of previousDataFiles) await writeProjectFiles(directory, { [`data/${file.path}`]: file.bytes })
+    const previousPaths = new Set(previousDataFiles.map((file) => file.path))
+    for (const file of requestedDataFiles) {
+      if (previousPaths.has(file.path)) continue
+      await removeProjectFile(directory, `data/${file.path}`)
+    }
+    return undefined
+  } catch (cause) {
+    return cause
+  }
+}
+
+async function removeProjectFile(root: ProjectDirectoryHandle, path: string): Promise<void> {
+  const parts = path.split("/")
+  const name = parts.pop()!
+  let parent = root
+  for (const part of parts) parent = await parent.getDirectoryHandle(part)
+  if (!parent.removeEntry) throw new Error(`The browser cannot remove '${path}' during rollback`)
+  await parent.removeEntry(name)
+}
+
+async function readProjectText(directory: ProjectDirectoryHandle, name: string): Promise<string> {
+  const file = await (await directory.getFileHandle(name)).getFile()
+  if (file.text) return file.text()
+  if (file.arrayBuffer) return new TextDecoder().decode(await file.arrayBuffer())
+  throw new Error(`Project file '${name}' cannot be read`)
 }
 
 function parseModelDocument(value: string): { document: Record<string, unknown>; manifest: ModelManifestV2 } {

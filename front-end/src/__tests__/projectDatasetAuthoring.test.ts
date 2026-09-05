@@ -13,6 +13,7 @@ import {
   generateDatasetResources,
   readDatasetDataFile,
 } from "../project-workspace/dataset-authoring"
+import type { ModelManifestV2 } from "../project-workspace/dataset-contract"
 
 class MemoryFile implements ProjectFile {
   constructor(public value: string | Uint8Array) {}
@@ -32,6 +33,7 @@ class MemoryDirectory implements ProjectDirectoryHandle {
   readonly kind = "directory" as const
   readonly directories = new Map<string, MemoryDirectory>()
   readonly files = new Map<string, MemoryFileHandle>()
+  removalFailure: Error | undefined
   constructor(readonly name = "root") {}
   async getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<ProjectDirectoryHandle> {
     const found = this.directories.get(name)
@@ -53,7 +55,11 @@ class MemoryDirectory implements ProjectDirectoryHandle {
     for (const [name, value] of this.directories) yield [name, value]
     for (const [name, value] of this.files) yield [name, value]
   }
-  async removeEntry(name: string): Promise<void> { this.directories.delete(name) }
+  async removeEntry(name: string): Promise<void> {
+    if (this.removalFailure) throw this.removalFailure
+    this.directories.delete(name)
+    this.files.delete(name)
+  }
 }
 
 const MODEL = JSON.stringify({
@@ -121,6 +127,34 @@ describe("project dataset authoring", () => {
     expect(new ProjectDatasetAuthoringCoordinator(reopened).listProjectDatasets()).toEqual([{ id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" }])
   })
 
+  test("authors against the current diagram snapshot without dropping graph or prior datasets", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    let graph = JSON.parse(MODEL) as Record<string, unknown>
+    const model = {
+      modelManifest: graph.manifest as ModelManifestV2,
+      exportToJson() {
+        return JSON.stringify({ ...graph, manifest: this.modelManifest })
+      },
+    }
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session, model)
+    await coordinator.author(REQUEST)
+    graph = { ...graph, nodes: [{ id: "input", position: { x: 350, y: 20 } }] }
+
+    await coordinator.author({
+      ...REQUEST,
+      id: "demo.labels",
+      directory: "datasets/labels",
+      name: "Labels",
+      dataFiles: [],
+    })
+
+    const saved = JSON.parse((await readProjectWorkspace(session.directory)).modelJson)
+    expect(saved.nodes).toEqual([{ id: "input", position: { x: 350, y: 20 } }])
+    expect(saved.manifest.customDatasets.map((dataset: { id: string }) => dataset.id)).toEqual(["demo.tokens", "demo.labels"])
+    expect(model.modelManifest.customDatasets).toHaveLength(2)
+  })
+
   test("rejects malformed requests and collisions before mutation", async () => {
     expect(() => generateDatasetResources({ ...REQUEST, directory: "../outside" })).toThrow()
     expect(() => generateDatasetResources({ ...REQUEST, inputs: [...REQUEST.inputs, { name: "next_tokens", shape: ["B"], dtype: "int64" }] })).toThrow(/slot/)
@@ -131,6 +165,74 @@ describe("project dataset authoring", () => {
     const before = await readProjectWorkspace(session.directory)
     await expect(coordinator.author(REQUEST)).rejects.toThrow(/already exists/)
     expect((await readProjectWorkspace(session.directory)).modelJson).toBe(before.modelJson)
+  })
+
+  test("updates a dataset contract while preserving its source and existing data", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session)
+    await coordinator.author(REQUEST)
+    const before = await readProjectWorkspace(session.directory)
+    const target = { id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" }
+
+    const result = await coordinator.update(target, {
+      ...REQUEST,
+      name: "Updated tokens",
+      dataFiles: [{ path: "validation.pt", bytes: new Uint8Array([4, 5, 6]) }],
+    })
+
+    expect(result.generated.definition.name).toBe("Updated tokens")
+    expect(result.generated.files["dataset.py"]).toBe(before.resources["datasets/tokens/dataset.py"])
+    const updated = await readProjectWorkspace(session.directory)
+    expect(JSON.parse(updated.resources["datasets/tokens/dataset.json"] as string).name).toBe("Updated tokens")
+    expect(updated.resources["datasets/tokens/dataset.py"]).toBe(before.resources["datasets/tokens/dataset.py"])
+    expect(datasetBytes(updated.resources["datasets/tokens/data/train.pt"]!)).toEqual(new Uint8Array([1, 2, 3]))
+    expect(datasetBytes(updated.resources["datasets/tokens/data/validation.pt"]!)).toEqual(new Uint8Array([4, 5, 6]))
+  })
+
+  test("rejects identity changes before mutating an existing dataset", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session)
+    await coordinator.author(REQUEST)
+    const before = await readProjectWorkspace(session.directory)
+
+    await expect(coordinator.update(
+      { id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" },
+      { ...REQUEST, version: "1.1.0" },
+    )).rejects.toThrow(/cannot be changed/)
+
+    expect(await readProjectWorkspace(session.directory)).toEqual(before)
+  })
+
+  test("deletes the dataset directory and removes its model manifest entry", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session)
+    await coordinator.author(REQUEST)
+
+    await coordinator.delete({ id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" })
+
+    const project = await readProjectWorkspace(session.directory)
+    expect(JSON.parse(project.modelJson).manifest.customDatasets).toEqual([])
+    const datasets = await session.directory.getDirectoryHandle("datasets")
+    await expect(datasets.getDirectoryHandle("tokens")).rejects.toThrow(/not found/)
+    expect(coordinator.listProjectDatasets()).toEqual([])
+  })
+
+  test("restores the dataset manifest when its directory cannot be removed", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session)
+    await coordinator.author(REQUEST)
+    const datasets = await session.directory.getDirectoryHandle("datasets") as MemoryDirectory
+    datasets.removalFailure = new Error("directory is busy")
+
+    await expect(coordinator.delete({ id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" })).rejects.toThrow(/directory is busy/)
+
+    const restored = await readProjectWorkspace(session.directory)
+    expect(JSON.parse(restored.modelJson).manifest.customDatasets).toEqual([{ id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" }])
+    await expect(datasets.getDirectoryHandle("tokens")).resolves.toBeDefined()
   })
 
   test("removes only the new directory when model persistence fails", async () => {
@@ -148,3 +250,7 @@ describe("project dataset authoring", () => {
     expect((await readProjectWorkspace(session.directory)).modelJson).toBe(MODEL)
   })
 })
+
+function datasetBytes(value: string | Uint8Array): Uint8Array {
+  return typeof value === "string" ? new TextEncoder().encode(value) : value
+}

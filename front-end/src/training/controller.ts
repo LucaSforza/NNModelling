@@ -212,6 +212,9 @@ export class TrainingController {
   setProjectDatasets(datasets: readonly DatasetInfo[], resources: ReadonlyMap<string, GeneratedDatasetResources>): void {
     // Project refs are archive uploads, so a ref/digest from the previous
     // project must never be reused for the new project's source files.
+    // A catalog update also invalidates an in-flight submission that captured
+    // a dataset which has since been edited or removed.
+    this.generation += 1;
     this.projectDatasetReferences.clear();
     this.projectDatasetResources = new Map(resources);
     this.datasets = [...datasets];
@@ -365,10 +368,21 @@ export class TrainingController {
     for (const key of ["gpuMemoryGb", "gpuType", "node"]) {
       if (normalizedPatch[key] === null) normalizedPatch[key] = undefined;
     }
-    const next = { ...this.config, ...normalizedPatch, datasetParams: patch.datasetParams === undefined
-      ? { ...this.config.datasetParams }
-      : { ...this.config.datasetParams, ...(patch.datasetParams as Record<string, unknown>) } } as TrainingConfig;
-    validateConfig(next, this.datasets);
+    const datasetChanged = patch.selectedDataset !== undefined && patch.selectedDataset !== this.config.selectedDataset;
+    const nextDataset = datasetChanged
+      ? this.datasets.find((dataset) => dataset.reference.ref === patch.selectedDataset)
+      : undefined;
+    const datasetParams = patch.datasetParams === undefined
+      ? datasetChanged
+        ? nextDataset ? datasetDefaults(nextDataset) : {}
+        : { ...this.config.datasetParams }
+      : datasetChanged
+        ? { ...(patch.datasetParams as Record<string, unknown>) }
+        : { ...this.config.datasetParams, ...(patch.datasetParams as Record<string, unknown>) };
+    const next = { ...this.config, ...normalizedPatch, datasetParams } as TrainingConfig;
+    // Draft edits may temporarily omit a required dataset value; submission
+    // performs the strict check once the user has finished editing.
+    validateConfig(next, this.datasets, { allowIncompleteDatasetParams: true });
     if (JSON.stringify(next) === JSON.stringify(this.config)) return this.getConfig();
     this.config = next;
     // Configuration is part of the pending submission snapshot. Any change
@@ -560,11 +574,17 @@ function cloneConfig(config: TrainingConfig): TrainingConfig {
 }
 
 function datasetDefaults(dataset: DatasetInfo): Record<string, unknown> {
-  return Object.fromEntries(dataset.definition.parameters.map((parameter) => [parameter.name, parameter.default]));
+  return Object.fromEntries(dataset.definition.parameters
+    .filter((parameter) => parameter.default !== undefined)
+    .map((parameter) => [parameter.name, parameter.default]));
 }
 
 function mergeDatasetDefaults(dataset: DatasetInfo, values: Record<string, unknown>): Record<string, unknown> {
-  return { ...datasetDefaults(dataset), ...values };
+  const allowed = new Set(dataset.definition.parameters.map((parameter) => parameter.name));
+  return {
+    ...datasetDefaults(dataset),
+    ...Object.fromEntries(Object.entries(values).filter(([name]) => allowed.has(name))),
+  };
 }
 
 function reconcileDatasetConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]): TrainingConfig {
@@ -577,7 +597,11 @@ function reconcileDatasetConfig(config: TrainingConfig, datasets: readonly Datas
   return { ...config, datasetParams: mergeDatasetDefaults(selected, config.datasetParams) };
 }
 
-function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]): void {
+function validateConfig(
+  config: TrainingConfig,
+  datasets: readonly DatasetInfo[],
+  options: { allowIncompleteDatasetParams?: boolean } = {},
+): void {
   if (config.selectedDataset) {
     const dataset = datasets.find((candidate) => candidate.reference.ref === config.selectedDataset);
     if (datasets.length > 0 && !dataset) throw new TrainingConfigurationError(`Dataset sconosciuto: ${config.selectedDataset}`, { field: "selectedDataset" });
@@ -585,7 +609,11 @@ function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]
       const allowed = new Map(dataset.definition.parameters.map((parameter) => [parameter.name, parameter]));
       const unknown = Object.keys(config.datasetParams).filter((key) => !allowed.has(key));
       if (unknown.length > 0) throw new TrainingConfigurationError(`Parametro dataset sconosciuto: ${unknown.join(", ")}`, { field: "datasetParams", keys: unknown });
-      for (const [key, value] of Object.entries(config.datasetParams)) validateDatasetValue(allowed.get(key)!, value);
+      for (const parameter of allowed.values()) {
+        if (Object.hasOwn(config.datasetParams, parameter.name) || parameter.required) {
+          validateDatasetValue(parameter, config.datasetParams[parameter.name], options.allowIncompleteDatasetParams === true);
+        }
+      }
     }
   }
   integer(config.seed, "seed");
@@ -603,9 +631,9 @@ function validateConfig(config: TrainingConfig, datasets: readonly DatasetInfo[]
   integer(config.priority, "priority");
 }
 
-function validateDatasetValue(parameter: DatasetInfo["definition"]["parameters"][number], value: unknown): void {
+function validateDatasetValue(parameter: DatasetInfo["definition"]["parameters"][number], value: unknown, allowIncomplete: boolean): void {
   if (value === undefined || value === null) {
-    if (parameter.required) throw invalid(`datasetParams.${parameter.name}`, "è obbligatorio");
+    if (parameter.required && !allowIncomplete) throw invalid(`datasetParams.${parameter.name}`, "è obbligatorio");
     return;
   }
   const type = parameter.type.toLowerCase();

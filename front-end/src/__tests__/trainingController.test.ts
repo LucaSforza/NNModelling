@@ -64,6 +64,55 @@ describe("TrainingController", () => {
     expect(controller.getConfig()).toMatchObject({ selectedDataset: second.reference.ref, datasetParams: { batch_size: 16 } });
   });
 
+  it("replaces dataset parameters when switching datasets", () => {
+    const first = projectDataset("project-a");
+    const second = {
+      ...projectDataset("project-b"),
+      definition: {
+        ...projectDataset("project-b").definition,
+        parameters: [{ name: "B", type: "integer" as const, required: true }],
+      },
+    };
+    const controller = new TrainingController();
+    controller.setProjectDatasets([first, second], resources);
+    controller.updateConfig({ selectedDataset: first.reference.ref, datasetParams: { batch_size: 99 } });
+    controller.updateConfig({ selectedDataset: second.reference.ref, datasetParams: {} });
+
+    expect(controller.getConfig()).toMatchObject({
+      selectedDataset: second.reference.ref,
+      datasetParams: {},
+    });
+    expect(() => controller.updateConfig({ datasetParams: { batch_size: 1 } })).toThrow(/sconosciuto/);
+  });
+
+  it("drops parameters removed from the selected dataset definition", () => {
+    const controller = new TrainingController();
+    const original = projectDataset("project-a");
+    controller.setProjectDatasets([original], resources);
+    controller.updateConfig({ datasetParams: { batch_size: 99, shuffle: true } });
+    const renamed = {
+      ...original,
+      definition: {
+        ...original.definition,
+        parameters: [{ name: "B", type: "integer" as const, required: true }],
+      },
+    };
+    controller.setProjectDatasets([renamed], resources);
+    expect(controller.getConfig().datasetParams).toEqual({});
+  });
+
+  it("removes a deleted project dataset from the training selection", () => {
+    const controller = new TrainingController();
+    const selected = projectDataset("project-a");
+    controller.setProjectDatasets([selected], resources);
+    controller.updateConfig({ selectedDataset: selected.reference.ref, datasetParams: { batch_size: 99 } });
+
+    controller.setProjectDatasets([], resources);
+
+    expect(controller.getDatasets()).toEqual([]);
+    expect(controller.getConfig()).toMatchObject({ selectedDataset: "", datasetParams: {} });
+  });
+
   it("clears project archive references when installing a new project catalog", () => {
     const controller = new TrainingController();
     const oldDataset = projectDataset("project-a");

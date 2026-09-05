@@ -13,7 +13,7 @@
   import { TrainingController, type TrainingControllerSnapshot } from "../training/controller";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
-  import type { DatasetParameterValue } from "../project-workspace/dataset-contract";
+  import { coerceTrainingValue } from "../training/coerce";
 
   interface Props {
     diagram: Diagram;
@@ -107,10 +107,6 @@
     api = view.status === "active" ? controller.getApi() : null;
     errorMessage = view.error ?? "";
     const config = snapshot.config;
-    const selectedDefinition = snapshot.datasets.find((dataset) => dataset.reference.ref === config.selectedDataset)?.definition;
-    diagram.setDatasetInferenceContext(selectedDefinition
-      ? { definition: selectedDefinition, parameters: config.datasetParams as Record<string, DatasetParameterValue> }
-      : null);
     selectedDataset = config.selectedDataset;
     datasetParams = Object.fromEntries(Object.entries(config.datasetParams).map(([key, value]) => [key, String(value ?? "")]));
     seed = String(config.seed); optimizerTarget = config.optimizerTarget; learningRate = String(config.learningRate);
@@ -183,7 +179,9 @@
 
   function selectDataset(dataset: DatasetInfo) {
     selectedDataset = dataset.reference.ref;
-    const defaults = Object.fromEntries(dataset.definition.parameters.map((parameter) => [parameter.name, parameter.default]));
+    const defaults = Object.fromEntries(dataset.definition.parameters
+      .filter((parameter) => parameter.default !== undefined)
+      .map((parameter) => [parameter.name, parameter.default]));
     datasetParams = Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, String(value ?? "")]));
     try { controller.updateConfig({ selectedDataset, datasetParams: defaults }); } catch (error) { handleConnectionError(error); }
   }
@@ -195,37 +193,31 @@
   }
 
   $effect(() => {
-    if (connectionState === "active") syncConfigFromDraft();
+    syncConfigFromDraft();
   });
 
   function syncConfigFromDraft(): void {
     const typedDatasetParams = Object.fromEntries(
       Object.entries(datasetParams).map(([key, value]) => {
         const parameter = selectedDatasetInfo?.definition.parameters.find((candidate) => candidate.name === key);
-        return [key, parameter ? coerce(value, parameter.type) : value];
+        return [key, parameter ? coerceTrainingValue(value, parameter.type) : value];
       }),
     );
     try {
-      controller.updateConfig({ selectedDataset, datasetParams: typedDatasetParams, seed: coerce(seed, "int"), optimizerTarget,
-        learningRate: coerce(learningRate, "float"), maxEpochs: coerce(maxEpochs, "int"), accelerator,
-        patience: coerce(patience, "int"), minDelta: coerce(minDelta, "float"), wandbProject, wandbMode,
-        cpu: coerce(cpu, "int"), memoryGb: coerce(memoryGb, "float"), gpu: coerce(gpu, "int"),
-        gpuMemoryGb: gpuMemoryGb ? coerce(gpuMemoryGb, "float") : undefined, gpuType: gpuType || undefined,
-        node: node || undefined, priority: coerce(priority, "int") });
-    } catch {
-      // Text inputs can be temporarily incomplete; submit/MCP validation reports the error.
+      controller.updateConfig({ selectedDataset, datasetParams: typedDatasetParams, seed: coerceTrainingValue(seed, "integer") as number,
+        optimizerTarget, learningRate: coerceTrainingValue(learningRate, "number") as number,
+        maxEpochs: coerceTrainingValue(maxEpochs, "integer") as number, accelerator,
+        patience: coerceTrainingValue(patience, "integer") as number, minDelta: coerceTrainingValue(minDelta, "number") as number,
+        wandbProject, wandbMode, cpu: coerceTrainingValue(cpu, "integer") as number,
+        memoryGb: coerceTrainingValue(memoryGb, "number") as number, gpu: coerceTrainingValue(gpu, "integer") as number,
+        gpuMemoryGb: gpuMemoryGb ? coerceTrainingValue(gpuMemoryGb, "number") as number : undefined,
+        gpuType: gpuType || undefined, node: node || undefined,
+        priority: coerceTrainingValue(priority, "integer") as number });
+    } catch (error) {
+      // Keep the last accepted controller snapshot, but make an invalid draft
+      // visible instead of silently pretending it was submitted.
+      errorMessage = errorText(error);
     }
-  }
-
-  function coerce(value: string, type: "int"): number;
-  function coerce(value: string, type: "float"): number;
-  function coerce(value: string, type: "bool"): boolean;
-  function coerce(value: string, type: string): number | boolean | string;
-  function coerce(value: string, type: string): number | boolean | string {
-    if (type === "int") return Number.parseInt(value, 10);
-    if (type === "float") return Number.parseFloat(value);
-    if (type === "bool") return value === "true";
-    return value;
   }
 
   async function submit() {
@@ -426,31 +418,32 @@
     {/if}
   </section>
 
-  {#if connectionState === "active"}
-    <section>
-      <h3>Dataset</h3>
-      <label>Dataset
-        <select value={selectedDataset} onchange={(event) => {
-          const target = datasets.find((item) => item.reference.ref === (event.currentTarget as HTMLSelectElement).value);
-          if (target) selectDataset(target);
-        }}>
-          {#each datasets as dataset (dataset.reference.ref)}
-            <option value={dataset.reference.ref}>{dataset.definition.name}</option>
-          {/each}
-        </select>
-      </label>
-      {#if selectedDatasetInfo}
-        {#if selectedDatasetInfo.definition.classes}
-          <small>Classi rilevate dal dataset: {selectedDatasetInfo.definition.classes.count}</small>
-        {/if}
-        {#each selectedDatasetInfo.definition.parameters as parameter (parameter.name)}
-          <label>{parameter.name}
-            <input value={datasetParams[parameter.name] ?? ""} oninput={(event) => setDatasetParameter(parameter, event)} />
-          </label>
+  <section>
+    <h3>Dataset</h3>
+    <label>Dataset
+      <select value={selectedDataset} onchange={(event) => {
+        const target = datasets.find((item) => item.reference.ref === (event.currentTarget as HTMLSelectElement).value);
+        if (target) selectDataset(target);
+      }}>
+        {#each datasets as dataset (dataset.reference.ref)}
+          <option value={dataset.reference.ref}>{dataset.definition.name}</option>
         {/each}
+      </select>
+    </label>
+    {#if selectedDatasetInfo}
+      {#if selectedDatasetInfo.definition.classes}
+        <small>Classi rilevate dal dataset: {selectedDatasetInfo.definition.classes.count}</small>
       {/if}
-      <label>Seed<input type="number" bind:value={seed} /></label>
-    </section>
+      {#each selectedDatasetInfo.definition.parameters as parameter (parameter.name)}
+        <label>{parameter.name}
+          <input value={datasetParams[parameter.name] ?? ""} oninput={(event) => setDatasetParameter(parameter, event)} />
+        </label>
+      {/each}
+    {/if}
+    <label>Seed<input type="number" bind:value={seed} /></label>
+  </section>
+
+  {#if connectionState === "active"}
 
     <section>
       <h3>Ottimizzazione</h3>

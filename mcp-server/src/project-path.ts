@@ -99,7 +99,7 @@ export function validateProjectResourcePath(projectPath: string, projectRoot: st
   }
   const normalized = resourcePath.replaceAll("\\", "/")
   const segments = normalized.split("/")
-  if (path.isAbsolute(resourcePath) || segments.some((segment) => !segment || segment === "." || segment === "..")) {
+  if (path.isAbsolute(resourcePath) || /^[A-Za-z]:\//.test(normalized) || segments.some((segment) => !segment || segment === "." || segment === "..")) {
     throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource path must stay below the project directory")
   }
   const resolved = path.resolve(safeProjectPath, ...segments)
@@ -122,6 +122,7 @@ export async function applyProjectResource(
     }
     const bytes = decodeProjectResource(operation.encoding, operation.data)
     await fs.mkdir(path.dirname(target), { recursive: true })
+    await ensureProjectResourceParent(projectPath, projectRoot, target)
     const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`)
     try {
       await fs.writeFile(temporary, bytes)
@@ -132,10 +133,26 @@ export async function applyProjectResource(
     return
   }
   if (operation.kind === "remove") {
+    await ensureProjectResourceParent(projectPath, projectRoot, target)
     await fs.rm(target, { recursive: operation.recursive === true, force: true })
     return
   }
   throw new MCPServerError("INVALID_PROJECT_RESOURCE", "unsupported resource operation")
+}
+
+async function ensureProjectResourceParent(projectPath: string, projectRoot: string | undefined, target: string): Promise<void> {
+  try {
+    const safeProjectPath = validateProjectPath(projectPath, projectRoot)
+    const rootReal = await fs.realpath(path.resolve(projectRoot!))
+    const projectReal = await fs.realpath(safeProjectPath)
+    const parentReal = await fs.realpath(path.dirname(target))
+    if (!isWithin(rootReal, projectReal) || (parentReal !== projectReal && !isWithin(projectReal, parentReal))) {
+      throw new MCPServerError("PROJECT_PATH_OUTSIDE_ROOT", "resource parent resolves outside the project root")
+    }
+  } catch (cause) {
+    if (cause instanceof MCPServerError) throw cause
+    throw new MCPServerError("PROJECT_PATH_UNAVAILABLE", cause instanceof Error ? cause.message : String(cause))
+  }
 }
 
 export async function rollbackCreatedProject(projectPath: string, projectRoot: string | undefined): Promise<void> {
