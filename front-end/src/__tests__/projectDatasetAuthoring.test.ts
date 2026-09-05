@@ -249,6 +249,37 @@ describe("project dataset authoring", () => {
     await expect(project.getDirectoryHandle("tokens")).rejects.toThrow()
     expect((await readProjectWorkspace(session.directory)).modelJson).toBe(MODEL)
   })
+
+  test("does not roll back a newer graph save after a dataset write failure", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    let graph = JSON.parse(MODEL) as Record<string, unknown>
+    const model = {
+      modelManifest: graph.manifest as ModelManifestV2,
+      exportToJson() {
+        return JSON.stringify({ ...graph, manifest: this.modelManifest })
+      },
+    }
+    const originalSave = session.save
+    let first = true
+    session.save = async (value) => {
+      if (first) {
+        first = false
+        graph = { ...graph, nodes: [{ id: "latest", position: { x: 350, y: 20 } }] }
+        // Simulate a newer graph save accepted while dataset authoring waits.
+        void originalSave(model.exportToJson())
+        throw new Error("disk full")
+      }
+      return originalSave(value)
+    }
+
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session, model)
+    await expect(coordinator.author(REQUEST)).rejects.toThrow(/disk full/)
+
+    const restored = JSON.parse((await readProjectWorkspace(session.directory)).modelJson)
+    expect(restored.nodes).toEqual([{ id: "latest", position: { x: 350, y: 20 } }])
+    expect(restored.manifest.customDatasets).toEqual([])
+  })
 })
 
 function datasetBytes(value: string | Uint8Array): Uint8Array {

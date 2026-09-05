@@ -334,7 +334,10 @@ export class ProjectDatasetAuthoringCoordinator {
       if (modelManifestInstalled) this.model!.modelManifest = manifestBeforeCommit
       const rollbackErrors: unknown[] = []
       if (modelWriteAttempted) {
-        try { await this.session.save(modelBeforeCommit) } catch (rollbackCause) { rollbackErrors.push(new Error(`model restore: ${messageOf(rollbackCause)}`)) }
+        // A newer graph save may already be queued while this transaction was
+        // pending. Export the live model after restoring only our manifest so
+        // rollback cannot put that newer draft back on disk.
+        try { await this.session.save(this.currentModelJson()) } catch (rollbackCause) { rollbackErrors.push(new Error(`model restore: ${messageOf(rollbackCause)}`)) }
       }
       if (created) {
         try { await removeCreatedDatasetDirectory(created) } catch (rollbackCause) { rollbackErrors.push(new Error(`dataset removal: ${messageOf(rollbackCause)}`)) }
@@ -468,7 +471,7 @@ export class ProjectDatasetAuthoringCoordinator {
       if (modelManifestInstalled) this.model!.modelManifest = manifestBeforeCommit
       if (manifestRemoved) {
         try {
-          await this.session.save(modelBeforeCommit)
+          await this.session.save(this.currentModelJson())
         } catch (rollbackCause) {
           throw new ProjectDatasetAuthoringRollbackError(cause, rollbackCause)
         }
