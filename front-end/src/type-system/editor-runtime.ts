@@ -158,6 +158,7 @@ export class EditorTypeSystemRuntime {
     private catalog: PackageCatalog,
     private readonly bundled: readonly InstalledPackageRecord[],
     private coordinator = new PackageActivationCoordinator(host, catalog),
+    private datasetCatalog: readonly DatasetDefinition[] = [],
   ) {}
 
   static async create(options: EditorTypeSystemRuntimeOptions = {}): Promise<EditorTypeSystemRuntime> {
@@ -176,7 +177,10 @@ export class EditorTypeSystemRuntime {
   infer(snapshot: TypeGraphSnapshot, datasetContext?: DatasetInferenceContext): GraphInferenceResult {
     return this.scheduler.infer(snapshot, datasetContext)
   }
-  setDatasetCatalog(definitions: readonly DatasetDefinition[]): void { this.host.setDatasetCatalog(definitions) }
+  setDatasetCatalog(definitions: readonly DatasetDefinition[]): void {
+    this.datasetCatalog = [...definitions]
+    this.host.setDatasetCatalog(this.datasetCatalog)
+  }
   packages(): ActivePackageMetadata[] { return this.host.activePackages() }
   /** Export the current core + model scope without exposing filesystem paths. */
   packageExports(): ReadonlyMap<string, PackageExportInfo> {
@@ -261,6 +265,9 @@ export class EditorTypeSystemRuntime {
     this.scheduler = scope.scheduler
     this.catalog = scope.catalog
     this.coordinator = scope.coordinator
+    // Model activation replaces the Cordis host; project-owned dataset
+    // definitions belong to the editor scope and must survive that swap.
+    this.host.setDatasetCatalog(this.datasetCatalog)
     await previousCoordinator.dispose()
     await previousHost.dispose()
   }

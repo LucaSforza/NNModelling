@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest"
 import { EditorTypeSystemRuntime, type ModelBundleResources } from "../type-system/editor-runtime"
 import { createInstalledPackageRecord } from "../type-system/packages/installed/records"
 import type { InstalledPackageRecord } from "../type-system/packages/types"
+import type { DatasetDefinition } from "../project-workspace/dataset-contract"
 
 let runtime: EditorTypeSystemRuntime | undefined
 
@@ -36,6 +37,40 @@ describe("model-scoped package runtime", () => {
     await runtime.commitModelScope(resnetScope)
     expect(runtime.availablePackages().map(({ id }) => id)).toEqual(["core.input", "example.resnet"])
     expect(oldCoordinator.status("example.vae@1.0.0")?.state).toBe("disposed")
+  })
+
+  test("preserves the dataset catalog when replacing the model scope", async () => {
+    const core = await record("core.input", "input")
+    runtime = await EditorTypeSystemRuntime.create({ bundled: [core] })
+    const dataset: DatasetDefinition = {
+      schemaVersion: 1,
+      id: "demo.images",
+      version: "1.0.0",
+      name: "Images",
+      parameters: [{ name: "B", type: "integer", required: true }],
+      batch: { inputs: { image: { shape: ["B", 28], dtype: "float32" } }, targets: {} },
+    }
+    runtime.setDatasetCatalog([dataset])
+
+    const model = manifest("example.vae")
+    await runtime.switchModelScope(model.manifest, model.bundle)
+
+    const result = runtime.infer(
+      {
+        nodes: [{
+          id: "input",
+          type: "custom",
+          position: { x: 0, y: 0 },
+          data: { package: { id: "core.input", version: "1.0.0", name: "core.input" }, params: { binding: "image" } },
+        }],
+        edges: [],
+      },
+      { definition: dataset, parameters: { B: 2 } },
+    )
+    expect(result.nodes.get("input")).toEqual({
+      status: "success",
+      output: { shape: [2, 28], dtype: "float32" },
+    })
   })
 
   test("does not mutate the active scope when model package preparation fails", async () => {
@@ -118,8 +153,11 @@ async function record(id: string, kind: "input" | "layer", source: "bundled" | "
     name: id,
     kind,
     view: { color: "#123456", width: 100, height: 60 },
-    parameters: {},
+    parameters: kind === "input" ? { binding: { type: "string" as const } } : {},
   }
+  const inference = kind === "input"
+    ? "return function(context, parameters, services) return services.resolve_input(parameters.binding) end"
+    : "return function(context) return { status = 'success', output = context.inputs[1] } end"
   return createInstalledPackageRecord({
     source,
     manifest,
@@ -127,7 +165,7 @@ async function record(id: string, kind: "input" | "layer", source: "bundled" | "
     resources: {
       "manifest.json": JSON.stringify(manifest),
       "stereotype.json": JSON.stringify(definition),
-      "inference.lua": "return function(context) return { status = 'success', output = context.inputs[1] } end",
+      "inference.lua": inference,
     },
   })
 }

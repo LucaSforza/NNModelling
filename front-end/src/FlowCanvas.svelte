@@ -251,6 +251,10 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         } else if (!await diagram.importProjectJson(session.modelJson, session.resources)) {
           throw new Error("Impossibile attivare le risorse del progetto.");
         }
+        // Importing a model replaces the Cordis host, so restore the
+        // project-owned dataset catalog on the committed runtime before the
+        // selection effect resolves top-level Inputs.
+        diagram.setDatasetCatalog(projectDatasetInfos.map((dataset) => dataset.definition));
         if (!active) return;
         if (projectResourceError) {
           diagram.recordPackageRuntimeDiagnostic({
