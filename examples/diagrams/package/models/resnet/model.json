@@ -5,7 +5,13 @@
     "version": "0.1.0",
     "name": "ResNet",
     "customPackages": [],
-    "customDatasets": []
+    "customDatasets": [
+      {
+        "id": "example.resnet-mnist",
+        "version": "0.1.0",
+        "path": "datasets/resnet-mnist"
+      }
+    ]
   },
   "nodes": [
     {
@@ -27,13 +33,7 @@
         "name": "image",
         "color": "#3f8f68",
         "params": {
-          "shape": [
-            "B",
-            1,
-            28,
-            28
-          ],
-          "dtype": "float32"
+          "binding": "image"
         },
         "isInput": true,
         "isLoss": false

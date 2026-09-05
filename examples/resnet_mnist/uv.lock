@@ -197,7 +197,7 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { filename = "nnm_resnet_mnist-0.1.0-py3-none-any.whl", hash = "sha256:b20d6c1489155a5be6c5ea2266bb3642331b5068b7f180921ca8c02ad0e22f8c" },
+    { filename = "nnm_resnet_mnist-0.1.0-py3-none-any.whl", hash = "sha256:cd4e911aae5d5cebf37371b4a0a4107f9611895277c5b1eecf107ac4cf4d8eaf" },
 ]
 
 [package.metadata]
