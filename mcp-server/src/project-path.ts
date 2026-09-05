@@ -1,4 +1,5 @@
 import path from "node:path"
+import { randomUUID } from "node:crypto"
 
 import { MCPServerError } from "./errors.js"
 import fs from "node:fs/promises"
@@ -44,6 +45,10 @@ export type ProjectPathPayload = {
   readonly resources: Record<string, { readonly encoding: "utf8" | "base64"; readonly data: string }>
 }
 
+export type ProjectResourceOperation =
+  | { readonly kind: "write"; readonly path: string; readonly encoding: "utf8" | "base64"; readonly data: string }
+  | { readonly kind: "remove"; readonly path: string; readonly recursive?: boolean }
+
 export async function createProjectAtPath(
   projectPath: string,
   projectRoot: string | undefined,
@@ -86,6 +91,53 @@ export async function saveProjectModel(projectPath: string, projectRoot: string 
   await fs.writeFile(path.join(safePath, "model.json"), modelJson, { encoding: "utf8" })
 }
 
+/** Resolve a project-relative resource without allowing traversal or root removal. */
+export function validateProjectResourcePath(projectPath: string, projectRoot: string | undefined, resourcePath: string): string {
+  const safeProjectPath = validateProjectPath(projectPath, projectRoot)
+  if (typeof resourcePath !== "string" || resourcePath.length === 0 || resourcePath.includes("\0")) {
+    throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource path must be non-empty")
+  }
+  const normalized = resourcePath.replaceAll("\\", "/")
+  const segments = normalized.split("/")
+  if (path.isAbsolute(resourcePath) || segments.some((segment) => !segment || segment === "." || segment === "..")) {
+    throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource path must stay below the project directory")
+  }
+  const resolved = path.resolve(safeProjectPath, ...segments)
+  if (!isWithin(safeProjectPath, resolved)) {
+    throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource path must stay below the project directory")
+  }
+  return resolved
+}
+
+export async function applyProjectResource(
+  projectPath: string,
+  projectRoot: string | undefined,
+  operation: ProjectResourceOperation,
+): Promise<void> {
+  if (!operation || typeof operation !== "object") throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource operation is required")
+  const target = validateProjectResourcePath(projectPath, projectRoot, operation.path)
+  if (operation.kind === "write") {
+    if (operation.path.replaceAll("\\", "/") === "model.json" && operation.encoding === "utf8") {
+      try { JSON.parse(operation.data) } catch { throw new MCPServerError("MALFORMED_PROJECT", "model.json is not valid JSON") }
+    }
+    const bytes = decodeProjectResource(operation.encoding, operation.data)
+    await fs.mkdir(path.dirname(target), { recursive: true })
+    const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`)
+    try {
+      await fs.writeFile(temporary, bytes)
+      await fs.rename(temporary, target)
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+    }
+    return
+  }
+  if (operation.kind === "remove") {
+    await fs.rm(target, { recursive: operation.recursive === true, force: true })
+    return
+  }
+  throw new MCPServerError("INVALID_PROJECT_RESOURCE", "unsupported resource operation")
+}
+
 export async function rollbackCreatedProject(projectPath: string, projectRoot: string | undefined): Promise<void> {
   const safePath = validateProjectPath(projectPath, projectRoot)
   await fs.rm(safePath, { recursive: true, force: false })
@@ -116,4 +168,21 @@ async function readFiles(
 function isWithin(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate)
   return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+}
+
+function decodeProjectResource(encoding: string, data: unknown): Buffer {
+  if (typeof data !== "string") throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource data must be a string")
+  if (encoding === "utf8") {
+    const bytes = Buffer.from(data, "utf8")
+    if (bytes.byteLength > PROJECT_RESOURCE_LIMIT_BYTES) throw new MCPServerError("PROJECT_TOO_LARGE", "resource exceeds 64 MiB")
+    return bytes
+  }
+  if (encoding !== "base64" || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) {
+    throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource encoding is invalid")
+  }
+  const bytes = Buffer.from(data, "base64")
+  const canonical = bytes.toString("base64").replace(/=+$/, "")
+  if (canonical !== data.replace(/=+$/, "")) throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource data is not valid base64")
+  if (bytes.byteLength > PROJECT_RESOURCE_LIMIT_BYTES) throw new MCPServerError("PROJECT_TOO_LARGE", "resource exceeds 64 MiB")
+  return bytes
 }

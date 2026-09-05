@@ -44,6 +44,12 @@ interface RPCResponse {
   error?: { message: string; code?: string };
 }
 
+type PendingBrowserRequest = {
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
+};
+
 export interface ProjectRPCBridge {
   create: (payload: ProjectPathPayload) => Promise<unknown>;
   open: (payload: ProjectPathPayload) => Promise<unknown>;
@@ -118,6 +124,8 @@ export class BrowserRPCHandler {
   private viewport?: ViewportController;
   private training?: TrainingController;
   private project?: ProjectRPCBridge;
+  private readonly pendingBrowserRequests = new Map<string, PendingBrowserRequest>();
+  private nextBrowserRequestId = 0;
 
   /**
    * @param diagram  The Diagram instance to mutate (single source of truth).
@@ -149,6 +157,26 @@ export class BrowserRPCHandler {
     if (this.ws?.readyState === WEBSOCKET_OPEN) this.ws.send(JSON.stringify({ method, params }));
   }
 
+  /** Send a browser-owned request to the MCP bridge and await its commit ack. */
+  request<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
+    if (this.ws?.readyState !== WEBSOCKET_OPEN) return Promise.reject(new Error("MCP bridge is not connected"));
+    const id = `browser-${++this.nextBrowserRequestId}`;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingBrowserRequests.delete(id);
+        reject(new Error(`MCP bridge request timed out: ${method}`));
+      }, 30000);
+      this.pendingBrowserRequests.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      try {
+        this.ws!.send(JSON.stringify({ id, method, params }));
+      } catch (cause) {
+        clearTimeout(timer);
+        this.pendingBrowserRequests.delete(id);
+        reject(cause instanceof Error ? cause : new Error(String(cause)));
+      }
+    });
+  }
+
   // ── Public API ───────────────────────────────────────────────────────
 
   /** Open the WebSocket connection and start listening for RPC requests. */
@@ -166,6 +194,7 @@ export class BrowserRPCHandler {
     };
 
     this.ws.onclose = () => {
+      this.rejectPendingBrowserRequests(new Error("MCP bridge disconnected"));
       if (!this.intentionalClose) {
         this.scheduleReconnect();
       }
@@ -185,6 +214,7 @@ export class BrowserRPCHandler {
     }
     this.ws?.close();
     this.ws = null;
+    this.rejectPendingBrowserRequests(new Error("MCP bridge disconnected"));
   }
 
   // ── Message Handling ─────────────────────────────────────────────────
@@ -198,13 +228,26 @@ export class BrowserRPCHandler {
       return;
     }
 
-    const rpc = request as RPCRequest;
-    if (typeof rpc.id !== "string" || typeof rpc.method !== "string") {
+    const rpc = request as Partial<RPCRequest> & RPCResponse;
+    if (typeof rpc.id !== "string") {
       console.warn("[BrowserRPCHandler] Invalid RPC request:", request);
       return;
     }
 
-    this.dispatch(rpc);
+    if (typeof rpc.method !== "string") {
+      const pending = this.pendingBrowserRequests.get(rpc.id);
+      if (!pending) {
+        console.warn("[BrowserRPCHandler] Unknown RPC response:", request);
+        return;
+      }
+      clearTimeout(pending.timer);
+      this.pendingBrowserRequests.delete(rpc.id);
+      if (rpc.error) pending.reject(new Error(rpc.error.message));
+      else pending.resolve(rpc.result);
+      return;
+    }
+
+    this.dispatch(rpc as RPCRequest);
   }
 
   /** Send a response back through the WebSocket. */
@@ -212,6 +255,14 @@ export class BrowserRPCHandler {
     if (this.ws && this.ws.readyState === WEBSOCKET_OPEN) {
       this.ws.send(JSON.stringify(response));
     }
+  }
+
+  private rejectPendingBrowserRequests(error: Error): void {
+    for (const pending of this.pendingBrowserRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pendingBrowserRequests.clear();
   }
 
   /** Route an incoming RPC request to the appropriate handler. */

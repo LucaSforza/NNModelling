@@ -51,7 +51,7 @@ import * as connectionTools from "./tools/connection.js";
 import * as screenshotTools from "./tools/screenshot.js";
 import * as remoteTrainingTools from "./tools/remote-training.js";
 import * as projectTools from "./tools/project.js";
-import { saveProjectModel } from "./project-path.js";
+import { applyProjectResource, type ProjectResourceOperation } from "./project-path.js";
 
 // ── ServerContext ───────────────────────────────────────────────────────
 
@@ -142,15 +142,18 @@ export async function createServer(
     projectRoot: options.projectRoot,
     projectPaths: new Map(),
   };
-  browser.onNotification((tabId, method, params) => {
-    if (method !== "project_save") return;
+  browser.onRequest(async (tabId, method, params) => {
+    if (method !== "project_resource") throw new MCPServerError("UNKNOWN_BROWSER_REQUEST", `Unsupported browser request '${method}'`);
     const projectPath = params.projectPath;
-    const modelJson = params.modelJson;
-    if (typeof projectPath !== "string" || typeof modelJson !== "string") return;
-    if (ctx.projectPaths.get(tabId) !== projectPath) return;
-    void saveProjectModel(projectPath, ctx.projectRoot, modelJson).catch((error) => {
-      console.error(`[nnmodelling-mcp] project save failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    const operation = params.operation;
+    if (typeof projectPath !== "string" || !operation || typeof operation !== "object") {
+      throw new MCPServerError("INVALID_PROJECT_RESOURCE", "project resource request is malformed");
+    }
+    if (ctx.projectPaths.get(tabId) !== projectPath) {
+      throw new MCPServerError("PROJECT_PATH_NOT_ACTIVE", "browser tab is not associated with this project path");
+    }
+    await applyProjectResource(projectPath, ctx.projectRoot, operation as ProjectResourceOperation);
+    return { status: "ok" };
   });
 
   // ── Step 4: Create MCP Server instance ──────────────────────────────

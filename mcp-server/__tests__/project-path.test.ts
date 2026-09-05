@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { openProjectAtPath, validateProjectPath } from "../src/project-path"
+import { applyProjectResource, openProjectAtPath, validateProjectPath, validateProjectResourcePath } from "../src/project-path"
 
 describe("project path boundary", () => {
   test("accepts a canonical model directory under the configured root", () => {
@@ -39,5 +39,26 @@ describe("project path boundary", () => {
     } finally {
       await fs.rm(parent, { recursive: true, force: true })
     }
+  })
+
+  test("writes and removes project resources under the validated project root", async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), "nnm-project-"))
+    const projectPath = path.join(parent, "demo")
+    await fs.mkdir(projectPath)
+    try {
+      await applyProjectResource(projectPath, parent, { kind: "write", path: "datasets/demo/data/sample.bin", encoding: "base64", data: "AH//" })
+      expect(await fs.readFile(path.join(projectPath, "datasets/demo/data/sample.bin"))).toEqual(Buffer.from([0, 127, 255]))
+      await applyProjectResource(projectPath, parent, { kind: "write", path: "datasets/demo/dataset.json", encoding: "utf8", data: "{}" })
+      await applyProjectResource(projectPath, parent, { kind: "remove", path: "datasets/demo", recursive: true })
+      await expect(fs.stat(path.join(projectPath, "datasets/demo"))).rejects.toMatchObject({ code: "ENOENT" })
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true })
+    }
+  })
+
+  test("rejects resource traversal and project-root deletion", () => {
+    expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "../outside")).toThrow("below the project")
+    expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "")).toThrow("non-empty")
+    expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "..")).toThrow("below the project")
   })
 })

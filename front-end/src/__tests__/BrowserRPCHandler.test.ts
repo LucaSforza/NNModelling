@@ -80,6 +80,23 @@ describe("BrowserRPCHandler startup project bridge", () => {
   })
 })
 
+describe("BrowserRPCHandler browser-owned persistence", () => {
+  test("waits for the MCP acknowledgement before resolving a resource request", async () => {
+    const { handler, sent } = harness()
+    const pending = handler.request("project_resource", { projectPath: "/projects/demo", operation: { kind: "remove", path: "datasets/demo", recursive: true } })
+    expect(sent[0]).toMatchObject({ method: "project_resource" })
+    handler.handleMessage({ data: JSON.stringify({ id: sent[0].id, result: { status: "ok" } }) })
+    await expect(pending).resolves.toEqual({ status: "ok" })
+  })
+
+  test("rejects a failed MCP persistence acknowledgement", async () => {
+    const { handler, sent } = harness()
+    const pending = handler.request("project_resource", { projectPath: "/projects/demo", operation: { kind: "write", path: "datasets/demo/dataset.json", encoding: "utf8", data: "{}" } })
+    handler.handleMessage({ data: JSON.stringify({ id: sent[0].id, error: { message: "permission denied" } }) })
+    await expect(pending).rejects.toThrow("permission denied")
+  })
+})
+
 describe("BrowserRPCHandler training download", () => {
   test("forwards the selected packageName to the browser-owned controller", async () => {
     const sent: Array<Record<string, unknown>> = []
