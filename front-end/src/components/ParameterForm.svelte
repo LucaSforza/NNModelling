@@ -90,6 +90,17 @@
     }
     return undefined;
   }
+  function listLengthError(minimum: unknown, maximum: unknown, defaultValue: string): string | undefined {
+    const min = numberValue(minimum);
+    const max = numberValue(maximum);
+    if (min !== undefined && max !== undefined && Number.isFinite(min) && Number.isFinite(max) && min > max) return "Minimum items must not exceed maximum items.";
+    if (!defaultValue.trim()) return undefined;
+    const parsed = jsonValue(defaultValue);
+    if (!Array.isArray(parsed)) return "Default must be a JSON list.";
+    if (min !== undefined && Number.isFinite(min) && parsed.length < min) return "Default has fewer items than the minimum.";
+    if (max !== undefined && Number.isFinite(max) && parsed.length > max) return "Default has more items than the maximum.";
+    return undefined;
+  }
   function optionalString(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value : undefined;
   }
@@ -172,6 +183,7 @@
         <label>Default dimensions <input placeholder="B, 128, features" bind:value={row.shape} oninput={emit} /></label>
       {:else if row.type === "list"}
         <div class="parameter-row__grid"><label>Item type <select bind:value={row.listItemType} onchange={emit}><option value="integer">Integer</option><option value="number">Number</option><option value="boolean">Boolean</option><option value="string">String</option></select></label><label>Minimum items <input type="number" min="0" step="1" bind:value={row.listMinItems} oninput={emit} />{#if numberError(row.listMinItems, "integer")}<small class="parameter-form__error" role="alert">{numberError(row.listMinItems, "integer")}</small>{/if}</label><label>Maximum items <input type="number" min="0" step="1" bind:value={row.listMaxItems} oninput={emit} />{#if numberError(row.listMaxItems, "integer")}<small class="parameter-form__error" role="alert">{numberError(row.listMaxItems, "integer")}</small>{/if}</label><label class="parameter-row__wide">Default JSON <input placeholder="[1, 2]" bind:value={row.listDefault} oninput={emit} /></label></div>
+        {#if listLengthError(row.listMinItems, row.listMaxItems, row.listDefault)}<small class="parameter-form__error" role="alert">{listLengthError(row.listMinItems, row.listMaxItems, row.listDefault)}</small>{/if}
         {#if row.listItemType === "integer" || row.listItemType === "number"}<div class="parameter-row__grid"><label>Item minimum <input type="number" step={row.listItemType === "integer" ? "1" : "any"} bind:value={row.minimum} oninput={emit} />{#if numberError(row.minimum, row.listItemType)}<small class="parameter-form__error" role="alert">{numberError(row.minimum, row.listItemType)}</small>{/if}</label><label>Item maximum <input type="number" step={row.listItemType === "integer" ? "1" : "any"} bind:value={row.maximum} oninput={emit} />{#if numberError(row.maximum, row.listItemType)}<small class="parameter-form__error" role="alert">{numberError(row.maximum, row.listItemType)}</small>{/if}</label><label>Item default <input type="number" step={row.listItemType === "integer" ? "1" : "any"} bind:value={row.listItemDefault} oninput={emit} />{#if numberError(row.listItemDefault, row.listItemType)}<small class="parameter-form__error" role="alert">{numberError(row.listItemDefault, row.listItemType)}</small>{/if}</label></div>{#if boundsError(row.minimum, row.maximum, row.listItemDefault, row.listItemType)}<small class="parameter-form__error" role="alert">{boundsError(row.minimum, row.maximum, row.listItemDefault, row.listItemType)}</small>{/if}{:else if row.listItemType === "boolean"}<label class="parameter-row__checkbox"><input type="checkbox" bind:checked={row.listItemDefaultBoolean} onchange={emit} /> Item default true</label>{:else}<div class="parameter-row__grid"><label>Item choices <input bind:value={row.choices} oninput={emit} /></label><label>Item default <input bind:value={row.listItemDefault} oninput={emit} /></label></div>{/if}
       {:else}
         <div class="parameter-row__grid"><label>Referenced kind <select bind:value={row.stereotypeKind} onchange={emit}><option value="input">Input</option><option value="layer">Layer</option><option value="loss">Loss</option><option value="join">Join</option><option value="subflow">Subflow</option><option value="output">Output</option></select></label><label>Referenced ID <input bind:value={row.stereotypeId} oninput={emit} /></label><label>Version range <input bind:value={row.stereotypeVersion} oninput={emit} /></label><label class="parameter-row__wide">Default parameters JSON <input bind:value={row.stereotypeParameters} oninput={emit} /></label></div>

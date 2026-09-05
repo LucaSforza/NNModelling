@@ -60,14 +60,26 @@ describe("stereotype authoring domain", () => {
 
   test("accepts deeply proxied form state at the authoring boundary", () => {
     const proxied = deepProxy(request({
-      parameters: [{
-        name: "shape",
-        definition: { type: "shape", default: ["B", 4], position: "top" },
-      }],
+      parameters: [
+        { name: "shape", definition: { type: "shape", default: ["B", 4], position: "top" } },
+        { name: "values", definition: { type: "list", items: { type: "number", minimum: -1, maximum: 1 }, minItems: 1, maxItems: 2, default: [0.5], position: "bottom" } },
+        { name: "reference", definition: { type: "stereotype", kind: "layer", default: { id: "core.relu", version: "^0.1.0", parameters: { slope: 0.1 } }, position: "top" } },
+      ],
     })) as StereotypeAuthoringRequest
 
     expect(() => generateStereotypePackage(proxied)).not.toThrow()
     expect(generateStereotypePackage(proxied).definition.parameters.shape).toEqual({ type: "shape", default: ["B", 4], position: "top" })
+    expect(generateStereotypePackage(proxied).definition.parameters.values).toEqual({ type: "list", items: { type: "number", minimum: -1, maximum: 1 }, minItems: 1, maxItems: 2, default: [0.5], position: "bottom" })
+    expect(generateStereotypePackage(proxied).definition.parameters.reference).toEqual({ type: "stereotype", kind: "layer", default: { id: "core.relu", version: "^0.1.0", parameters: { slope: 0.1 } }, position: "top" })
+  })
+
+  test("rejects contradictory list bounds and defaults", () => {
+    expect(() => generateStereotypePackage(request({ parameters: [
+      { name: "values", definition: { type: "list", items: { type: "number" }, minItems: 3, maxItems: 1, position: "top" } },
+    ] }))).toThrow(/minItems/)
+    expect(() => generateStereotypePackage(request({ parameters: [
+      { name: "values", definition: { type: "list", items: { type: "number" }, maxItems: 1, default: [0, 1], position: "top" } },
+    ] }))).toThrow(/list length/)
   })
 
   test("requires unique names, explicit position, safe identity and dependencies", () => {
