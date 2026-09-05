@@ -1,6 +1,3 @@
-return function()
-  return {
-    status = "error",
-    message = "top-level Input type is supplied by the selected dataset",
-  }
+return function(context, parameters, services)
+  return services.resolve_input(parameters.binding)
 end

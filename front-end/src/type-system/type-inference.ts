@@ -3,9 +3,10 @@ import type { TensorType } from "./tensor-type"
 /** Expected semantic outcomes. Host/runtime faults are thrown separately. */
 export type TypeResult =
   | { readonly status: "success"; readonly output: TensorType }
+  | { readonly status: "unresolved"; readonly reason: string }
   | { readonly status: "error"; readonly message: string }
 
-export type InputTypeContext = { readonly kind: "input"; readonly inputs: readonly [] }
+export type InputTypeContext = { readonly kind: "input"; readonly inputs: readonly []; readonly boundary?: TensorType }
 export type LayerTypeContext = { readonly kind: "layer"; readonly inputs: readonly [TensorType] }
 export type LossTypeContext = { readonly kind: "loss"; readonly inputs: readonly [TensorType] }
 export type OutputTypeContext = { readonly kind: "output"; readonly inputs: readonly [TensorType] }

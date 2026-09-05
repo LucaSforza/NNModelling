@@ -4,7 +4,8 @@ import type { TensorType } from "./tensor-type"
 import type { TypeContext } from "./type-inference"
 import { PackageCatalog } from "./packages/catalog"
 import { PackageLoader } from "./packages/loader"
-import { LuaInferenceService, PackageRegistryService } from "./packages/cordis-services"
+import { DatasetCatalogService, DatasetSelectionService, LuaInferenceService, PackageRegistryService, type DatasetSelection } from "./packages/cordis-services"
+import type { DatasetDefinition, ResolvedDatasetContract } from "../project-workspace/dataset-contract"
 import type { PackageResourceMap, PackageResourceProvider } from "./packages/types"
 import type { Definition } from "./packages/types"
 import type { PackageIdentity } from "../core/types"
@@ -28,6 +29,7 @@ export type ActivePackageMetadata = {
 
 export type EditorInferenceState =
   | { readonly status: "unresolved"; readonly missingParameters: readonly string[] }
+  | { readonly status: "unresolved"; readonly reason: string }
   | { readonly status: "success"; readonly output: TensorType }
   | { readonly status: "error"; readonly message: string }
   | {
@@ -51,6 +53,8 @@ export class TypeSystemHost {
   private constructor(catalog: PackageCatalog) {
     new PackageRegistryService(this.context)
     new LuaInferenceService(this.context)
+    new DatasetCatalogService(this.context)
+    new DatasetSelectionService(this.context)
     const registry = this.context.get("packageRegistry", true)
     const luaInference = this.context.get("luaInference", true)
     if (!(registry instanceof PackageRegistryService) || !(luaInference instanceof LuaInferenceService)) {
@@ -126,6 +130,27 @@ export class TypeSystemHost {
     ))
   }
 
+  /** Update the stable Cordis dataset capability consumed by kind=input packages. */
+  setDatasetSelection(selection: DatasetSelection | null): void {
+    this.assertActive()
+    const service = this.context.get("datasetSelection", true)
+    if (!(service instanceof DatasetSelectionService)) throw new Error("dataset selection service is unavailable")
+    service.set(selection)
+  }
+
+  /** Replace the current project-scoped catalog without replacing Cordis services. */
+  setDatasetCatalog(definitions: readonly DatasetDefinition[]): void {
+    this.assertActive()
+    const catalog = this.context.get("datasetCatalog", true)
+    if (!(catalog instanceof DatasetCatalogService)) throw new Error("dataset catalog service is unavailable")
+    catalog.replace(definitions)
+  }
+
+  datasetContract(): ResolvedDatasetContract | undefined {
+    const service = this.context.get("datasetSelection", true)
+    return service instanceof DatasetSelectionService ? service.resolved() ?? undefined : undefined
+  }
+
   /**
    * Adapt semantic inference to editor state without manufacturing an unknown
    * tensor. Required-but-missing parameters stop before Lua invocation.
@@ -146,7 +171,10 @@ export class TypeSystemHost {
     }
 
     try {
-      return this.loader.infer(identity, context, parameters)
+      const result = this.loader.infer(identity, context, parameters)
+      return result.status === "unresolved"
+        ? { status: "unresolved", reason: result.reason }
+        : result
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       this.recordDiagnostic({

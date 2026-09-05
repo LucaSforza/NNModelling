@@ -1,9 +1,9 @@
 import type { Node } from "@xyflow/svelte"
 import type { TypeContext } from "../type-inference"
 import { TypeSystemHost } from "../host"
-import { inputsFor, nodeParameters, packageIdentity, type DatasetInferenceContext, type GraphInferenceResult, type GraphNodeResult, type TypeGraphSnapshot, type ResolvedGraphDataset } from "./types"
+import { inputsFor, nodeParameters, packageIdentity, type DatasetInferenceContext, type GraphInferenceResult, type GraphNodeResult, type TypeGraphSnapshot } from "./types"
 import { compileGraphBindings } from "./bindings"
-import { resolveDatasetContract, type DatasetDefinition } from "../../project-workspace/dataset-contract"
+import type { ResolvedDatasetContract } from "../../project-workspace/dataset-contract"
 
 /**
  * Schedules only the current DiagramCore snapshot. It owns no graph state and
@@ -13,26 +13,19 @@ export class PackageGraphScheduler {
   constructor(private readonly host: TypeSystemHost) {}
 
   infer(snapshot: TypeGraphSnapshot, datasetContext?: DatasetInferenceContext): GraphInferenceResult {
+    this.host.setDatasetSelection(datasetContext ?? null)
     const results = new Map<string, GraphNodeResult>()
     const order: string[] = []
-    let dataset: ResolvedGraphDataset | undefined
-    let datasetError: string | undefined
-    if (datasetContext) {
-      try {
-        dataset = resolveDatasetContract(datasetContext.definition, datasetContext.parameters)
-      } catch (error) {
-        datasetError = error instanceof Error ? error.message : String(error)
-      }
-    }
+    const dataset = this.host.datasetContract()
     const topLevel = snapshot.nodes.filter((node) => !node.parentId)
-    this.inferScope(topLevel, snapshot, results, order, undefined, dataset, datasetError)
+    this.inferScope(topLevel, snapshot, results, order)
 
     const topLevelIds = new Set(topLevel.map((node) => node.id))
     const outgoing = new Set(snapshot.edges
       .filter((edge) => topLevelIds.has(edge.source) && topLevelIds.has(edge.target))
       .map(edge => edge.source))
     const terminals = topLevel.filter(node => !outgoing.has(node.id)).map(node => node.id)
-    const roleInfo = this.trainingRoles(snapshot, topLevel, terminals, datasetContext?.definition, results)
+    const roleInfo = this.trainingRoles(snapshot, topLevel, terminals, dataset, results)
     const allResolved = topLevel.every(node => results.get(node.id)?.status === "success")
     const trainingComplete = allResolved && roleInfo.trainingComplete
     const complete = allResolved && (terminals.length === 1 || trainingComplete)
@@ -54,7 +47,7 @@ export class PackageGraphScheduler {
     snapshot: TypeGraphSnapshot,
     topLevel: readonly Node[],
     terminals: readonly string[],
-    dataset: DatasetDefinition | undefined,
+    dataset: ResolvedDatasetContract | undefined,
     results: ReadonlyMap<string, GraphNodeResult>,
   ) {
     const kindOf = (node: Node): string | undefined => {
@@ -128,8 +121,6 @@ export class PackageGraphScheduler {
     results: Map<string, GraphNodeResult>,
     order: string[],
     boundaryInput?: import("../tensor-type").TensorType,
-    dataset?: ResolvedGraphDataset,
-    datasetError?: string,
   ): GraphNodeResult | undefined {
     const scopeIds = new Set(scope.map((node) => node.id))
     const pending = new Map(scope.map(node => [node.id, node]))
@@ -140,7 +131,7 @@ export class PackageGraphScheduler {
       for (const node of pending.values()) {
         const dependencies = incoming(node.id).map(edge => edge.source)
         if (dependencies.some(source => pending.has(source))) continue
-        const result = this.inferNode(node, snapshot, results, boundaryInput, scopeIds, dataset, datasetError)
+        const result = this.inferNode(node, snapshot, results, boundaryInput, scopeIds)
         results.set(node.id, result)
         order.push(node.id)
         pending.delete(node.id)
@@ -171,8 +162,6 @@ export class PackageGraphScheduler {
     results: ReadonlyMap<string, GraphNodeResult>,
     boundaryInput: import("../tensor-type").TensorType | undefined,
     scopeIds: ReadonlySet<string>,
-    dataset: ResolvedGraphDataset | undefined,
-    datasetError: string | undefined,
   ): GraphNodeResult {
     const identity = packageIdentity(node)
     if (!identity) return { status: "unresolved", reason: "node has no versioned package identity" }
@@ -219,26 +208,11 @@ export class PackageGraphScheduler {
     let inputs = inputsFor(node.id, nodeEdges, results)
     if (inputs && inputs.length === 0 && boundaryInput && definition.kind !== "input") inputs = [boundaryInput]
     if (!inputs) return { status: "unresolved", reason: "one or more input regions are unresolved" }
+    let context: TypeContext
     if (definition.kind === "input") {
       if (inputs.length !== 0) return { status: "error", message: "input package cannot have graph inputs" }
-      if (boundaryInput) return { status: "success", output: boundaryInput }
-      if (datasetError) return { status: "error", message: `dataset selection is invalid: ${datasetError}` }
-      const binding = (node.data as { inputBinding?: unknown } | undefined)?.inputBinding
-      if (typeof binding !== "string" || binding.length === 0) {
-        return { status: "error", message: `top-level Input node '${node.id}' requires an input binding` }
-      }
-      const resolved = dataset?.batch.inputs[binding]
-      if (!resolved) {
-        return dataset
-          ? { status: "error", message: `Input node '${node.id}' binds '${binding}', but dataset has no batch.inputs.${binding} slot` }
-          : { status: "unresolved", reason: `dataset selection is required to resolve Input '${binding}'` }
-      }
-      // Dataset slots are the sole authority for top-level Input types. Lua
-      // is intentionally bypassed here: core.input has no type parameters.
-      return { status: "success", output: { shape: resolved.shape, dtype: resolved.dtype } }
-    }
-    let context: TypeContext
-    if (definition.kind === "layer" || definition.kind === "loss" || definition.kind === "output") {
+      context = { kind: "input", inputs: [], ...(boundaryInput ? { boundary: boundaryInput } : {}) }
+    } else if (definition.kind === "layer" || definition.kind === "loss" || definition.kind === "output") {
       if (inputs.length !== 1) return { status: "unresolved", reason: `package '${identity.id}' requires one graph input` }
       context = { kind: definition.kind, inputs: [inputs[0]!] }
     } else if (definition.kind === "join") {
@@ -252,14 +226,15 @@ export class PackageGraphScheduler {
           const children = snapshot.nodes.filter((candidate) => candidate.parentId === node.id)
           if (children.length === 0) return { status: "error", message: "subflow has no child graph" }
           const childOrder: string[] = []
-          const childResult = this.inferScope(children, snapshot, results as Map<string, GraphNodeResult>, childOrder, input, dataset, datasetError)
+          const childResult = this.inferScope(children, snapshot, results as Map<string, GraphNodeResult>, childOrder, input)
           if (!childResult) return { status: "error", message: "subflow produced no result" }
           if (childResult.status === "success") return childResult
           if (childResult.status === "error") return childResult
           if (childResult.status === "fault") return { status: "error", message: childResult.fault.message }
           if (childResult.status === "unresolved") return {
             status: "error",
-            message: "reason" in childResult ? childResult.reason : `missing parameters: ${childResult.missingParameters.join(", ")}`,
+            message: (childResult as { readonly reason?: string; readonly missingParameters?: readonly string[] }).reason
+              ?? ((childResult as { readonly missingParameters?: readonly string[] }).missingParameters?.join(", ") || "subflow result is unresolved"),
           }
           return { status: "error", message: "subflow result is unresolved" }
         },

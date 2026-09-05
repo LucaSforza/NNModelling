@@ -114,11 +114,18 @@ codes, multiple causes, warnings and source spans are not current requirements.
 
 The implemented [dataset-driven Input decision](../decisions/dataset-driven-input-types.md)
 changes the top-level boundary without changing package-owned propagation:
-`core.input` carries only a named dataset binding, and the selected
-dataset's slot will supply its shape and dtype. With no selected dataset,
-Input-dependent regions remain unresolved while topology and independent
-regions may still be analyzed. Internal subflow boundaries continue to receive
-their types from graph composition and do not resolve dataset slots directly.
+`core.input` carries only a named binding in `params.binding`, and the selected
+dataset's slot supplies its shape and dtype through the stable Cordis
+`datasetSelection` service. `kind: "input"` package Fibers inject that service,
+while the loader exposes only `services.resolve_input(binding)` to Lua. With no
+selected dataset, Input-dependent regions remain unresolved while topology and
+independent regions may still be analyzed. Internal subflow boundaries receive
+their types from graph composition through the same package rule and do not
+resolve dataset slots directly. The scheduler has no special dataset/Input
+bypass. `data.inputBinding` is not part of the package-node contract: imports
+carrying it are rejected and it is never emitted, migrated or read.
+Compiled package graphs carry the canonical named-root mapping in
+`graph.inputBindings`; bundle nodes do not repeat the binding per node.
 
 ## Graph semantics
 

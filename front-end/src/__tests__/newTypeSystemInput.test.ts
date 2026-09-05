@@ -9,13 +9,13 @@ afterEach(async () => {
 })
 
 describe("new package type-system input slice", () => {
-  test("activates core.input with a parameterless definition", async () => {
+  test("activates core.input with a named binding parameter", async () => {
     const host = await TypeSystemHost.create([coreInputPackage])
     hosts.push(host)
     await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
     expect(host.isActive({ id: "core.input", version: "0.1.0", name: "Input" })).toBe(true)
-    expect(host.packageDefinition({ id: "core.input", version: "0.1.0", name: "Input" })?.parameters).toEqual({})
+    expect(host.packageDefinition({ id: "core.input", version: "0.1.0", name: "Input" })?.parameters).toHaveProperty("binding")
 
     await host.dispose()
     expect(host.isActive({ id: "core.input", version: "0.1.0", name: "Input" })).toBe(false)
@@ -26,7 +26,7 @@ describe("new package type-system input slice", () => {
     hosts.push(host)
     await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
-    expect(host.packageDefinition({ id: "core.input", version: "0.1.0", name: "Input" })?.parameters).toEqual({})
+    expect(host.packageDefinition({ id: "core.input", version: "0.1.0", name: "Input" })?.parameters).toHaveProperty("binding")
   })
 
   test("does not invoke legacy Input Lua for dataset-scoped inference", async () => {
@@ -39,7 +39,7 @@ describe("new package type-system input slice", () => {
     hosts.push(host)
     await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
-    expect(host.packageDefinition({ id: "core.input", version: "0.1.0", name: "Input" })?.parameters).toEqual({})
+    expect(host.packageDefinition({ id: "core.input", version: "0.1.0", name: "Input" })?.parameters).toHaveProperty("binding")
   })
 
   test("rolls back activation when the Lua entrypoint cannot load", async () => {

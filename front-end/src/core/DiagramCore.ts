@@ -32,7 +32,6 @@ import {
   routePointsFromData,
   sameRoutePoints,
 } from "./edgeRoute";
-import { migrateLegacyInputNodes } from "../project-workspace/dataset-migration";
 
 /** Convert Svelte's reactive proxy payloads into persisted JSON primitives. */
 function clonePackageParams(value: Record<string, unknown> | undefined): Record<string, unknown> {
@@ -68,11 +67,11 @@ function validatePackageNode(node: unknown): void {
     throw new Error("Package node rejected: data.package must contain exact id and version");
   }
   const data = (node as { data: Record<string, unknown> }).data;
+  if (Object.prototype.hasOwnProperty.call(data, "inputBinding")) {
+    throw new Error("Legacy data.inputBinding is not supported; use data.params.binding");
+  }
   if (hasLegacyParameterWrapper(data.params)) {
     throw new Error("Legacy frontend parameters rejected: values must be primitive package values");
-  }
-  if (data.inputBinding !== undefined && (typeof data.inputBinding !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(data.inputBinding))) {
-    throw new Error("Input binding must be a valid batch slot name");
   }
 }
 
@@ -97,7 +96,7 @@ function canonicalizePackageNode(node: Node): Node {
 }
 
 function persistedNode(node: Node): Node {
-  const data = node.data as Record<string, unknown>;
+  const data = stripLegacyInputBinding(node).data as Record<string, unknown>;
   const packageValue = data.package;
   if (!packageValue || typeof packageValue !== "object") return node;
   const identity = packageValue as Record<string, unknown>;
@@ -109,6 +108,14 @@ function persistedNode(node: Node): Node {
       package: { id: identity.id, version: identity.version },
     },
   };
+}
+
+/** Legacy boundary metadata never crosses a persistence boundary. */
+function stripLegacyInputBinding(node: Node): Node {
+  const data = node.data as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(data, "inputBinding")) return node;
+  const { inputBinding: _legacyInputBinding, ...canonicalData } = data;
+  return { ...node, data: canonicalData };
 }
 
 function normalizedLayoutDirection(value: unknown): LayoutDirection {
@@ -298,15 +305,10 @@ export class DiagramCore {
     kind: "input" | "layer" | "loss" | "output",
     x: number,
     y: number,
-    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[]; inputBinding?: string },
+    config?: { name?: string; color?: string; width?: number; height?: number; params?: Record<string, unknown>; parentId?: string; wheelAdapters?: readonly string[] },
   ): Node {
-    const inputBinding = kind === "input" && config?.parentId === undefined
-      ? (config?.inputBinding ?? "input")
-      : config?.inputBinding;
-    if (inputBinding !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(inputBinding)) {
-      throw new Error("Input binding must be a valid batch slot name");
-    }
     this._captureUndoState();
+    const params = clonePackageParams(config?.params);
     const finalName = config?.name?.trim() || identity.name || identity.id;
     const newNode: Node = {
       id: crypto.randomUUID(),
@@ -319,8 +321,7 @@ export class DiagramCore {
         package: { ...identity, name: identity.name || identity.id },
         name: finalName,
         color: config?.color ?? "#ffffff",
-        params: clonePackageParams(config?.params),
-        ...(inputBinding === undefined ? {} : { inputBinding }),
+        params,
         ...(config?.wheelAdapters ? { wheelAdapters: [...config.wheelAdapters] } : {}),
       },
     };
@@ -344,7 +345,6 @@ export class DiagramCore {
       inputsCount?: number;
       parentId?: string;
       wheelAdapters?: readonly string[];
-      inputBinding?: string;
     },
   ): Node {
     if (kind === "join") {
@@ -369,7 +369,6 @@ export class DiagramCore {
       inputsCount?: number;
       parentId?: string;
       wheelAdapters?: readonly string[];
-      inputBinding?: string;
     },
   ): Node {
     this._captureUndoState();
@@ -406,7 +405,6 @@ export class DiagramCore {
       params?: Record<string, unknown>;
       parentId?: string;
       wheelAdapters?: readonly string[];
-      inputBinding?: string;
     },
   ): Node {
     this._captureUndoState();
@@ -450,7 +448,6 @@ export class DiagramCore {
       params?: Record<string, unknown>;
       inputsCount?: number;
       wheelAdapters?: readonly string[];
-      inputBinding?: string;
     },
   ): void {
     const node = this.nodes.find((candidate) => candidate.id === id);
@@ -461,9 +458,6 @@ export class DiagramCore {
     if (hasLegacyParameterWrapper(config.params)) {
       throw new Error("package parameters must use primitive values");
     }
-    if (config.inputBinding !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.inputBinding)) {
-      throw new Error("Input binding must be a valid batch slot name");
-    }
     this._captureUndoState();
     this.nodes = this.nodes.map((candidate) => {
       if (candidate.id !== id) return candidate;
@@ -473,9 +467,10 @@ export class DiagramCore {
         name: config.name ?? candidate.data.name,
         label: kind === "subflow" ? (config.name ?? candidate.data.label ?? candidate.data.name) : candidate.data.label,
         color: config.color ?? candidate.data.color,
-        params: config.params === undefined ? candidate.data.params : clonePackageParams(config.params),
+        params: config.params === undefined
+          ? clonePackageParams(candidate.data.params as Record<string, unknown> | undefined)
+          : clonePackageParams(config.params),
         ...(config.wheelAdapters === undefined ? {} : { wheelAdapters: [...config.wheelAdapters] }),
-        ...(config.inputBinding === undefined ? {} : { inputBinding: config.inputBinding }),
         ...(kind === "join" ? { inputsCount: config.inputsCount ?? candidate.data.inputsCount ?? 2 } : {}),
       };
       return {
@@ -929,7 +924,7 @@ export class DiagramCore {
 
   public getSnapshot(): DiagramCoreSnapshot {
     return {
-      nodes: [...this.nodes],
+      nodes: this.nodes.map(stripLegacyInputBinding),
       // Svelte Flow can supply a valid automatic edge before it has route
       // metadata. Snapshots must still use the canonical explicit empty route
       // so undo/redo changes the renderer's route state in both directions.
@@ -942,7 +937,7 @@ export class DiagramCore {
   public restoreSnapshot(snapshot: DiagramCoreSnapshot): void {
     this._assertNotNotifying();
     const manifest = parseModelManifest(snapshot.manifest);
-    this.nodes = [...snapshot.nodes];
+    this.nodes = snapshot.nodes.map(stripLegacyInputBinding);
     this.edges = snapshot.edges.map((edge) => normalizeEditableEdge(edge));
     this.layoutDirection = normalizedLayoutDirection(
       (snapshot as DiagramCoreSnapshot & { layoutDirection?: unknown }).layoutDirection,
@@ -1022,9 +1017,7 @@ export class DiagramCore {
       };
       const manifest = parseModelManifest(imported.manifest);
       imported.nodes.forEach(validatePackageNode);
-      const normalizedNodes = [...migrateLegacyInputNodes(
-        imported.nodes.map((node) => canonicalizePackageNode(node as Node)),
-      )];
+      const normalizedNodes = imported.nodes.map((node) => canonicalizePackageNode(node as Node));
       // Normalize edge handle IDs before validation, but keep the imported
       // graph entirely off-state until containment validation succeeds.
       const normalizedEdges = imported.edges.map((candidate) => {
@@ -1058,7 +1051,7 @@ export class DiagramCore {
     this._assertNotNotifying();
     const manifest = parseModelManifest(snapshot.manifest);
     this._captureUndoState();
-    this.nodes = [...snapshot.nodes];
+    this.nodes = snapshot.nodes.map(stripLegacyInputBinding);
     this.edges = snapshot.edges.map((edge) => normalizeEditableEdge(edge));
     this.layoutDirection = normalizedLayoutDirection(snapshot.layoutDirection);
     this.modelManifest = manifest;

@@ -661,14 +661,13 @@ function invalid(field: string, message: string): TrainingConfigurationError {
 }
 
 function snapshotNode(node: Node): Node {
-  const data = node.data as { package?: unknown; params?: unknown; wheelAdapters?: unknown; inputBinding?: unknown } | undefined;
+  const data = node.data as { package?: unknown; params?: unknown; wheelAdapters?: unknown } | undefined;
   return {
     id: node.id, type: node.type, parentId: node.parentId ?? null,
     data: {
       package: data?.package,
       params: data?.params ?? {},
       wheelAdapters: Array.isArray(data?.wheelAdapters) ? [...data.wheelAdapters] : [],
-      ...(typeof data?.inputBinding === "string" ? { inputBinding: data.inputBinding } : {}),
     },
   } as unknown as Node;
 }

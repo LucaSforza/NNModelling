@@ -37,20 +37,25 @@ describe("package/runtime diagnostics", () => {
     expect(diagnostics.snapshot()).toEqual([])
   })
 
-  test("dataset-scoped Input inference bypasses legacy Lua", async () => {
+  test("dataset-scoped Input inference uses the injected boundary capability", async () => {
     const host = await TypeSystemHost.create([{
       resources: {
         ...coreInputPackage.resources as Record<string, string>,
-        "inference.lua": "return function() error('diagnostic Lua cause') end",
+        "inference.lua": "return function(context, parameters, services) return services.resolve_input(parameters.binding) end",
       },
     }])
     hosts.push(host)
     await host.activate({ id: "core.input", version: "0.1.0", name: "Input" })
 
     const scheduler = new PackageGraphScheduler(host)
+    host.setDatasetCatalog([{
+      schemaVersion: 1, id: "test.images", version: "1.0.0", name: "Images",
+      parameters: [{ name: "B", type: "integer", required: true }],
+      batch: { inputs: { image: { shape: ["B", 4], dtype: "float32" } }, targets: {} },
+    }])
     const result = scheduler.infer({
       nodes: [{ id: "input-node", type: "custom", position: { x: 0, y: 0 }, data: {
-        package: { id: "core.input", version: "0.1.0", name: "Input" }, inputBinding: "image", params: {},
+        package: { id: "core.input", version: "0.1.0", name: "Input" }, params: { binding: "image" },
       } }],
       edges: [],
     }, {

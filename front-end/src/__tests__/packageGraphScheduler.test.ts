@@ -18,7 +18,7 @@ function node(id: string, packageId: string, params: Record<string, unknown> = {
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: ref(packageId), name: id, params, ...(packageId === "core.input" ? { inputBinding: "input" } : {}) },
+    data: { package: ref(packageId), name: id, params: packageId === "core.input" ? { ...params, binding: "input" } : params },
   } as Node
 }
 
@@ -33,9 +33,10 @@ describe("package graph failure scope", () => {
       definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", 4], dtype: "float32" as const } }, targets: {} } },
       parameters: { B: 1 },
     }
+    host.setDatasetCatalog([datasetContext.definition])
     const result = scheduler.infer({
       nodes: [
-        node("input", "core.input", { shape: ["B", 4], dtype: "float32" }),
+        node("input", "core.input"),
         node("good", "core.fork"),
         node("missing", "external.layer"),
         node("after-missing", "external.layer"),

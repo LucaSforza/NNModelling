@@ -130,6 +130,7 @@ export type PackageExportInfo = {
 export type InferenceServices = {
   readonly inferSubflow?: (input: TensorType) => TypeResult
   readonly inferStereotype?: (reference: StereotypeReference, inputs: readonly TensorType[]) => TypeResult
+  readonly resolveInput?: (binding: string) => TypeResult
 }
 
 export type InferenceRule = (

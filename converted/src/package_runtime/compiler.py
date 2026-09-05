@@ -66,6 +66,8 @@ def _compile_programs(graph: Mapping[str, Any], catalog: dict[tuple[str, str], V
     nodes = {node.get("id"): node for node in raw_nodes if isinstance(node, Mapping) and isinstance(node.get("id"), str)}
     if len(nodes) != len(raw_nodes):
         raise PackageValidationError(f"{scope} graph contains invalid or duplicate node ids")
+    if any(isinstance(node, Mapping) and "inputBinding" in node for node in raw_nodes):
+        raise PackageValidationError(f"{scope} graph nodes must not contain per-node inputBinding")
     edges = _validate_edges(raw_edges, nodes, scope)
     _ensure_acyclic(nodes, edges, scope)
     roots = [node_id for node_id, incoming in edges.items() if not incoming]
@@ -102,7 +104,15 @@ def _compile_programs(graph: Mapping[str, Any], catalog: dict[tuple[str, str], V
         for node_id, node in nodes.items()
         if kinds.get(node_id) == "loss"
     }
-    graph_module = _GraphModule(nodes, edges, modules, kinds, tuple(roots), objective_bindings)
+    graph_module = _GraphModule(
+        nodes,
+        edges,
+        modules,
+        kinds,
+        tuple(roots),
+        objective_bindings,
+        _input_binding_map(graph, scope),
+    )
     programs = _make_programs(graph_module)
     if scope == "root":
         programs._set_adapters(_compile_adapters(graph, catalog, graph_module, programs._objective_nodes))
@@ -131,9 +141,10 @@ def _validate_input_contracts(
         return
     if not isinstance(raw_contracts, Mapping):
         raise PackageValidationError(f"{scope} graph inputContracts must be a named object")
+    binding_by_node = _input_binding_map(graph, scope)
     expected_names: set[str] = set()
     for node_id in roots:
-        binding = nodes[node_id].get("inputBinding")
+        binding = binding_by_node.get(node_id)
         if not isinstance(binding, str) or not binding:
             raise PackageValidationError(f"{scope} input node {node_id} has no input binding")
         if binding in expected_names:
@@ -156,8 +167,29 @@ def _validate_input_contracts(
         if not isinstance(raw_bindings, list):
             raise PackageValidationError(f"{scope} graph inputBindings must be a list")
         declared = {(item.get("nodeId"), item.get("name")) for item in raw_bindings if isinstance(item, Mapping)}
-        if declared != {(node_id, nodes[node_id].get("inputBinding")) for node_id in roots}:
+        if declared != {(node_id, binding_by_node.get(node_id)) for node_id in roots}:
             raise PackageValidationError(f"{scope} graph inputBindings do not match input roots")
+
+
+def _input_binding_map(graph: Mapping[str, Any], scope: str) -> dict[str, str]:
+    """Read the canonical graph-level input binding contract."""
+
+    raw_bindings = graph.get("inputBindings")
+    if raw_bindings is None:
+        return {}
+    if not isinstance(raw_bindings, list):
+        raise PackageValidationError(f"{scope} graph inputBindings must be a list")
+    result: dict[str, str] = {}
+    for item in raw_bindings:
+        if not isinstance(item, Mapping):
+            raise PackageValidationError(f"{scope} graph contains an invalid input binding")
+        node_id, name = item.get("nodeId"), item.get("name")
+        if not isinstance(node_id, str) or not node_id or not isinstance(name, str) or not name:
+            raise PackageValidationError(f"{scope} graph contains an invalid input binding")
+        if node_id in result:
+            raise PackageValidationError(f"{scope} graph has duplicate input binding for node {node_id}")
+        result[node_id] = name
+    return result
 
 
 def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[str, str], ValidatedPackage]) -> Mapping[str, Any]:
@@ -203,10 +235,7 @@ def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[s
             package_value = _resolve_package(catalog, package)
             node_type = node.get("type")
             if package_value.kind == "input" or node_type == "input":
-                input_node: dict[str, Any] = {"id": node["id"], "type": "input"}
-                if isinstance(node.get("inputBinding"), str):
-                    input_node["inputBinding"] = node["inputBinding"]
-                normalized_nodes.append(input_node)
+                normalized_nodes.append({"id": node["id"], "type": "input"})
                 continue
             runtime_type = "layer" if node_type == "custom" else node_type
             if runtime_type not in {"layer", "join", "subflow"}:
@@ -217,8 +246,6 @@ def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[s
                 "package": {"id": package_value.package_id, "version": package_value.version},
                 "parameters": dict(node.get("params", node.get("parameters", {}))),
             }
-            if isinstance(node.get("inputBinding"), str):
-                normalized["inputBinding"] = node["inputBinding"]
             if "wheelAdapters" in node:
                 normalized["wheelAdapters"] = node["wheelAdapters"]
             if runtime_type == "subflow":
@@ -660,11 +687,21 @@ class ObjectiveProgram:
 
 
 class _GraphModule(torch.nn.Module):
-    def __init__(self, nodes: dict[str, Mapping[str, Any]], edges: dict[str, list[dict[str, Any]]], modules: dict[str, torch.nn.Module], kinds: dict[str, str | None], roots: tuple[str, ...], objective_bindings: dict[str, tuple[_ObjectiveBinding, ...]]) -> None:
+    def __init__(
+        self,
+        nodes: dict[str, Mapping[str, Any]],
+        edges: dict[str, list[dict[str, Any]]],
+        modules: dict[str, torch.nn.Module],
+        kinds: dict[str, str | None],
+        roots: tuple[str, ...],
+        objective_bindings: dict[str, tuple[_ObjectiveBinding, ...]],
+        input_bindings: dict[str, str],
+    ) -> None:
         super().__init__()
         self.modules_by_id = torch.nn.ModuleDict(modules)
         self._nodes, self._edges, self._kinds, self._roots = nodes, edges, kinds, roots
         self._objective_bindings = objective_bindings
+        self._input_bindings = input_bindings
 
     def forward(self, value: torch.Tensor) -> torch.Tensor:
         """Execute a nested graph as a normal PyTorch submodule."""
@@ -682,7 +719,7 @@ class _GraphModule(torch.nn.Module):
         excluded: set[str],
     ) -> dict[str, torch.Tensor]:
         values = {
-            root: _root_input(value, self._nodes[root], root, len(self._roots))
+            root: _root_input(value, self._input_bindings.get(root), root, len(self._roots))
             for root in self._roots
         }
         pending = list(self._roots)
@@ -729,7 +766,7 @@ class _GraphModule(torch.nn.Module):
 
 def _root_input(
     value: Mapping[str, torch.Tensor] | torch.Tensor,
-    node: Mapping[str, Any],
+    binding: str | None,
     node_id: str,
     root_count: int,
 ) -> torch.Tensor:
@@ -739,12 +776,11 @@ def _root_input(
         return value
     if not isinstance(value, Mapping):
         raise PackageValidationError(f"input binding for node {node_id} must be a tensor map")
-    name = node.get("inputBinding")
-    if not isinstance(name, str) or not name:
+    if not isinstance(binding, str) or not binding:
         raise PackageValidationError(f"input node {node_id} has no input binding")
-    tensor = value.get(name)
+    tensor = value.get(binding)
     if not isinstance(tensor, torch.Tensor):
-        raise PackageValidationError(f"batch.inputs is missing slot: {name}")
+        raise PackageValidationError(f"batch.inputs is missing slot: {binding}")
     return tensor
 
 

@@ -40,7 +40,6 @@ Licensed under the GNU General Public License v3 or later.
     height: 60,
     params: {} as Record<string, unknown>,
     wheelAdapters: [] as string[],
-    inputBinding: "input",
   });
   // Svelte Flow owns live resizer dimensions. Keep them unless the user
   // explicitly edits the corresponding form field; otherwise saving a label
@@ -108,7 +107,6 @@ Licensed under the GNU General Public License v3 or later.
       form.wheelAdapters = Array.isArray(node.data.wheelAdapters)
         ? node.data.wheelAdapters.filter((name: unknown): name is string => typeof name === "string")
         : [];
-      form.inputBinding = typeof node.data.inputBinding === "string" ? node.data.inputBinding : "input";
       return;
     }
 
@@ -125,7 +123,6 @@ Licensed under the GNU General Public License v3 or later.
     form.height = 60;
     form.params = {};
     form.wheelAdapters = [];
-    form.inputBinding = "input";
   }
 
   function onPackageChange(metadata: ActivePackageMetadata | null) {
@@ -140,7 +137,6 @@ Licensed under the GNU General Public License v3 or later.
     form.height = metadata.definition.view.height;
     form.params = initialPackageParameters(metadata.definition);
     form.wheelAdapters = [];
-    if (metadata.definition.kind === "input") form.inputBinding = "input";
   }
 
   async function handleCreate() {
@@ -154,7 +150,6 @@ Licensed under the GNU General Public License v3 or later.
         height: form.height,
         params: form.params,
         wheelAdapters: form.wheelAdapters,
-        inputBinding: packageSelection.definition.kind === "input" ? form.inputBinding : undefined,
         inputsCount: definition.kind === "join" ? 2 : undefined,
       });
       resetForm();
@@ -173,7 +168,6 @@ Licensed under the GNU General Public License v3 or later.
         height: geometryDirty.height ? form.height : currentNode?.height,
         params: form.params,
         wheelAdapters: form.wheelAdapters,
-        inputBinding: packageSelection.definition.kind === "input" ? form.inputBinding : undefined,
         inputsCount: Number(selectedNode.data.inputsCount ?? 2),
       });
       // Keep the selected-node panel in sync even when Svelte has not yet
@@ -261,7 +255,7 @@ Licensed under the GNU General Public License v3 or later.
         nodeId: node.id,
         severity: "unresolved",
         title: "Incomplete",
-        message: "reason" in state ? state.reason : `Missing: ${state.missingParameters.join(", ")}`,
+        message: "missingParameters" in state ? `Missing: ${state.missingParameters.join(", ")}` : state.reason,
       });
     }
     return diagnostics;
@@ -315,12 +309,6 @@ Licensed under the GNU General Public License v3 or later.
 
       {#if packageSelection}
         <div class="package-kind">Kind: {packageSelection.definition.kind}</div>
-        {#if packageSelection.definition.kind === "input"}
-          <label>Dataset input binding
-            <input value={form.inputBinding} oninput={(event) => { form.inputBinding = (event.currentTarget as HTMLInputElement).value; handleManualUpdate(); }} aria-describedby="input-binding-help" />
-          </label>
-          <small id="input-binding-help">Il tipo viene derivato dal dataset selezionato.</small>
-        {/if}
         <div class="params-section">
           <h4>Parametri</h4>
           {#each packageParameters as [key, config] (key)}

@@ -28,7 +28,6 @@ export type PackageBundleGraph = {
     readonly params: Readonly<Record<string, unknown>>
     readonly wheelAdapters: readonly PackageBundleAdapterBinding[]
     readonly parentId: string | null
-    readonly inputBinding?: string
   }[]
   readonly edges: readonly {
     readonly id: string
@@ -71,7 +70,7 @@ export type PackageBundleV1 = {
   readonly digest: string
 }
 
-type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[]; inputBinding?: string } }
+type PackageNode = Node & { data?: { package?: PackageIdentity; params?: Record<string, unknown>; wheelAdapters?: readonly string[] } }
 type SemanticGraph = Omit<PackageBundleGraph, "nodes" | "inputBindings" | "inputContracts" | "objectiveBindings"> & {
   readonly nodes: readonly (Omit<PackageBundleGraph["nodes"][number], "wheelAdapters"> & { readonly wheelAdapters: readonly string[] })[]
 }
@@ -146,9 +145,6 @@ function materializeGraph(
   }
   const nodes = graph.nodes.map((node) => ({
     ...node,
-    ...(bindings?.inputBindings.find((binding) => binding.nodeId === node.id) === undefined
-      ? {}
-      : { inputBinding: bindings.inputBindings.find((binding) => binding.nodeId === node.id)!.name }),
     wheelAdapters: node.wheelAdapters.map((name) => {
       if (!name.trim()) throw new Error(`graph node '${node.id}' has an empty wheel adapter binding`)
       const declaration = definitions.get(node.package.id)?.get(name)
@@ -279,7 +275,6 @@ function semanticGraph(nodes: readonly Node[], edges: readonly Edge[]): Semantic
       params: (node.data?.params ?? {}) as Readonly<Record<string, unknown>>,
       wheelAdapters: [...(node.data?.wheelAdapters ?? [])].sort(),
       parentId: node.parentId ?? null,
-      ...(typeof node.data?.inputBinding === "string" ? { inputBinding: node.data.inputBinding } : {}),
     }
   }).sort((left, right) => left.id.localeCompare(right.id))
 

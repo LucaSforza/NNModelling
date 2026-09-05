@@ -40,6 +40,7 @@ describe("package model editor acceptance", () => {
     const loaded = new MemoryDiagram()
     expect(loaded.importFromJson(persisted)).toBe(true)
 
+    runtime.setDatasetCatalog([snapshot.datasetContext.definition])
     const result = runtime.infer({ nodes: loaded.nodes, edges: loaded.edges }, snapshot.datasetContext)
     expect(result.complete).toBe(true)
     expect(result.terminals).toEqual([scenario.output])
@@ -64,8 +65,7 @@ describe("package model editor acceptance", () => {
       data: {
         package: identity(packageId, name),
         name: id,
-        params,
-        ...(packageId === "core.input" ? { inputBinding: "input" } : {}),
+        params: packageId === "core.input" ? { ...params, binding: "input" } : params,
         ...(packageId === "core.add" ? { inputsCount: 2 } : {}),
       },
     })
@@ -102,6 +102,7 @@ describe("package model editor acceptance", () => {
       definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }, { name: "T", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", "T", 128], dtype: "float32" as const } }, targets: {} } },
       parameters: { B: 1, T: 1 },
     }
+    runtime.setDatasetCatalog([datasetContext.definition])
     const concatResult = runtime.infer({ nodes, edges }, datasetContext)
     expect(concatResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: [1, 1, 64], dtype: "float32" } })
 
@@ -118,6 +119,7 @@ describe("package model editor acceptance", () => {
     runtime = await EditorTypeSystemRuntime.create()
     const source = new MemoryDiagram()
     const input = source.addPackageNode({ id: "core.input", version: "0.1.0", name: "Input" }, "input", 0, 0, {
+      params: { binding: "input" },
     })
     const linear = source.addPackageNode({ id: "core.linear", version: "0.1.0", name: "Linear" }, "layer", 0, 100, {
       params: { in_features: 8, out_features: 4, dtype: "float32" },
@@ -127,6 +129,7 @@ describe("package model editor acceptance", () => {
       definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", 8], dtype: "float32" as const } }, targets: {} } },
       parameters: { B: 1 },
     }
+    runtime.setDatasetCatalog([datasetContext.definition])
     expect(runtime.infer({ nodes: source.nodes, edges: source.edges }, datasetContext).nodes.get(linear.id)).toEqual({
       status: "success", output: { shape: [1, 4], dtype: "float32" },
     })

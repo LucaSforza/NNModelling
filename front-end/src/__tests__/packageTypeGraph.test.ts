@@ -24,7 +24,7 @@ function packageNode(id: string, identity: PackageIdentity, params: Record<strin
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: identity, name: identity.name, params, ...(identity.id === "core.input" ? { inputBinding: "input" } : {}) },
+    data: { package: identity, name: identity.name, params: identity.id === "core.input" ? { ...params, binding: "input" } : params },
   } as Node
 }
 
@@ -41,6 +41,7 @@ async function createScheduler(): Promise<PackageGraphScheduler> {
   await host.activate(forkIdentity)
   await host.activate({ id: "core.output", version: "0.1.0", name: "Output" })
   await host.activate({ id: "core.mse-loss", version: "0.1.0", name: "MSE Loss" })
+  host.setDatasetCatalog([datasetContext.definition])
   return new PackageGraphScheduler(host)
 }
 

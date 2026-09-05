@@ -42,7 +42,7 @@ const layer: PackageExportInfo = {
 }
 
 function node(id: string, identity: { id: string; version: string; name: string }, parentId?: string): Node {
-  return { id, type: "custom", position: { x: 100, y: 100 }, ...(parentId ? { parentId } : {}), data: { package: identity, params: { width: 4, labels: ["x", "y"] }, ...(identity.id === "core.input" ? { inputBinding: "input" } : {}) } }
+  return { id, type: "custom", position: { x: 100, y: 100 }, ...(parentId ? { parentId } : {}), data: { package: identity, params: identity.id === "core.input" ? { binding: "input" } : { width: 4, labels: ["x", "y"] } } }
 }
 
 function resourceExport(id: string, version: string, dependencies: Record<string, string>, helper: Uint8Array): PackageExportInfo {
@@ -139,7 +139,8 @@ describe("package bundle v1", () => {
     expect(first.graph.nodes[0]?.id).toBe("input")
     expect(first.graph.inputBindings).toEqual([{ nodeId: "input", name: "input" }])
     expect(first.graph.objectiveBindings).toEqual([])
-    expect(first.graph.nodes[0]?.inputBinding).toBe("input")
+    expect(first.graph.nodes[0]).not.toHaveProperty("inputBinding")
+    expect(first.graph.nodes[0]?.params.binding).toBe("input")
     expect(first.graph.edges[0]).toMatchObject({ targetHandle: "in-0", sourceHandle: "out" })
     expect(first.graph.nodes.find((item) => item.id === "layer")?.wheelAdapters).toEqual([{
       name: "decode", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" },
@@ -192,7 +193,7 @@ describe("package bundle v1", () => {
       ["input", { status: "success" as const, output: { shape: ["B", 4], dtype: "float32" as const } }],
       ["layer", { status: "success" as const, output: { shape: ["B", 7], dtype: "float32" as const } }],
     ]) }
-    const bound = { ...node("input", { id: "core.input", version: "0.1.0", name: "Input" }), data: { package: { id: "core.input", version: "0.1.0", name: "Input" }, inputBinding: "input", wheelAdapters: [] } }
+    const bound = { ...node("input", { id: "core.input", version: "0.1.0", name: "Input" }), data: { package: { id: "core.input", version: "0.1.0", name: "Input" }, params: { binding: "input" }, wheelAdapters: [] } }
     const layerNode = { ...node("layer", { id: "test.layer", version: "1.0.0", name: "Layer" }), data: { package: { id: "test.layer", version: "1.0.0", name: "Layer" }, wheelAdapters: ["decode"] } }
     await expect(buildPackageBundle([bound, layerNode], [{ id: "edge", source: "input", target: "layer", sourceHandle: "out", targetHandle: "in" }], new Map([["core.input", input], ["test.layer", layer]]), incompatible)).rejects.toThrow(
       "wheel adapter 'decode' output schema is incompatible",

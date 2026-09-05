@@ -23,6 +23,7 @@ import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
 import type { ModelBundleResources, PackageCatalogMetadata, PreparedModelScope } from "./type-system/editor-runtime";
 import type { PackageExportInfo } from "./type-system/packages/types";
 import type { PackageIdentity } from "./core/types";
+import type { DatasetDefinition } from "./project-workspace/dataset-contract";
 import type { DiagramCoreSnapshot } from "./core/types";
 import {
   PackageRuntimeDiagnosticCollection,
@@ -125,6 +126,11 @@ export class Diagram extends DiagramCore {
     if (this.packageTypeRuntime) this.refreshTypes();
   }
 
+  /** Keep the stable Cordis dataset catalog aligned with the active project. */
+  public setDatasetCatalog(definitions: readonly DatasetDefinition[]): void {
+    if (this.packageTypeRuntime) this.packageTypeRuntime.setDatasetCatalog(definitions)
+  }
+
   /** Presentation docking is intentionally limited to ordinary layer nodes. */
   public isLayerNode(node: Node): boolean {
     const identity = node.data?.package as { id?: unknown; version?: unknown } | undefined;
@@ -165,8 +171,8 @@ export class Diagram extends DiagramCore {
             input.definition.kind,
             centerX,
             50,
-            { params: Object.fromEntries(Object.entries(input.definition.parameters).flatMap(([key, definition]) =>
-              definition.default === undefined ? [] : [[key, structuredClone(definition.default)]])), inputBinding: "input" },
+            { params: { ...Object.fromEntries(Object.entries(input.definition.parameters).flatMap(([key, definition]) =>
+              definition.default === undefined ? [] : [[key, structuredClone(definition.default)]])), binding: "input" } },
           );
           this._undoStack = [];
           this._redoStack = [];

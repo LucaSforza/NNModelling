@@ -57,10 +57,20 @@ def test_compile_rejects_unresolved_named_input_contract() -> None:
     source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
     package = _package("demo.identity", source)
     graph = _graph("demo.identity")
-    graph["nodes"][0]["inputBinding"] = "image"
     graph["inputBindings"] = [{"nodeId": "input", "name": "image"}]
     graph["inputContracts"] = {"image": {"type": "tensor", "shape": ["B", "features"], "dtype": "float32"}}
     with pytest.raises(PackageValidationError, match="unresolved dimensions"):
+        compile_package_graph({"packages": [package], "graph": graph})
+
+
+def test_compile_rejects_per_node_input_binding() -> None:
+    source = "import torch\ndef build(parameters, context, services): return torch.nn.Identity()\n"
+    package = _package("demo.identity", source)
+    graph = _graph("demo.identity")
+    graph["nodes"][0]["inputBinding"] = "image"
+    graph["inputBindings"] = [{"nodeId": "input", "name": "image"}]
+    graph["inputContracts"] = {"image": {"type": "tensor", "shape": ["B", 1], "dtype": "float32"}}
+    with pytest.raises(PackageValidationError, match="per-node inputBinding"):
         compile_package_graph({"packages": [package], "graph": graph})
 
 
@@ -74,8 +84,8 @@ def build(parameters, context, services): return Add()
     package = _package("demo.add", source, definition={"kind": "join"})
     graph = {
         "nodes": [
-            {"id": "left", "type": "input", "inputBinding": "left"},
-            {"id": "right", "type": "input", "inputBinding": "right"},
+            {"id": "left", "type": "input"},
+            {"id": "right", "type": "input"},
             {"id": "add", "type": "join", "package": {"id": "demo.add", "version": "0.1.0"}},
         ],
         "edges": [
@@ -108,10 +118,12 @@ def test_normalized_input_node_preserves_named_binding() -> None:
         "packages": [input_package, layer_package],
         "graph": {
             "nodes": [
-                {"id": "input", "type": "custom", "package": {"id": "demo.input", "version": "0.1.0"}, "inputBinding": "image"},
+                {"id": "input", "type": "custom", "package": {"id": "demo.input", "version": "0.1.0"}},
                 {"id": "layer", "type": "custom", "package": {"id": "demo.identity", "version": "0.1.0"}},
             ],
             "edges": [{"source": "input", "target": "layer", "targetHandle": "in-0"}],
+            "inputBindings": [{"nodeId": "input", "name": "image"}],
+            "inputContracts": {"image": {"type": "tensor", "shape": ["B", 1], "dtype": "float32"}},
         },
     }
 

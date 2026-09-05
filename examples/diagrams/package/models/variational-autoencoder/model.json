@@ -17,8 +17,9 @@
         },
         "name": "Input",
         "color": "#ffffff",
-        "params": {},
-        "inputBinding": "image"
+        "params": {
+          "binding": "image"
+        }
       },
       "measured": {
         "width": 30,

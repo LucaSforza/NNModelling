@@ -19,8 +19,8 @@ def test_vae_fixture_uses_dataset_input_contract() -> None:
     dataset = _json(DATASET / "dataset.json")
     input_node = next(node for node in model["nodes"] if node["id"] == "input")
 
-    assert input_node["data"]["inputBinding"] == "image"
-    assert input_node["data"]["params"] == {}
+    assert input_node["data"]["params"] == {"binding": "image"}
+    assert "inputBinding" not in input_node["data"]
     assert "inferenceAdapter" not in dataset
 
     parameters = {parameter["name"]: parameter for parameter in dataset["parameters"]}

@@ -13,6 +13,8 @@ export type LuaInferenceServices = {
     reference: unknown,
     inputs: readonly TensorType[],
   ) => TypeResult
+  /** Narrow external-boundary capability exposed to kind=input packages. */
+  readonly resolveInput?: (binding: string) => TypeResult
 }
 
 export type LuaInferenceLimits = {
@@ -192,6 +194,13 @@ function createServices(services: LuaInferenceServices): Record<string, unknown>
     }
   }
 
+  if (services.resolveInput) {
+    result.resolve_input = (binding: unknown) => {
+      if (typeof binding !== "string") return { status: "error", message: "input binding must be a string" }
+      return services.resolveInput!(binding)
+    }
+  }
+
   return result
 }
 
@@ -345,8 +354,11 @@ function validateResult(value: unknown): TypeResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("inference result must be a table")
   }
-  const result = value as { status?: unknown; output?: unknown; message?: unknown }
+  const result = value as { status?: unknown; output?: unknown; message?: unknown; reason?: unknown }
   if (result.status === "success") return { status: "success", output: copyTensor(result.output) }
+  if (result.status === "unresolved" && typeof result.reason === "string") {
+    return { status: "unresolved", reason: result.reason }
+  }
   if (result.status === "error" && typeof result.message === "string") {
     return { status: "error", message: result.message }
   }

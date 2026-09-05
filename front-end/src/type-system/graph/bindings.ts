@@ -1,5 +1,5 @@
 import type { Node } from "@xyflow/svelte"
-import type { DatasetDefinition, DatasetTensorContract } from "../../project-workspace/dataset-contract"
+import type { DatasetDefinition, DatasetTensorContract, ResolvedDatasetContract } from "../../project-workspace/dataset-contract"
 import type { PackageIdentity } from "../../core/types"
 import type { TensorType } from "../tensor-type"
 import type { Definition, PackageExportInfo } from "../packages/types"
@@ -44,7 +44,7 @@ export function compileGraphBindings(
   nodes: readonly Node[],
   definitions: ReadonlyMap<string, Definition> | PackageDefinitionResolver,
   inference?: ReadonlyMap<string, GraphNodeResult>,
-  dataset?: DatasetDefinition,
+  dataset?: DatasetDefinition | ResolvedDatasetContract,
 ): CompiledGraphBindings {
   const topLevelInputs = nodes
     .filter((node) => !node.parentId)
@@ -172,7 +172,11 @@ function resolveDefinition(
 }
 
 function inputBindingOf(node: Node): string | undefined {
-  const value = (node.data as { inputBinding?: unknown } | undefined)?.inputBinding
+  const data = node.data as { params?: unknown } | undefined
+  const params = data?.params
+  const value = params && typeof params === "object" && !Array.isArray(params)
+    ? (params as { binding?: unknown }).binding
+    : undefined
   return typeof value === "string" ? value : undefined
 }
 
@@ -188,7 +192,7 @@ function validateDatasetInput(
   node: Node,
   bindingName: string,
   inference: ReadonlyMap<string, GraphNodeResult> | undefined,
-  dataset: DatasetDefinition,
+  dataset: DatasetDefinition | ResolvedDatasetContract,
   diagnostics: GraphBindingDiagnostic[],
 ): void {
   const expected = dataset.batch.inputs[bindingName]

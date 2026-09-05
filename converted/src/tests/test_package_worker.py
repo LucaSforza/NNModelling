@@ -29,7 +29,7 @@ DEFINITION = DatasetDefinition(
 
 def training_package() -> dict[str, object]:
     return {"graph": {
-        "nodes": [{"id": "input", "type": "input", "inputBinding": "image"}],
+        "nodes": [{"id": "input", "type": "input"}],
         "inputBindings": [{"nodeId": "input", "name": "image", "contract": {"shape": ["B", 1], "dtype": "float32"}}],
         "objectiveBindings": [],
     }}
@@ -146,7 +146,7 @@ def test_materialize_dataset_inputs_resolves_symbols_and_keeps_batch_dynamic() -
         ),
     )
     package = {"graph": {
-        "nodes": [{"id": "input", "type": "input", "inputBinding": "image"}],
+        "nodes": [{"id": "input", "type": "input"}],
         "inputBindings": [{"nodeId": "input", "name": "image"}],
         "edges": [],
     }}

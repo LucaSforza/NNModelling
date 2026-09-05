@@ -18,7 +18,7 @@ function input(id: string, binding: string): Node {
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: ref("core.input"), inputBinding: binding, params: {} },
+    data: { package: ref("core.input"), params: { binding } },
   } as Node
 }
 
@@ -54,23 +54,27 @@ describe("dataset-scoped graph Input inference", () => {
     await host.activate(ref("core.input"))
     const scheduler = new PackageGraphScheduler(host)
     const nodes = [input("image", "image"), input("mask", "mask")]
-    const first = scheduler.infer({ nodes, edges: [] }, {
+    const firstSelection = {
       definition: { ...dataset(2, 28).definition, batch: { inputs: {
         image: { shape: ["B", 28], dtype: "float32" as const },
         mask: { shape: ["B", 28], dtype: "uint8" as const },
       }, targets: {} } },
       parameters: { B: 2 },
-    })
+    }
+    host.setDatasetCatalog([firstSelection.definition])
+    const first = scheduler.infer({ nodes, edges: [] }, firstSelection)
     expect(first.nodes.get("image")).toEqual({ status: "success", output: { shape: [2, 28], dtype: "float32" } })
     expect(first.nodes.get("mask")).toEqual({ status: "success", output: { shape: [2, 28], dtype: "uint8" } })
 
-    const second = scheduler.infer({ nodes, edges: [] }, {
+    const secondSelection = {
       definition: { ...dataset(4, 64).definition, batch: { inputs: {
         image: { shape: ["B", 64], dtype: "float16" as const },
         mask: { shape: ["B", 64], dtype: "int64" as const },
       }, targets: {} } },
       parameters: { B: 4 },
-    })
+    }
+    host.setDatasetCatalog([secondSelection.definition])
+    const second = scheduler.infer({ nodes, edges: [] }, secondSelection)
     expect(second.nodes.get("image")).toEqual({ status: "success", output: { shape: [4, 64], dtype: "float16" } })
     expect(second.nodes.get("mask")).toEqual({ status: "success", output: { shape: [4, 64], dtype: "int64" } })
   })
@@ -79,13 +83,34 @@ describe("dataset-scoped graph Input inference", () => {
     const host = await TypeSystemHost.create([coreInputPackage])
     hosts.push(host)
     await host.activate(ref("core.input"))
-    const result = new PackageGraphScheduler(host).infer({ nodes: [input("image", "image")], edges: [] }, {
+    const selection = {
       ...dataset(0, 28),
       parameters: { B: 0 },
-    })
+    }
+    host.setDatasetCatalog([selection.definition])
+    const result = new PackageGraphScheduler(host).infer({ nodes: [input("image", "image")], edges: [] }, selection)
     expect(result.nodes.get("image")).toEqual(expect.objectContaining({
       status: "error",
       message: expect.stringContaining("invalid-dimension-value"),
     }))
+  })
+
+  test("invalidates a selected dataset when the catalog removes it", async () => {
+    const host = await TypeSystemHost.create([coreInputPackage])
+    hosts.push(host)
+    await host.activate(ref("core.input"))
+    const scheduler = new PackageGraphScheduler(host)
+    const selection = dataset(2, 28)
+    const snapshot = { nodes: [input("image", "image")], edges: [] }
+    host.setDatasetCatalog([selection.definition])
+    expect(scheduler.infer(snapshot, selection).nodes.get("image")).toEqual({
+      status: "success", output: { shape: [2, 28], dtype: "float32" },
+    })
+
+    host.setDatasetCatalog([])
+    expect(scheduler.infer(snapshot, selection).nodes.get("image")).toEqual({
+      status: "unresolved",
+      reason: "selected dataset 'demo.images@1.0.0' is not present in the dataset catalog",
+    })
   })
 })

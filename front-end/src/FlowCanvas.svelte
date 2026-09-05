@@ -191,6 +191,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     ];
     projectDatasetResources = new Map(projectDatasetResources).set(reference.ref, generated);
     trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+    diagram.setDatasetCatalog(projectDatasetInfos.map((dataset) => dataset.definition));
   }
 
   async function authorDataset(request: DatasetAuthoringRequest): Promise<void> {
@@ -211,6 +212,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     nextResources.delete(reference.ref);
     projectDatasetResources = nextResources;
     trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+    diagram.setDatasetCatalog(projectDatasetInfos.map((dataset) => dataset.definition));
   }
 
   // Stage package-aware import before exposing Svelte Flow. New projects carry
@@ -230,12 +232,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           projectDatasetInfos = loadedProjectDatasetResources.infos;
           projectDatasetResources = loadedProjectDatasetResources.resources;
           trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
+          diagram.setDatasetCatalog(projectDatasetInfos.map((dataset) => dataset.definition));
         } catch (error) {
           // Keep the graph editable when project-owned dataset files are
           // incomplete; expose the failure through the existing diagnostics UI.
           projectDatasetInfos = [];
           projectDatasetResources = new Map();
           trainingController.setProjectDatasets([], new Map());
+          diagram.setDatasetCatalog([]);
           projectResourceError = saveErrorMessage(error);
         }
 

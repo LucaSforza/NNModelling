@@ -39,8 +39,9 @@ export function scenarioSnapshot(
         package: { id: metadata.id, version: metadata.version, name: metadata.definition.name },
         name: modelNode.id,
         color: metadata.definition.view.color,
-        params: metadata.definition.kind === "input" ? {} : structuredClone(modelNode.parameters),
-        ...(metadata.definition.kind === "input" ? { inputBinding: modelNode.id } : {}),
+        params: metadata.definition.kind === "input"
+          ? { ...structuredClone(modelNode.parameters), binding: modelNode.id }
+          : structuredClone(modelNode.parameters),
         ...(metadata.definition.kind === "join" ? { inputsCount: modelNode.inputs.length } : {}),
       },
     }

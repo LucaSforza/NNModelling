@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-09-03
+updated: 2026-09-05
 ---
 
 # Dataset-driven model input types
@@ -22,10 +22,28 @@ produce a different valid model instance.
 
 ## Decision
 
-A top-level `Input` node declares only its stable named `inputBinding`.
-`core.input` has no `shape` or `dtype` parameters. During dataset-scoped type
-inference, the bound entry in `dataset.batch.inputs` is the sole authority for
-the Input node's tensor shape and dtype.
+A top-level `Input` node declares only its stable named binding in the ordinary
+package parameter map (`params.binding`). `core.input` has no `shape` or `dtype`
+parameters. During dataset-scoped type inference, the bound entry in
+`dataset.batch.inputs` is the sole authority for the Input node's tensor shape
+and dtype. The legacy `data.inputBinding` field is not part of the contract:
+imports carrying it are rejected, and no runtime migration or fallback
+consumes it.
+
+The browser owns a stable Cordis `datasetCatalog` service and a stable
+`datasetSelection` service. Dataset definitions and the active selection are
+dynamic service contents: creating, editing, deleting or changing a project
+does not replace the service or unload `core.input`. Selection resolution must
+use the exact selected identity currently present in `datasetCatalog`; catalog
+replacement/removal invalidates the resolved contract and leaves Inputs
+unresolved. A missing selection is likewise unresolved.
+
+Packages whose definition has `kind: "input"` inject `datasetSelection` during
+Fiber activation. The package loader adapts that service to the narrow Lua
+capability `services.resolve_input(binding)`; package Lua cannot access Cordis,
+the catalog, project files or training data. The graph scheduler invokes the
+normal package-owned inference rule for Inputs, including internal subflow
+boundaries, and contains no dataset/Input bypass.
 
 Every symbolic dimension used by a dataset input or target slot MUST name an
 existing dataset parameter with the same spelling. That parameter MUST have
@@ -45,7 +63,9 @@ the previous dataset-scoped inference result and recompiles the model. Existing
 checkpoint compatibility remains strict: weights may be reused only when the
 resulting architecture fingerprint and state tensor contracts still match.
 
-The portable wheel does not contain or require the training dataset. It embeds
+The compiled package graph carries named roots only in `graph.inputBindings`;
+per-node binding metadata is not part of the bundle node contract. The portable
+wheel does not contain or require the training dataset. It embeds
 the resolved named input contract needed by `predict_tensor()` and the existing
 stereotype-selected wheel adapters needed by `predict()`. Input preprocessing
 is model behavior and therefore belongs to those model/package adapters, not
@@ -78,6 +98,9 @@ tensor and not by itself a malformed graph.
   names but different shapes, dtypes and dimension values.
 - Dataset selection becomes required for complete Input-dependent inference,
   compilation and training.
+- Dataset catalog/selection lifecycle is Cordis-owned, while dataset contract
+  resolution remains deterministic and package inference receives only the
+  minimum boundary capability.
 - Model export remains dataset-independent because it freezes the resolved
   input boundary and model-owned adapters.
 - Existing diagrams migrate `Input.params.shape` and `Input.params.dtype` out
@@ -93,6 +116,16 @@ tensor and not by itself a malformed graph.
 - Keeping `shape` and `dtype` as hidden Input fallbacks.
 - Allowing datasets to inject executable inference adapters into wheels.
 - Changing target ownership or prediction/objective separation.
+
+## Reference contract transition
+
+The pinned `stereotype-lab` reference describes an Input rule that derives a
+tensor from Input-owned `shape` and `dtype` parameters. That is intentionally
+superseded at the NNModelling integration boundary by this accepted
+dataset-owned contract. The reference remains the semantic oracle for the
+package/runtime result model; the Cordis dataset capability and named external
+boundary are NNModelling integration behavior, not a production dependency on
+the reference implementation.
 
 ## Affected contracts
 

@@ -468,6 +468,7 @@ export class BrowserRPCHandler {
     const training = this.training;
     if (!training) return;
     const snapshot = training.snapshot();
+    this.diagram.setDatasetCatalog(snapshot.datasets.map((dataset) => dataset.definition));
     const selected = snapshot.datasets.find((dataset) => dataset.reference.ref === snapshot.config.selectedDataset);
     this.diagram.setDatasetInferenceContext(selected
       ? { definition: selected.definition, parameters: snapshot.config.datasetParams as Record<string, DatasetParameterValue> }
@@ -668,7 +669,6 @@ export class BrowserRPCHandler {
         inputsCount: ((params.inputsCount ?? config.inputsCount) as number | undefined) ?? (metadata.definition.kind === "join" ? 2 : undefined),
         parentId: (params.parentId ?? config.parentId) as string | undefined,
         wheelAdapters: (params.wheelAdapters ?? config.wheelAdapters) as string[] | undefined,
-        inputBinding: (params.inputBinding ?? config.inputBinding) as string | undefined,
       };
       const create = () => {
         const beforeCount = this.diagram.nodes.length;
@@ -680,13 +680,11 @@ export class BrowserRPCHandler {
           name: added.data.name ?? packageSpec.name,
           type: added.type ?? "custom",
           package: added.data.package,
-          ...(typeof added.data.inputBinding === "string" ? { inputBinding: added.data.inputBinding } : {}),
         };
       };
       const activatedCreate = (this.diagram as unknown as { addActivatedPackageNode?: Function }).addActivatedPackageNode;
       if (activatedCreate) return activatedCreate.call(this.diagram, identity, metadata.definition.kind, x, y, nodeConfig).then((added: Node) => ({
         nodeId: added.id, name: added.data.name ?? packageSpec.name, type: added.type ?? "custom", package: added.data.package,
-        ...(typeof added.data.inputBinding === "string" ? { inputBinding: added.data.inputBinding } : {}),
       }));
       if (metadata.state === undefined || metadata.state === "active") return create();
       return this.diagram.activatePackage(identity).then(create);

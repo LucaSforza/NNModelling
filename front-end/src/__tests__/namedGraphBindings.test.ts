@@ -23,7 +23,7 @@ const dataset = parseDatasetDefinition({
 function node(id: string, packageId: string, params: Record<string, unknown> = {}, inputBinding?: string): Node {
   return {
     id, type: "custom", position: { x: 0, y: 0 },
-    data: { package: { id: packageId, version: "0.1.0", name: id }, params, ...(inputBinding === undefined ? {} : { inputBinding }) },
+    data: { package: { id: packageId, version: "0.1.0", name: id }, params: inputBinding === undefined ? params : { ...params, binding: inputBinding } },
   } as Node
 }
 

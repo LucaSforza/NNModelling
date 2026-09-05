@@ -71,7 +71,7 @@ export class PackageLoader {
         }
       }
       const allowed = new Set([...Object.keys(active.packageInfo.manifest.dependencies), ...referenceKinds.keys()])
-      const services = {
+      const inferenceServices = {
         inferSubflow: context.kind === "subflow" ? context.inferSubflow : undefined,
         ...(allowed.size > 0 ? {
           inferStereotype: (reference: StereotypeReference, inputs: readonly TensorType[]) => this.inferReference(allowed, referenceKinds, referenceRanges, reference, inputs),
@@ -79,7 +79,7 @@ export class PackageLoader {
       }
       // Deliberately no catch around the rule: a runtime/Lua fault is a host
       // failure and must stay distinguishable from an expected TypeResult.
-      return active.rule(context, resolved, services)
+      return active.rule(context, resolved, inferenceServices)
     } finally {
       this.inferenceDepth--
     }
@@ -113,6 +113,7 @@ export class PackageLoader {
     try {
       fiber = this.context.plugin({
         name: id,
+        ...(packageInfo.definition.kind === "input" ? { inject: ["datasetSelection"] } : {}),
         apply: async (pluginContext) => {
           for (const [dependency, range] of Object.entries(packageInfo.manifest.dependencies)) {
             const resolvedKey = "resolvedDependencies" in packageInfo ? packageInfo.resolvedDependencies[dependency] : undefined
@@ -132,8 +133,17 @@ export class PackageLoader {
           const loaded = await services.luaInference.load(packageInfo, inference.file)
           pluginContext.effect(() => () => loaded.dispose(), `package '${id}' Lua inference`)
 
-          const unregister = services.packageRegistry.register({ packageInfo, rule: loaded.infer })
-          const active: Active = { packageInfo, rule: loaded.infer, fiber, leases: 0 }
+          const rule: InferenceRule = packageInfo.definition.kind === "input"
+            ? (inferenceContext, parameters, inferenceServices) => loaded.infer(inferenceContext, parameters, {
+                ...inferenceServices,
+                resolveInput: (binding) => pluginContext.datasetSelection.resolveInput(
+                  binding,
+                  inferenceContext.kind === "input" ? inferenceContext.boundary : undefined,
+                ),
+              })
+            : loaded.infer
+          const unregister = services.packageRegistry.register({ packageInfo, rule })
+          const active: Active = { packageInfo, rule, fiber, leases: 0 }
           this.active.set(id, active)
           pluginContext.effect(() => () => {
             this.active.delete(id)

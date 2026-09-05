@@ -58,8 +58,6 @@ export type PackageNodeData = {
   readonly params?: Readonly<Record<string, unknown>>
   /** Explicit names of wheel adapters selected for this concrete node. */
   readonly wheelAdapters?: readonly string[]
-  /** Required batch slot for a top-level Input node. */
-  readonly inputBinding?: string
 }
 
 export function selectedWheelAdapters(node: Node): readonly string[] {

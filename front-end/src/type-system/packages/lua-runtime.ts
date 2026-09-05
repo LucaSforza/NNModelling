@@ -23,6 +23,9 @@ export class LuaPackageInferenceRuntime implements InferenceRuntime {
                 ? services.inferStereotype!(reference, inputs)
                 : { status: "error", message: "invalid stereotype reference" },
             } : {}),
+            ...(services.resolveInput ? {
+              resolveInput: (binding) => services.resolveInput!(binding),
+            } : {}),
           })
         } catch (cause) {
           // Preserve the thrown outcome as a fault; PackageLoader intentionally

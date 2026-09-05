@@ -132,7 +132,7 @@ def test_classifier_wheel_exposes_logits_without_a_target(tmp_path: Path) -> Non
 def test_wheel_freezes_named_inputs_and_keeps_batch_dynamic(tmp_path: Path) -> None:
     bundle = _bundle(
         [
-            {"id": "input", "type": "input", "inputBinding": "features"},
+            {"id": "input", "type": "input"},
             {"id": "linear", "type": "layer", "package": {"id": "core.linear", "version": "0.1.0"}, "parameters": {"in_features": 2, "out_features": 2}},
             {"id": "output", "type": "layer", "package": {"id": "core.output", "version": "0.1.0"}, "parameters": {}},
         ],
