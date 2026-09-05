@@ -5,6 +5,7 @@ import {
   parseDatasetDefinition,
   parseDatasetReference,
   parseModelManifest,
+  resolveDatasetContract,
   serializeDatasetDefinition,
 } from "../project-workspace/dataset-contract"
 import { validateDatasetSelection } from "../training/dataset-contract"
@@ -29,6 +30,17 @@ describe("dataset and manifest contracts", () => {
     expect(serialized).toContain('\n  "batch":')
     expect(serialized.endsWith("\n")).toBe(true)
     expect(Object.keys(parsed.batch.inputs)).toEqual(["tokens"])
+  })
+
+  test("accepts and resolves defaults for required parameters", () => {
+    const parsed = parseDatasetDefinition({
+      ...DEFINITION,
+      parameters: [{ name: "B", type: "integer", required: true, default: 32 }],
+      batch: { inputs: { tokens: { shape: ["B"], dtype: "int64" } }, targets: {} },
+    })
+
+    expect(parsed.parameters).toEqual([{ name: "B", type: "integer", required: true, default: 32 }])
+    expect(resolveDatasetContract(parsed).parameters).toEqual({ B: 32 })
   })
 
   test("accepts the exhaustive v2 manifest without losing packages", () => {
@@ -64,7 +76,7 @@ describe("dataset and manifest contracts", () => {
     [{ ...DEFINITION, extra: true }, "unknown-field"],
     [{ ...DEFINITION, batch: { inputs: { x: { shape: ["B"], dtype: "complex128" } }, targets: {} } }, "unsupported-dtype"],
     [{ ...DEFINITION, batch: { inputs: { x: { shape: ["B"], dtype: "float32" } }, targets: { x: { shape: ["B"], dtype: "float32" } } } }, "duplicate-entry"],
-    [{ ...DEFINITION, parameters: [{ name: "bad", type: "integer", required: true, default: 1 }] }, "invalid-parameter"],
+    [{ ...DEFINITION, parameters: [{ name: "bad", type: "integer", required: false, default: "not an integer" }] }, "invalid-parameter"],
   ])("rejects malformed definitions before persistence", (value, code) => {
     expect(() => parseDatasetDefinition(value)).toThrowError(DatasetContractError)
     try { parseDatasetDefinition(value) } catch (error) { expect((error as DatasetContractError).code).toBe(code) }

@@ -155,7 +155,7 @@
     const classCountValue = typeof classCount === "number" ? String(classCount) : classCount ?? "";
     const classNamesValue = typeof classNames === "string" ? classNames : "";
     const parsedParameters = parameters.map((row) => {
-      if (row.required || !row.defaultValue.trim()) {
+      if (!row.defaultValue.trim()) {
         return { name: row.name, type: row.type, required: row.required };
       }
       if (row.type === "boolean") {

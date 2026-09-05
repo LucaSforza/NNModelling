@@ -197,7 +197,6 @@ export function parseDatasetDefinition(value: unknown): DatasetDefinition {
     if (typeof required !== "boolean") fail("required must be a boolean", "invalid-parameter", `parameters[${index}].required`)
     const defaultValue = parameter.default === undefined ? undefined : scalar(parameter.default, `parameters[${index}].default`)
     if (defaultValue !== undefined && !parameterValueMatches(parameterType, defaultValue)) fail("default does not match parameter type", "invalid-parameter", `parameters[${index}].default`)
-    if (required && defaultValue !== undefined) fail("required parameters cannot have a default", "invalid-parameter", `parameters[${index}]`)
     return { name: parameterName, type: parameterType, required, ...(defaultValue === undefined ? {} : { default: defaultValue }) }
   })
   const batchObject = record(object.batch, "batch")
@@ -289,7 +288,6 @@ function validateDimensionParameters(
     if (!parameter) fail(`symbolic dimension '${symbol}' requires a same-named parameter`, "missing-parameter-value", `parameters.${symbol}`)
     if (parameter.type !== "integer") fail(`symbolic dimension '${symbol}' requires an integer parameter`, "invalid-parameter", `parameters.${symbol}.type`)
     if (!parameter.required) fail(`symbolic dimension '${symbol}' requires a required parameter`, "invalid-parameter", `parameters.${symbol}.required`)
-    if (parameter.default !== undefined) fail(`symbolic dimension '${symbol}' cannot have a default`, "invalid-parameter", `parameters.${symbol}.default`)
   }
 }
 

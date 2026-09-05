@@ -28,6 +28,7 @@
   "name": "Autoencoder MNIST",
   "parameters": [
     {
+      "default": 32,
       "name": "B",
       "required": true,
       "type": "integer"

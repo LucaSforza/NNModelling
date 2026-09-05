@@ -101,7 +101,6 @@ def test_slots_reject_unknown_dtypes_and_duplicates() -> None:
 @pytest.mark.parametrize("parameter, message", [
     ({"name": "T", "type": "number", "required": True}, "symbolic dimension"),
     ({"name": "T", "type": "integer", "required": False}, "symbolic dimension"),
-    ({"name": "T", "type": "integer", "required": True, "default": 4}, "required parameters"),
 ])
 def test_symbolic_dimensions_require_required_integer_parameters(parameter: dict[str, object], message: str) -> None:
     with pytest.raises((ValidationError, DatasetContractError), match=message):
@@ -110,6 +109,14 @@ def test_symbolic_dimensions_require_required_integer_parameters(parameter: dict
             "parameters": [parameter],
             "batch": {"inputs": {"tokens": {"shape": ["B", "T"], "dtype": "int64"}}, "targets": {}},
         })
+
+
+def test_symbolic_dimensions_accept_required_integer_defaults() -> None:
+    definition = DatasetDefinition.model_validate({
+        **_definition(),
+        "parameters": [{"name": "B", "type": "integer", "required": True, "default": 32}, {"name": "T", "type": "integer", "required": True}],
+    })
+    assert definition.parameters[0].default == 32
 
 
 def test_symbolic_dimensions_require_positive_values() -> None:

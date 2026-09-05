@@ -24,7 +24,7 @@ def test_vae_fixture_uses_dataset_input_contract() -> None:
     assert "inferenceAdapter" not in dataset
 
     parameters = {parameter["name"]: parameter for parameter in dataset["parameters"]}
-    assert parameters["B"] == {"name": "B", "type": "integer", "required": True}
+    assert parameters["B"] == {"name": "B", "type": "integer", "required": True, "default": 32}
     assert dataset["batch"]["inputs"]["image"] == {
         "shape": ["B", 1, 28, 28],
         "dtype": "float32",

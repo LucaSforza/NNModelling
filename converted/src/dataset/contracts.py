@@ -86,8 +86,6 @@ class DatasetParameter(BaseModel):
 
     @model_validator(mode="after")
     def valid_default(self) -> "DatasetParameter":
-        if self.required and self.default is not None:
-            raise DatasetContractError("required parameters cannot have a default", "invalid-parameter", self.name)
         if self.default is not None:
             valid = (
                 self.type == "string" and isinstance(self.default, str)
@@ -185,7 +183,7 @@ class DatasetDefinition(BaseModel):
                     "missing-parameter-value",
                     f"parameters.{symbol}",
                 )
-            if parameter.type != "integer" or not parameter.required or parameter.default is not None:
+            if parameter.type != "integer" or not parameter.required:
                 raise DatasetContractError(
                     f"symbolic dimension '{symbol}' requires a required integer parameter",
                     "invalid-parameter",
