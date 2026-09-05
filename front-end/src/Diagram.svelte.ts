@@ -128,7 +128,11 @@ export class Diagram extends DiagramCore {
 
   /** Keep the stable Cordis dataset catalog aligned with the active project. */
   public setDatasetCatalog(definitions: readonly DatasetDefinition[]): void {
-    if (this.packageTypeRuntime) this.packageTypeRuntime.setDatasetCatalog(definitions)
+    if (!this.packageTypeRuntime) return
+    this.packageTypeRuntime.setDatasetCatalog(definitions)
+    // Catalog replacement changes the Input capability immediately. Keep the
+    // visible result in lockstep with the authoritative DiagramCore state.
+    this.refreshTypes()
   }
 
   /** Presentation docking is intentionally limited to ordinary layer nodes. */
