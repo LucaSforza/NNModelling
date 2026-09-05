@@ -4,6 +4,8 @@ import { coerceTrainingValue } from "../training/coerce";
 describe("coerceTrainingValue", () => {
   it("converts canonical dataset parameter types and aliases", () => {
     expect(coerceTrainingValue("64", "integer")).toBe(64);
+    expect(coerceTrainingValue(1, "integer")).toBe(1);
+    expect(coerceTrainingValue(0.8, "number")).toBe(0.8);
     expect(coerceTrainingValue("0.8", "number")).toBe(0.8);
     expect(coerceTrainingValue("true", "boolean")).toBe(true);
     expect(coerceTrainingValue("false", "bool")).toBe(false);
