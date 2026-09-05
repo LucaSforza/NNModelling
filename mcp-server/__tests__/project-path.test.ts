@@ -56,6 +56,26 @@ describe("project path boundary", () => {
     }
   })
 
+  test("reopens replaced binary resources while preserving untouched files", async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), "nnm-project-"))
+    const projectPath = path.join(parent, "demo")
+    await fs.mkdir(projectPath)
+    try {
+      const modelJson = JSON.stringify({ nodes: [], edges: [], manifest: { schemaVersion: 1, id: "demo", version: "1.0.0", name: "Demo" } })
+      await applyProjectResource(projectPath, parent, { kind: "write", path: "model.json", encoding: "utf8", data: modelJson })
+      await applyProjectResource(projectPath, parent, { kind: "write", path: "datasets/demo/data/train.bin", encoding: "base64", data: "AQID" })
+      await applyProjectResource(projectPath, parent, { kind: "write", path: "datasets/demo/data/untouched.bin", encoding: "base64", data: "BAUG" })
+      await applyProjectResource(projectPath, parent, { kind: "write", path: "datasets/demo/data/train.bin", encoding: "base64", data: "BwgJ" })
+
+      const reopened = await openProjectAtPath(projectPath, parent)
+      expect(reopened.resources["datasets/demo/data/train.bin"]).toEqual({ encoding: "base64", data: "BwgJ" })
+      expect(reopened.resources["datasets/demo/data/untouched.bin"]).toEqual({ encoding: "base64", data: "BAUG" })
+      expect(await fs.readFile(path.join(projectPath, "datasets/demo/data/untouched.bin"))).toEqual(Buffer.from([4, 5, 6]))
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true })
+    }
+  })
+
   test("rejects resource traversal and project-root deletion", () => {
     expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "../outside")).toThrow("below the project")
     expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "")).toThrow("non-empty")

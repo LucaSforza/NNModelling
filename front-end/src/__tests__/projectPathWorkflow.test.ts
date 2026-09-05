@@ -1,7 +1,18 @@
 import { describe, expect, test } from "vitest"
 import { createPathProjectSession, type ProjectPathPayload } from "../project-workspace/path"
+import { ProjectDatasetAuthoringCoordinator } from "../project-workspace/dataset-authoring"
 
 const MODEL = JSON.stringify({ manifest: { schemaVersion: 2, id: "demo", version: "0.1.0", name: "Demo", customPackages: [], customDatasets: [] }, nodes: [], edges: [] })
+const DATASET_REQUEST = {
+  id: "demo.remote",
+  version: "1.0.0",
+  directory: "datasets/remote",
+  name: "Remote",
+  parameters: [],
+  inputs: [{ name: "image", shape: ["B", 1, 2, 2], dtype: "float32" as const }],
+  targets: [],
+  dataFiles: [{ path: "sample.bin", bytes: Uint8Array.from([1, 2, 3]) }],
+}
 
 describe("MCP-selected project workspace", () => {
   test("keeps handles local and forwards ordered model saves", async () => {
@@ -75,5 +86,27 @@ describe("MCP-selected project workspace", () => {
     const names: string[] = []
     for await (const [name] of datasets.entries!()) names.push(name)
     expect(names).toEqual(["demo"])
+  })
+
+  test("keeps the dataset directory and manifest when remote removal is rejected", async () => {
+    let rejectRemoval = false
+    const session = createPathProjectSession({
+      projectPath: "/projects/demo",
+      modelJson: MODEL,
+      resources: { "model.json": { encoding: "utf8", data: MODEL } },
+    }, async (operation) => {
+      if (rejectRemoval && operation.kind === "remove") throw new Error("bridge disconnected")
+    })
+    const coordinator = new ProjectDatasetAuthoringCoordinator(session)
+    await coordinator.author(DATASET_REQUEST)
+    rejectRemoval = true
+
+    const target = { id: DATASET_REQUEST.id, version: DATASET_REQUEST.version, path: DATASET_REQUEST.directory }
+    await expect(coordinator.delete(target)).rejects.toThrow("bridge disconnected")
+    expect(coordinator.listProjectDatasets()).toEqual([target])
+    const datasets = await session.directory.getDirectoryHandle("datasets")
+    await expect(datasets.getDirectoryHandle("remote")).resolves.toBeDefined()
+    const model = await (await session.directory.getFileHandle("model.json")).getFile()
+    expect(JSON.parse(await model.text!()).manifest.customDatasets).toEqual([target])
   })
 })
