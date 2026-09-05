@@ -13,6 +13,7 @@ describe("coerceTrainingValue", () => {
   it("keeps incomplete drafts explicit and rejects malformed values", () => {
     expect(coerceTrainingValue("", "integer")).toBeUndefined();
     expect(coerceTrainingValue("", "boolean")).toBeUndefined();
+    expect(() => coerceTrainingValue("3.5", "integer")).toThrow(/intero/);
     expect(() => coerceTrainingValue("1.2", "integer")).toThrow(/intero/);
     expect(() => coerceTrainingValue("not-a-number", "number")).toThrow(/numero/);
     expect(() => coerceTrainingValue("yes", "boolean")).toThrow(/true/);

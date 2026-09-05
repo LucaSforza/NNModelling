@@ -197,13 +197,13 @@
   });
 
   function syncConfigFromDraft(): void {
-    const typedDatasetParams = Object.fromEntries(
-      Object.entries(datasetParams).map(([key, value]) => {
-        const parameter = selectedDatasetInfo?.definition.parameters.find((candidate) => candidate.name === key);
-        return [key, parameter ? coerceTrainingValue(value, parameter.type) : value];
-      }),
-    );
     try {
+      const typedDatasetParams = Object.fromEntries(
+        Object.entries(datasetParams).map(([key, value]) => {
+          const parameter = selectedDatasetInfo?.definition.parameters.find((candidate) => candidate.name === key);
+          return [key, parameter ? coerceTrainingValue(value, parameter.type) : value];
+        }),
+      );
       controller.updateConfig({ selectedDataset, datasetParams: typedDatasetParams, seed: coerceTrainingValue(seed, "integer") as number,
         optimizerTarget, learningRate: coerceTrainingValue(learningRate, "number") as number,
         maxEpochs: coerceTrainingValue(maxEpochs, "integer") as number, accelerator,
