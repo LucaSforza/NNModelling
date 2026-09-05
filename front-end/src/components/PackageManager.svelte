@@ -2,8 +2,8 @@
   import "../styles/package-manager.css";
   import DatasetForm from "./DatasetForm.svelte";
   import StereotypeForm from "./StereotypeForm.svelte";
-  import type { DatasetAuthoringRequest } from "../project-workspace/dataset-authoring";
-  import type { DatasetDefinition, DatasetReference } from "../project-workspace/dataset-contract";
+  import type { DatasetAuthoringRequest, GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
+  import type { ModelDatasetReference } from "../project-workspace/dataset-contract";
   import type { InstalledPackageRecord } from "../type-system/packages/types";
   import type { StereotypeAuthoringRequest } from "../stereotype-authoring";
 
@@ -12,9 +12,10 @@
   interface Props {
     packages: readonly PackageManagerPackage[];
     onAuthoringRequest?: (request: StereotypeAuthoringRequest) => Promise<void> | void;
-    projectDatasets?: readonly (DatasetReference & { readonly name?: string })[];
-    projectDefinitions?: readonly DatasetDefinition[];
+    projectDatasets?: readonly GeneratedDatasetResources[];
     onDatasetAuthoringRequest?: (request: DatasetAuthoringRequest) => Promise<void> | void;
+    onDatasetUpdateRequest?: (target: ModelDatasetReference, request: DatasetAuthoringRequest) => Promise<void> | void;
+    onDatasetDeleteRequest?: (target: ModelDatasetReference) => Promise<void> | void;
     /** Compatibility index until the canvas integration task removes old callers. */
     [key: string]: unknown;
   }
@@ -23,8 +24,9 @@
     packages,
     onAuthoringRequest,
     projectDatasets = [],
-    projectDefinitions = [],
     onDatasetAuthoringRequest,
+    onDatasetUpdateRequest,
+    onDatasetDeleteRequest,
   }: Props = $props();
   let bundled = $derived(packages.filter((item) => item.source === "bundled"));
   let project = $derived(packages.filter((item) => item.source === "model"));
@@ -84,8 +86,9 @@
   {:else}
     <DatasetForm
       {projectDatasets}
-      {projectDefinitions}
       onAuthoringRequest={onDatasetAuthoringRequest}
+      onUpdateRequest={onDatasetUpdateRequest}
+      onDeleteRequest={onDatasetDeleteRequest}
     />
   {/if}
 

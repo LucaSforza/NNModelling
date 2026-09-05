@@ -16,15 +16,9 @@
         },
         "name": "Input",
         "color": "#ffffff",
-        "params": {
-          "shape": [
-            "B",
-            128
-          ],
-          "dtype": "float32"
-        },
-        "inputBinding": "input",
-        "wheelAdapters": []
+        "inputBinding": "features",
+        "wheelAdapters": [],
+        "params": {}
       },
       "measured": {
         "width": 30,
@@ -42,12 +36,6 @@
     "name": "SpamHam",
     "description": "Classifier for spam email",
     "customPackages": [],
-    "customDatasets": [
-      {
-        "id": "qa.minimal.final",
-        "version": "1.0.0",
-        "path": "datasets/qa-minimal-final-20260903"
-      }
-    ]
+    "customDatasets": []
   }
 }

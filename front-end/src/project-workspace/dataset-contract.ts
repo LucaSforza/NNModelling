@@ -320,7 +320,7 @@ export function parseDatasetReference(value: unknown): DatasetReference {
 }
 
 export function serializeDatasetDefinition(value: DatasetDefinition): string {
-  return JSON.stringify(sortKeys(value))
+  return `${JSON.stringify(sortKeys(value), null, 2)}\n`
 }
 
 function parseModelEntries(value: unknown, label: string): ModelDatasetReference[] {

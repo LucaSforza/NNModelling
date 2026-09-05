@@ -199,6 +199,21 @@ validation runs before filesystem mutation. On failure, the previous model
 manifest and dataset catalog remain active, and only a directory proven to have
 been created by the failed operation may be removed.
 
+An existing project dataset may be edited through the same structured form.
+Its ID, version and project-relative directory remain stable during that
+operation; these values identify the model-manifest entry and its on-disk
+closure. The edit rewrites declarative metadata and explicitly supplied data
+files, while preserving the user-owned `dataset.py` and unmodified data files.
+Renaming or moving a dataset is a separate migration, not an implicit edit.
+
+Deleting a project dataset removes its manifest entry, exact project directory,
+browser catalog entry and active training-controller descriptor. The model
+entry is restored if directory removal fails, so the editor never retains a
+reference to a missing dataset closure. Previously uploaded backend archives
+and jobs are intentionally not deleted: archives are immutable, content
+addressed job inputs and historical jobs must retain their exact resolved
+dataset reference.
+
 Dataset upload and job submission are separate commits. A failed upload creates
 no job. A failed job submission does not delete an already valid owned dataset
 archive. Invalid code can fail only in the worker and produces a scoped job

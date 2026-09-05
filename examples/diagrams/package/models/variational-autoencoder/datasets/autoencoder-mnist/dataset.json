@@ -1,40 +1,50 @@
 {
-  "schemaVersion": 1,
-  "id": "example.vae-mnist",
-  "version": "0.1.0",
-  "name": "Autoencoder MNIST",
-  "description": "MNIST images paired with themselves for reconstruction.",
-  "parameters": [
-    {
-      "name": "B",
-      "type": "integer",
-      "required": true
-    },
-    {
-      "name": "num_workers",
-      "type": "integer",
-      "required": false,
-      "default": 0
-    },
-    {
-      "name": "train_size",
-      "type": "number",
-      "required": false,
-      "default": 0.8
-    }
-  ],
   "batch": {
     "inputs": {
       "image": {
-        "shape": ["B", 1, 28, 28],
-        "dtype": "float32"
+        "dtype": "float32",
+        "shape": [
+          "B",
+          1,
+          28,
+          28
+        ]
       }
     },
     "targets": {
       "target": {
-        "shape": ["B", 1, 28, 28],
-        "dtype": "float32"
+        "dtype": "float32",
+        "shape": [
+          "B",
+          1,
+          28,
+          28
+        ]
       }
     }
-  }
+  },
+  "description": "MNIST images paired with themselves for reconstruction.",
+  "id": "example.vae-mnist",
+  "name": "Autoencoder MNIST",
+  "parameters": [
+    {
+      "name": "B",
+      "required": true,
+      "type": "integer"
+    },
+    {
+      "default": 0,
+      "name": "num_workers",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "default": 0.8,
+      "name": "train_size",
+      "required": false,
+      "type": "number"
+    }
+  ],
+  "schemaVersion": 1,
+  "version": "0.1.0"
 }

@@ -24,7 +24,10 @@ const DEFINITION = {
 describe("dataset and manifest contracts", () => {
   test("round-trips a definition with stable named slots", () => {
     const parsed = parseDatasetDefinition(DEFINITION)
-    expect(JSON.parse(serializeDatasetDefinition(parsed))).toEqual(parsed)
+    const serialized = serializeDatasetDefinition(parsed)
+    expect(JSON.parse(serialized)).toEqual(parsed)
+    expect(serialized).toContain('\n  "batch":')
+    expect(serialized.endsWith("\n")).toBe(true)
     expect(Object.keys(parsed.batch.inputs)).toEqual(["tokens"])
   })
 

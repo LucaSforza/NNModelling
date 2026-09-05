@@ -178,6 +178,10 @@
 .dataset-form__file-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--manager-border); border-radius: 9px; padding: 9px 10px; background: #fff; font-size: 0.75rem; }
 .dataset-form__file-row span { min-width: 0; overflow: hidden; color: #334664; text-overflow: ellipsis; white-space: nowrap; }
 .dataset-form__file-row small { color: #8290a6; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.68rem; }
+.dataset-form__catalog-actions, .dataset-form__confirmation-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.dataset-form__delete { border-color: #efc5c5 !important; background: #fff5f5 !important; color: #a03535 !important; }
+.dataset-form__delete:hover:not(:disabled) { border-color: #e6a7a7 !important; background: #ffe9e9 !important; color: #8f2929 !important; transform: none !important; }
+.dataset-form__confirmation-actions { margin-top: 10px; }
 
 .parameter-form { gap: 13px; }
 .parameter-row { display: flex; flex-direction: column; gap: 11px; border: 1px solid #d6dfed; border-radius: 9px; padding: 12px; background: #fff; }

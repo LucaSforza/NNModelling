@@ -20,6 +20,7 @@ behavior as a second supported contract or append narrative history.
 ## Verification and operation
 
 - [Testing strategy](testing/strategy.md)
+- [Dataset and stereotype UI: known bugs and regression QA](testing/dataset-ui-bugs-and-qa.md)
 - [Local development stack](operations/local-stack.md)
 
 Durable architectural decisions should be added under `decisions/` and linked

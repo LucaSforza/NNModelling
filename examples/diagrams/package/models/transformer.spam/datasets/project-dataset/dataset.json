@@ -1,0 +1,26 @@
+{
+  "batch": {
+    "inputs": {
+      "input": {
+        "dtype": "int32",
+        "shape": [
+          "B",
+          128
+        ]
+      }
+    },
+    "targets": {
+      "labels": {
+        "dtype": "int64",
+        "shape": [
+          "B"
+        ]
+      }
+    }
+  },
+  "id": "project.dataset",
+  "name": "Project dataset",
+  "parameters": [],
+  "schemaVersion": 1,
+  "version": "1.0.0"
+}
