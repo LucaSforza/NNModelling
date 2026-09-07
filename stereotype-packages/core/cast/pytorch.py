@@ -23,4 +23,4 @@ def build(
     context: BuildContext,
     services: NoServices,
 ) -> torch.nn.Module:
-    return Cast(torch_dtype(context["output"]["dtype"]))
+    return Cast(torch_dtype(parameters["dtype"]))

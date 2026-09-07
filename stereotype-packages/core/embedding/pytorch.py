@@ -20,5 +20,5 @@ def build(
     return torch.nn.Embedding(
         parameters["num_embeddings"],
         parameters["embedding_dim"],
-        dtype=torch_dtype(context["output"]["dtype"]),
+        dtype=torch_dtype(parameters["dtype"]),
     )
