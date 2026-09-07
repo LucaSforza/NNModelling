@@ -157,14 +157,14 @@ def _split_validation(examples: Sequence[TextExample]) -> tuple[list[TextExample
     return train, validation
 
 
-def _collate(examples: list[tuple[torch.Tensor, int]]) -> TrainingBatch:
-    """Batch token IDs and emit one-hot float32 class targets."""
+def _collate(examples: list[tuple[torch.Tensor, int]]) -> dict[str, dict[str, torch.Tensor]]:
+    """Batch encoded prompts and emit one-hot float32 class targets."""
 
-    features = torch.stack([item[0] for item in examples]).to(dtype=torch.int32)
+    prompt = torch.stack([item[0] for item in examples]).to(dtype=torch.int32)
     labels = torch.tensor([item[1] for item in examples], dtype=torch.int64)
     targets = torch.zeros((len(examples), 2), dtype=torch.float32)
     targets.scatter_(1, labels.unsqueeze(1), 1.0)
-    return TrainingBatch(inputs={"features": features}, targets={"target": targets})
+    return {"inputs": {"features": prompt}, "targets": {"target": targets}}
 
 
 def _loader(
