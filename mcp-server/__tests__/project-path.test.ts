@@ -76,6 +76,26 @@ describe("project path boundary", () => {
     }
   })
 
+  test("opens project resources larger than the training upload limit", async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), "nnm-project-"))
+    const projectPath = path.join(parent, "demo")
+    await fs.mkdir(projectPath)
+    try {
+      const modelJson = JSON.stringify({ nodes: [], edges: [], manifest: { schemaVersion: 1, id: "demo", version: "1.0.0", name: "Demo" } })
+      const data = Buffer.alloc(64 * 1024 * 1024 + 1, 1)
+      await fs.writeFile(path.join(projectPath, "model.json"), modelJson)
+      await fs.writeFile(path.join(projectPath, "dataset.bin"), data)
+
+      const opened = await openProjectAtPath(projectPath, parent)
+      const reopened = Buffer.from(opened.resources["dataset.bin"].data, "base64")
+      expect(reopened.byteLength).toBe(data.byteLength)
+      expect(reopened[0]).toBe(1)
+      expect(reopened.at(-1)).toBe(1)
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true })
+    }
+  })
+
   test("rejects resource traversal and project-root deletion", () => {
     expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "../outside")).toThrow("below the project")
     expect(() => validateProjectResourcePath("/tmp/projects/demo", "/tmp/projects", "")).toThrow("non-empty")

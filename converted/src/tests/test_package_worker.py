@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from dataset.contracts import DatasetBatchContract, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
 from package_runtime import PackageValidationError
 from package_worker import _dataset_loaders, _materialize_dataset_inputs, _normalized_training, _validate_graph_bindings, run, train
+from training.datasets import resolve_dataset
 
 REFERENCE = DatasetReference(
     kind="project", id="demo.dataset", version="1.0.0",
@@ -33,6 +34,30 @@ def training_package() -> dict[str, object]:
         "inputBindings": [{"nodeId": "input", "name": "image", "contract": {"shape": ["B", 1], "dtype": "float32"}}],
         "objectiveBindings": [],
     }}
+
+
+def test_project_dataset_loader_supports_dataclass_module_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "dataset"
+    root.mkdir()
+    root.joinpath("dataset.json").write_text(json.dumps(DEFINITION.model_dump()), encoding="utf-8")
+    root.joinpath("dataset.py").write_text(
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class Settings:\n"
+        "    batch_size: int\n"
+        "class Dataset:\n"
+        "    def division(self): return {}\n"
+        "def build(parameters, context): return Dataset()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NNM_DATASET_ROOT", str(root))
+    dataset, definition, reference, parameters = resolve_dataset({
+        "dataset": {"reference": REFERENCE.model_dump(), "parameters": {"B": 2}},
+    })
+    assert definition.id == REFERENCE.id
+    assert reference == REFERENCE
+    assert parameters == {"B": 2}
+    assert dataset.division() == {}
 
 
 def test_run_rejects_missing_package(tmp_path: Path) -> None:

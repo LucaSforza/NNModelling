@@ -3,7 +3,7 @@
   "description": "Normalizes tensor values into probabilities along one dimension.",
   "kind": "layer",
   "view": {
-    "color": "#4779c4",
+    "color": "#d9a514",
     "width": 180,
     "height": 100
   },

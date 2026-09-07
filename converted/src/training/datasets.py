@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
@@ -84,5 +85,12 @@ def _load_project_module(path: Path) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ValueError("project dataset code cannot be loaded")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # dataclasses and other introspection helpers resolve ``__module__`` via
+    # sys.modules while decorating classes in dynamically loaded datasets.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(spec.name, None)
+        raise
     return module

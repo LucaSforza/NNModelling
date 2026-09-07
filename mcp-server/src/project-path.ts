@@ -6,7 +6,6 @@ import fs from "node:fs/promises"
 
 const PROJECT_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
-const PROJECT_RESOURCE_LIMIT_BYTES = 64 * 1024 * 1024
 
 /**
  * Validate a user-supplied project path before it crosses the browser bridge.
@@ -78,7 +77,7 @@ export async function openProjectAtPath(projectPath: string, projectRoot: string
   const stat = await fs.stat(safePath).catch(() => undefined)
   if (!stat?.isDirectory()) throw new MCPServerError("PROJECT_NOT_FOUND", "project directory does not exist")
   const resources: Record<string, { encoding: "utf8" | "base64"; data: string }> = {}
-  await readFiles(safePath, "", resources, { bytes: 0 })
+  await readFiles(safePath, "", resources)
   const model = resources["model.json"]
   if (!model) throw new MCPServerError("MALFORMED_PROJECT", "project directory does not contain model.json")
   try { JSON.parse(model.data) } catch { throw new MCPServerError("MALFORMED_PROJECT", "model.json is not valid JSON") }
@@ -164,16 +163,13 @@ async function readFiles(
   directory: string,
   prefix: string,
   resources: Record<string, { encoding: "utf8" | "base64"; data: string }>,
-  size: { bytes: number },
 ): Promise<void> {
   if (Object.keys(resources).length >= 512) throw new MCPServerError("PROJECT_TOO_LARGE", "project contains too many files")
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
     const relative = prefix ? path.join(prefix, entry.name) : entry.name
-    if (entry.isDirectory()) await readFiles(path.join(directory, entry.name), relative, resources, size)
+    if (entry.isDirectory()) await readFiles(path.join(directory, entry.name), relative, resources)
     else if (entry.isFile()) {
       const bytes = await fs.readFile(path.join(directory, entry.name))
-      size.bytes += bytes.byteLength
-      if (size.bytes > PROJECT_RESOURCE_LIMIT_BYTES) throw new MCPServerError("PROJECT_TOO_LARGE", "project resources exceed 64 MiB")
       const resourcePath = relative.split(path.sep).join("/")
       resources[resourcePath] = resourcePath === "model.json"
         ? { encoding: "utf8", data: bytes.toString("utf8") }
@@ -190,9 +186,7 @@ function isWithin(root: string, candidate: string): boolean {
 function decodeProjectResource(encoding: string, data: unknown): Buffer {
   if (typeof data !== "string") throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource data must be a string")
   if (encoding === "utf8") {
-    const bytes = Buffer.from(data, "utf8")
-    if (bytes.byteLength > PROJECT_RESOURCE_LIMIT_BYTES) throw new MCPServerError("PROJECT_TOO_LARGE", "resource exceeds 64 MiB")
-    return bytes
+    return Buffer.from(data, "utf8")
   }
   if (encoding !== "base64" || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) {
     throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource encoding is invalid")
@@ -200,6 +194,5 @@ function decodeProjectResource(encoding: string, data: unknown): Buffer {
   const bytes = Buffer.from(data, "base64")
   const canonical = bytes.toString("base64").replace(/=+$/, "")
   if (canonical !== data.replace(/=+$/, "")) throw new MCPServerError("INVALID_PROJECT_RESOURCE", "resource data is not valid base64")
-  if (bytes.byteLength > PROJECT_RESOURCE_LIMIT_BYTES) throw new MCPServerError("PROJECT_TOO_LARGE", "resource exceeds 64 MiB")
   return bytes
 }
