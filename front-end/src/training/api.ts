@@ -513,7 +513,10 @@ async function responseError(response: Response): Promise<BackendApiError> {
     : typeof detail === "object" && detail?.message
       ? detail.message
       : response.statusText;
-  return new BackendApiError(response.status, code, `${response.status}: ${message}`);
+  const friendlyMessage = code === "package_bundle_digest_mismatch"
+    ? "Il modello non può essere avviato perché frontend e backend hanno calcolato firme diverse per il bundle. Nessun training è stato avviato; ricarica il progetto e riprova."
+    : message;
+  return new BackendApiError(response.status, code, friendlyMessage);
 }
 
 const SHA256_HEX = /^[0-9a-fA-F]{64}$/;

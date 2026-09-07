@@ -36,6 +36,17 @@ describe("training job actions", () => {
 });
 
 describe("authenticated training API", () => {
+  it("explains package bundle integrity failures", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: { code: "package_bundle_digest_mismatch", message: "internal" } }),
+      { status: 422, headers: { "content-type": "application/json" } },
+    )))
+    await expect(new TrainingApiClient("http://backend", "token").getSession()).rejects.toMatchObject({
+      status: 422,
+      code: "package_bundle_digest_mismatch",
+      message: "Il modello non può essere avviato perché frontend e backend hanno calcolato firme diverse per il bundle. Nessun training è stato avviato; ricarica il progetto e riprova.",
+    })
+  })
   it("uploads a package bundle through the authenticated package endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ bundle_ref: "bundle-1", digest: "a".repeat(64), size: 12 }), { status: 200 }),

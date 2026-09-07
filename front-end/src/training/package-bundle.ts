@@ -254,6 +254,7 @@ function compatibleSchema(
 }
 
 export function canonicalJson(value: unknown): string {
+  // JSON.stringify's ECMAScript number grammar is the JCS number grammar.
   return JSON.stringify(canonicalize(value))
 }
 

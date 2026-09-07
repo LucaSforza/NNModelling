@@ -12,6 +12,8 @@ import pytest
 import torch
 
 from package_runtime import PackageValidationError, compile_package_graph
+from package_runtime.jcs import canonicalize
+from package_runtime.loader import bundle_digest
 
 
 def _file(source: str) -> dict[str, str]:
@@ -40,6 +42,12 @@ def _graph(package_id: str, *, parameters: dict[str, Any] | None = None) -> dict
         ],
         "edges": [{"source": "input", "target": "layer", "targetHandle": "in-0"}],
     }
+
+
+def test_jcs_vectors_match_ecmascript_serialization() -> None:
+    value = {"small": 0.00001, "same": 1e-5, "negzero": -0.0, "large": 1e21, "tiny": 1e-7, "unicode": "café"}
+    assert canonicalize(value).decode() == '{"large":1e+21,"negzero":0,"same":0.00001,"small":0.00001,"tiny":1e-7,"unicode":"café"}'
+    assert bundle_digest(value) == "3e68fe03662988be356e3e6b23667ecc9cb54e6d8d58587139284d142cf0ea97"
 
 
 def test_compile_package_builds_torch_module() -> None:
@@ -280,6 +288,12 @@ def test_matmul_package_builds_matrix_product() -> None:
     value = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     assert torch.equal(model(value), value @ value @ value)
 
+    batched_value = torch.tensor([
+        [[1.0, 2.0], [3.0, 4.0]],
+        [[2.0, 1.0], [4.0, 3.0]],
+    ])
+    assert torch.equal(model(batched_value), batched_value @ batched_value @ batched_value)
+
 
 def test_matmul_package_selects_parallel_builder_for_four_inputs() -> None:
     root = Path(__file__).parents[3]
@@ -302,6 +316,35 @@ def test_matmul_package_selects_parallel_builder_for_four_inputs() -> None:
     assert model.modules_by_id["matmul"].__class__.__name__ == "ParallelMatMul"
     value = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     assert torch.equal(model(value), value @ value @ value @ value)
+
+    batched_value = torch.tensor([
+        [[1.0, 2.0], [3.0, 4.0]],
+        [[2.0, 1.0], [4.0, 3.0]],
+    ])
+    assert torch.equal(model(batched_value), batched_value @ batched_value @ batched_value @ batched_value)
+
+
+def test_transpose_package_swaps_last_two_dimensions() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/transpose/pytorch.py").read_text()
+    package = _package("core.transpose", source)
+    graph = {
+        "nodes": [
+            {"id": "input", "type": "input"},
+            {"id": "transpose", "type": "layer", "package": {"id": "core.transpose", "version": "0.1.0"}},
+        ],
+        "edges": [
+            {"source": "input", "target": "transpose", "targetHandle": "in-0"},
+        ],
+    }
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    value = torch.arange(24.0).reshape(2, 3, 4)
+
+    assert torch.equal(model(value), value.transpose(-2, -1))
+
+    graph["nodes"][1]["parameters"] = {"dim0": 0, "dim1": 2}
+    model = compile_package_graph({"packages": [package], "graph": graph})
+    assert torch.equal(model(value), value.transpose(0, 2))
 
 
 def test_rejects_arbitrary_import_and_missing_dependency() -> None:

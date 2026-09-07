@@ -358,6 +358,14 @@ def create_app(
                 declared_digest=body.get("digest") if isinstance(body.get("digest"), str) else None,
             )
         except (ValueError, TypeError, KeyError) as exc:
+            if str(exc) == "package bundle digest mismatch":
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "package_bundle_digest_mismatch",
+                        "message": "Il bundle del modello non ha superato il controllo di integrità.",
+                    },
+                ) from exc
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return PackageBundleInfo(**record)
 

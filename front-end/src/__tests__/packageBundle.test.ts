@@ -63,6 +63,10 @@ function resourceExport(id: string, version: string, dependencies: Record<string
 }
 
 describe("package bundle v1", () => {
+  it("uses RFC 8785-compatible number and Unicode canonicalization", () => {
+    expect(canonicalJson({ small: 0.00001, same: 1e-5, negzero: -0, large: 1e21, tiny: 1e-7, unicode: "café" }))
+      .toBe('{"large":1e+21,"negzero":0,"same":0.00001,"small":0.00001,"tiny":1e-7,"unicode":"café"}')
+  })
   it("validates typed stereotype-declared wheel adapters", () => {
     expect(parseDefinition(JSON.parse(layer.definition)).wheelAdapters).toEqual([{
       name: "decode", entrypoint: "module.forward", input: { type: "tensor", shape: ["B", 4], dtype: "float32" }, output: { type: "tensor", shape: ["B", 8], dtype: "float32" }, targetPolicy: "forbidden", randomness: { mode: "none" },
