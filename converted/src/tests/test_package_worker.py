@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,15 @@ from torch.utils.data import DataLoader
 
 from dataset.contracts import DatasetBatchContract, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
 from package_runtime import PackageValidationError
-from package_worker import _dataset_loaders, _materialize_dataset_inputs, _normalized_training, _validate_graph_bindings, run, train
+from package_worker import (
+    _dataset_loaders,
+    _materialize_dataset_inputs,
+    _normalized_training,
+    _validate_graph_bindings,
+    main,
+    run,
+    train,
+)
 from training.datasets import resolve_dataset
 
 REFERENCE = DatasetReference(
@@ -70,6 +80,65 @@ def test_run_rejects_missing_package(tmp_path: Path) -> None:
 def test_training_contract_requires_opaque_dataset_reference() -> None:
     with pytest.raises(ValueError, match="reference is required"):
         _normalized_training({"dataset": {"target": "legacy.target"}})
+
+
+def test_worker_accepts_frozen_wandb_modes_and_rejects_controller_fields() -> None:
+    for mode in ("disabled", "offline", "online"):
+        normalized = _normalized_training(
+            {
+                "dataset": {"reference": REFERENCE.model_dump(), "parameters": {}},
+                "wandb": {"mode": mode, "project": "demo"},
+            }
+        )
+        assert normalized["wandb"] == {"mode": mode, "project": "demo"}
+    with pytest.raises(ValueError, match="only mode and project"):
+        _normalized_training(
+            {
+                "dataset": {"reference": REFERENCE.model_dump(), "parameters": {}},
+                "wandb": {"mode": "online", "project": "demo", "entity": "forbidden"},
+            }
+        )
+
+
+def test_worker_reads_bounded_credentials_before_run_and_closes_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    payload = json.dumps(
+        {
+            "schema_version": 1,
+            "api_key": "test-secret",
+            "base_url": "https://wandb.example.test",
+            "entity": "team",
+        }
+    ).encode("utf-8")
+    stdin = io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_run(input_path: Path, artifacts_path: Path, *, wandb_credentials=None) -> dict[str, object]:
+        captured["input_path"] = input_path
+        captured["artifacts_path"] = artifacts_path
+        captured["credentials"] = wandb_credentials
+        return {"ok": True}
+
+    monkeypatch.setattr("package_worker.run", fake_run)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "package_worker",
+            "--input",
+            str(tmp_path / "input.json"),
+            "--artifacts",
+            str(tmp_path),
+            "--wandb-credentials-stdin",
+        ],
+    )
+    main()
+
+    assert captured["credentials"].api_key == "test-secret"
+    assert stdin.closed
 
 
 def test_training_passes_named_batch_to_objective(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -46,6 +46,49 @@ a typed `network.format="package"` training request. Jobs are executed by the
 configured Podman or Docker container controller and expose status, logs,
 events, cancellation and the portable model wheel through the API.
 
+## Weights & Biases administration
+
+W&B uses one backend-administrator-owned account. Connect it from the repository
+root; the command prompts for the API key and never accepts it in argv:
+
+```bash
+just --justfile converted/backend/justfile wandb-connect <entity>
+# Self-hosted deployment:
+just --justfile converted/backend/justfile wandb-connect <entity> https://wandb.example.org
+
+just --justfile converted/backend/justfile wandb-status
+just --justfile converted/backend/justfile wandb-disconnect
+```
+
+`wandb-connect` verifies the account before atomically writing
+`converted/valkey-data/wandb-credentials.json` with mode `0600`.
+`wandb-status` prints only the schema version, entity and base URL. Override the
+machine-local path with `NNM_WANDB_CREDENTIAL_FILE` when required.
+
+Disabled and offline jobs remain on `--network none` and never receive the
+credential. To advertise online mode, start the trusted controller with all
+three operator settings:
+
+```bash
+NNM_WANDB_CREDENTIAL_FILE=/secure/path/wandb-credentials.json \
+NNM_WANDB_NETWORK=nnm-wandb-egress \
+NNM_WANDB_PROXY_URL=http://wandb-proxy.internal:3128 \
+just --justfile converted/backend/justfile controller
+```
+
+The named container network must be configured outside NNModelling to deny
+direct egress and allow only the proxy; the proxy must allowlist the selected
+W&B Cloud or self-hosted endpoint. Proxy URLs containing credentials are
+rejected. The browser cannot select the entity, base URL, proxy or network.
+Online submissions are rejected before queueing when this capability is
+incomplete, and an online SDK error fails the job without changing mode.
+
+Browser users select a W&B project and mode. `Online (consigliato)` exposes the
+structured run link. Offline creates a real W&B run under the job artifacts and
+offers an authenticated ZIP whose SHA-256 digest is verified before download.
+NNModelling does not upload the dataset, weights or model wheel as W&B
+Artifacts.
+
 ## Runtime contract
 
 Package definitions provide the graph, resources and PyTorch builders. The

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
 
@@ -180,6 +181,66 @@ class WandbRequest(BaseModel):
     mode: Literal["disabled", "offline", "online"] = "disabled"
 
 
+class WandbRun(BaseModel):
+    """Structured W&B run metadata emitted by the package worker."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: Literal["offline", "online"]
+    id: str = Field(min_length=1, max_length=300)
+    entity: str | None = Field(default=None, max_length=256)
+    project: str = Field(min_length=1, max_length=200)
+    url: str | None = Field(default=None, max_length=2_000)
+
+    @model_validator(mode="after")
+    def validate_url_for_mode(self) -> "WandbRun":
+        """Keep worker-provided links safe and mode-consistent."""
+
+        if self.mode == "offline":
+            if self.url is not None:
+                raise ValueError("offline W&B runs must not include a URL")
+            return self
+        if self.url is None or not self.url or self.url != self.url.strip():
+            raise ValueError("online W&B runs require an HTTP(S) URL")
+        value = self.url
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("W&B run URL is malformed") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or "@" in parsed.netloc
+            or any(character.isspace() or ord(character) < 0x20 for character in value)
+        ):
+            raise ValueError("online W&B run URL must be an absolute HTTP(S) URL without userinfo")
+        return self
+
+
+class WandbOnlineCapability(BaseModel):
+    """Sanitized administrator-owned online connection status."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    configured: bool
+    entity: str | None = None
+    base_url: str | None = None
+    reason: str | None = None
+
+
+class BackendCapabilities(BaseModel):
+    """Modes that an authenticated browser may choose for a new job."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    available_modes: list[Literal["disabled", "offline", "online"]]
+    online: WandbOnlineCapability
+
 class TrainingRequest(BaseModel):
     """Complete, validated training contract sent by the frontend."""
 
@@ -268,7 +329,7 @@ class JobStatus(BaseModel):
     compute_unit: str | None = None
     error: str | None = None
     heartbeat_at: str | None = None
-    wandb_url: str | None = None
+    wandb_run: WandbRun | None = None
     model_package: ModelPackageInfo | None = None
     package_error: str | None = None
     artifact_dir: str

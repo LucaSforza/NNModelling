@@ -138,6 +138,27 @@ describe("TrainingController", () => {
     expect(controller.getConnection()).toMatchObject({ connectionId: "session", requestId: null, verificationCode: null });
     await controller.disconnect();
   });
+
+  it("loads sanitized W&B capability after pairing and blocks unavailable online mode", async () => {
+    const api = {
+      health: vi.fn().mockResolvedValue({ status: "ok" }),
+      createPairing: vi.fn().mockResolvedValue({ request_id: "req", connection_id: "grant", token: "secret", verification_code: "123", expires_at: "later" }),
+      getPairingStatus: vi.fn().mockResolvedValue({ status: "approved", request_id: "req", connection_id: "grant", verification_code: "123", expires_at: "later", session_expires_at: "later" }),
+      getSession: vi.fn().mockResolvedValue({ id: "session", status: "active", device_name: "test", created_at: "now", approved_at: "now", expires_at: "later", last_seen_at: null, revoked_at: null }),
+      getWandbCapabilities: vi.fn().mockResolvedValue({
+        available_modes: ["disabled", "offline"],
+        online: { configured: false, entity: null, base_url: null, reason: "Configura le credenziali W&B" },
+      }),
+    } as any;
+    const controller = new TrainingController({ apiFactory: () => api, storage: new MemoryStorage() });
+    await controller.connect("http://backend.test:8000");
+    await vi.waitFor(() => expect(controller.getConnection().status).toBe("active"), { timeout: 3000 });
+    await vi.waitFor(() => expect(controller.getWandbCapabilities()?.online.reason).toBe("Configura le credenziali W&B"), { timeout: 3000 });
+
+    expect(controller.getAvailableWandbModes()).toEqual(["disabled", "offline"]);
+    expect(() => controller.updateConfig({ wandbMode: "online" })).toThrow("Configura le credenziali W&B");
+    await controller.disconnect();
+  });
 });
 
 class MemoryStorage {

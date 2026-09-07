@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-08-28
+updated: 2026-09-07
 ---
 
 # Package backend standard and least-privilege execution
@@ -135,14 +135,39 @@ the [prediction/objective program decision](prediction-objective-programs.md).
 The VAE project dataset is uploaded as untrusted content-addressed data.
 FastAPI validates its declarative contract but never imports its Python; only
 the least-privilege worker loads it from a server-resolved read-only mount.
-The browser cannot provide an import path or host path. Network and W&B online
-mode are disabled unless the operator explicitly enables a policy that grants
-only the required egress.
+The browser cannot provide an import path or host path. Network remains denied
+for ordinary and offline jobs. W&B online mode is an implemented opt-in
+controller policy that grants only the required egress as specified below.
 
 Project dataset ownership, named training batches and the bounded upload v1 are
 defined by the
 [project-owned dataset decision](project-owned-datasets.md). Large or resumable
 dataset transfer is not implied by accepting browser-supplied dataset code.
+
+## W&B policy
+
+There is one package-native W&B integration, owned by the worker. The backend
+administrator configures a shared account with local `wandb-connect`,
+`wandb-status` and `wandb-disconnect` recipes. The API key is prompted for,
+verified against W&B Cloud or an administrator-selected self-hosted base URL,
+and stored in a versioned mode-0600 file. It is never a browser/API field.
+
+Browser users choose only `disabled`, `offline` or `online` and a project. The
+administrator fixes entity and base URL; the worker derives a fresh run name
+from the immutable job ID. Disabled mode does not initialize the SDK. Offline
+mode initializes the SDK without credentials or network and produces an owned,
+digest-verified downloadable run archive. Online mode is admitted only when
+the controller has valid credentials, an operator-named network and a proxy
+URL. The network's firewall is the enforcement boundary and must deny direct
+egress except through the allowlisting proxy.
+
+For an online worker, the controller supplies proxy variables but transports
+the credential over a bounded stdin pipe that is closed before training. The
+credential is not placed in argv, the engine environment, RPC, mounts, job
+state, artifacts or public status. W&B initialization/logging failures fail the
+requested online job without fallback. Status and SSE use the worker's atomic
+structured run manifest rather than log parsing. W&B dataset/model Artifact
+upload, sweeps, resume and per-user credentials are outside this standard.
 
 ## Artifact contract
 
@@ -176,3 +201,4 @@ download uses the authenticated connection ownership contract.
 - Network package installation during a job.
 - A second NNTree compatibility variant in the backend API.
 - A second public checkpoint-download format.
+- Per-user W&B accounts or unrestricted worker Internet access.

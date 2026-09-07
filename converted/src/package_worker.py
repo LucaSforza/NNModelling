@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -12,12 +13,19 @@ from typing import Any
 import torch
 from safetensors.torch import save_file
 
+from backend.wandb_credentials import WandbCredentials, read_credentials_stdin
 from package_runtime import CompiledPrograms, PackageValidationError, compile_package_graph
 from dataset.contracts import DatasetDefinition, TensorSlotContract, TrainingBatch, normalize_training_batch
 from training.datasets import resolve_dataset
+from training.wandb_tracking import create_tracker, normalize_wandb_config
 
 
-def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
+def run(
+    input_path: Path,
+    artifacts_path: Path,
+    *,
+    wandb_credentials: WandbCredentials | None = None,
+) -> dict[str, Any]:
     """Compile the submitted graph and execute its declared training task."""
 
     request = json.loads(input_path.read_text(encoding="utf-8"))
@@ -32,7 +40,7 @@ def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
     package = _materialize_dataset_inputs(package, definition, parameters)
     model = compile_package_graph(package)
     request = {**request, "package": package}
-    summary = train(model, request, artifacts_path)
+    summary = train(model, request, artifacts_path, wandb_credentials=wandb_credentials)
     artifacts_path.mkdir(parents=True, exist_ok=True)
     (artifacts_path / "package.json").write_text(json.dumps(package, sort_keys=True), encoding="utf-8")
     result = {
@@ -52,11 +60,17 @@ def run(input_path: Path, artifacts_path: Path) -> dict[str, Any]:
     return result
 
 
-def train(model: CompiledPrograms, request: dict[str, Any], artifacts_path: Path) -> dict[str, Any]:
+def train(
+    model: CompiledPrograms,
+    request: dict[str, Any],
+    artifacts_path: Path,
+    *,
+    wandb_credentials: WandbCredentials | None = None,
+) -> dict[str, Any]:
     """Run the typed package training contract inside the worker."""
 
     training = _normalized_training(_training_config(request))
-    _validate_training_support(training)
+    _validate_training_support(training, wandb_credentials=wandb_credentials)
     dataset, definition, reference, parameters = resolve_dataset(training)
     _validate_graph_bindings(request.get("package", {}), definition)
     train_loader, validation_loader = _dataset_loaders(dataset)
@@ -72,56 +86,73 @@ def train(model: CompiledPrograms, request: dict[str, Any], artifacts_path: Path
     history: list[dict[str, float]] = []
     best_validation = float("inf")
     stale_epochs = 0
-
-    for epoch in range(max_epochs):
-        total = 0.0
-        batches = 0
-        for raw_batch in train_loader:
-            batch = normalize_training_batch(raw_batch).to(device)
-            optimizer.zero_grad(set_to_none=True)
-            loss = model.objective(batch.inputs, batch.targets)
-            if not torch.isfinite(loss):
-                raise RuntimeError("package training produced a non-finite loss")
-            loss.backward()
-            optimizer.step()
-            total += float(loss.detach())
-            batches += 1
-        train_loss = total / max(1, batches)
-        validation_loss = _evaluate(model, validation_loader, device)
-        history.append({"epoch": float(epoch + 1), "train_loss": train_loss, "val_loss": validation_loss})
-        print(
-            json.dumps({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": validation_loss}),
-            flush=True,
-        )
-        if validation_loss < best_validation - min_delta:
-            best_validation = validation_loss
-            stale_epochs = 0
-        else:
-            stale_epochs += 1
-            if stale_epochs > patience:
-                break
-
-    artifacts_path.mkdir(parents=True, exist_ok=True)
-    tensors = {
-        key: value.detach().cpu()
-        for key, value in model.state_dict().items()
-        if isinstance(value, torch.Tensor)
-    }
-    if not tensors:
-        raise RuntimeError("compiled package graph has no trainable state")
-    save_file(tensors, str(artifacts_path / "weights.safetensors"))
-    summary = {
-        "dataset": {"reference": reference.model_dump(mode="json"), "parameters": parameters},
-        "epochs": len(history),
-        "history": history,
-        "config": training,
-        "num_parameters": sum(parameter.numel() for parameter in model.parameters()),
-    }
-    (artifacts_path / "training-summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True),
-        encoding="utf-8",
+    tracker = create_tracker(
+        training,
+        request,
+        artifacts_path,
+        credentials=wandb_credentials,
     )
-    return summary
+
+    try:
+        for epoch in range(max_epochs):
+            total = 0.0
+            batches = 0
+            for raw_batch in train_loader:
+                batch = normalize_training_batch(raw_batch).to(device)
+                optimizer.zero_grad(set_to_none=True)
+                loss = model.objective(batch.inputs, batch.targets)
+                if not torch.isfinite(loss):
+                    raise RuntimeError("package training produced a non-finite loss")
+                loss.backward()
+                optimizer.step()
+                total += float(loss.detach())
+                batches += 1
+            train_loss = total / max(1, batches)
+            validation_loss = _evaluate(model, validation_loader, device)
+            epoch_number = epoch + 1
+            history.append({"epoch": float(epoch_number), "train_loss": train_loss, "val_loss": validation_loss})
+            tracker.log_epoch(epoch_number, train_loss, validation_loss)
+            print(
+                json.dumps({"epoch": epoch_number, "train_loss": train_loss, "val_loss": validation_loss}),
+                flush=True,
+            )
+            if validation_loss < best_validation - min_delta:
+                best_validation = validation_loss
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if stale_epochs > patience:
+                    break
+
+        artifacts_path.mkdir(parents=True, exist_ok=True)
+        tensors = {
+            key: value.detach().cpu()
+            for key, value in model.state_dict().items()
+            if isinstance(value, torch.Tensor)
+        }
+        if not tensors:
+            raise RuntimeError("compiled package graph has no trainable state")
+        save_file(tensors, str(artifacts_path / "weights.safetensors"))
+        summary = {
+            "dataset": {"reference": reference.model_dump(mode="json"), "parameters": parameters},
+            "epochs": len(history),
+            "history": history,
+            "config": training,
+            "num_parameters": sum(parameter.numel() for parameter in model.parameters()),
+        }
+        (artifacts_path / "training-summary.json").write_text(
+            json.dumps(summary, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        tracker.finish(
+            best_loss=best_validation,
+            completed_epochs=len(history),
+            num_parameters=summary["num_parameters"],
+        )
+        return summary
+    except Exception:
+        tracker.abort()
+        raise
 
 
 def _training_config(request: dict[str, Any]) -> dict[str, Any]:
@@ -170,16 +201,24 @@ def _normalized_training(raw: dict[str, Any]) -> dict[str, Any]:
     result["trainer"].setdefault("patience", 3)
     result["trainer"].setdefault("min_delta", 0.0)
     result.setdefault("seed", 0)
-    result.setdefault("wandb", {"mode": "disabled", "project": "NeuralNetworks"})
+    result["wandb"] = normalize_wandb_config(raw.get("wandb"))
+    if any(field in result for field in ("api_key", "credentials", "token", "password")):
+        raise ValueError("training must not contain credentials")
     if "overrides" in result:
         raise ValueError("training.overrides is not part of the package training contract")
     return result
 
 
-def _validate_training_support(training: dict[str, Any]) -> None:
-    wandb = training.get("wandb", {})
-    if isinstance(wandb, dict) and wandb.get("mode", "disabled") != "disabled":
-        raise ValueError("W&B logging is not available in the package worker")
+def _validate_training_support(
+    training: dict[str, Any],
+    *,
+    wandb_credentials: WandbCredentials | None = None,
+) -> None:
+    mode = normalize_wandb_config(training.get("wandb"))["mode"]
+    if mode == "online" and wandb_credentials is None:
+        raise ValueError("online W&B logging requires credentials from stdin")
+    if mode != "online" and wandb_credentials is not None:
+        raise ValueError("W&B credentials are accepted only for online logging")
     _seed_from_training(training)
     trainer = training["trainer"]
     accelerator = trainer.get("accelerator", "auto")
@@ -476,8 +515,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--artifacts", type=Path, required=True)
+    parser.add_argument(
+        "--wandb-credentials-stdin",
+        action="store_true",
+        help="read the bounded administrator credential JSON from stdin before compilation",
+    )
     args = parser.parse_args()
-    print(json.dumps(run(args.input, args.artifacts), sort_keys=True), flush=True)
+    credentials = None
+    if args.wandb_credentials_stdin:
+        stream = getattr(sys.stdin, "buffer", sys.stdin)
+        try:
+            credentials = read_credentials_stdin(stream)
+        finally:
+            sys.stdin.close()
+    print(json.dumps(run(args.input, args.artifacts, wandb_credentials=credentials), sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":

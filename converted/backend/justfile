@@ -15,6 +15,9 @@ container_image := env_var_or_default("NNM_CONTAINER_IMAGE", "")
 controller_socket := env_var_or_default("NNM_CONTAINER_CONTROLLER_SOCKET", "/tmp/nnm-controller/controller.sock")
 controller_token_file := env_var_or_default("NNM_CONTAINER_CONTROLLER_TOKEN_FILE", valkey_data_dir / "controller.token")
 container_data_root := env_var_or_default("NNM_CONTAINER_DATA_ROOT", converted_dir / "data")
+wandb_credentials_file := env_var_or_default("NNM_WANDB_CREDENTIAL_FILE", valkey_data_dir / "wandb-credentials.json")
+wandb_network := env_var_or_default("NNM_WANDB_NETWORK", "")
+wandb_proxy_url := env_var_or_default("NNM_WANDB_PROXY_URL", "")
 
 default:
     @just --list
@@ -40,7 +43,20 @@ backend-unsafe-unlimited-dataset-size: admin-init
 # Start the trusted container controller separately. Only this process needs
 # access to the local Podman/Docker socket; FastAPI connects through its RPC.
 controller: admin-init
-    mkdir -p "$(dirname '{{controller_socket}}')" "{{valkey_data_dir}}"; if [[ ! -s "{{controller_token_file}}" ]]; then (umask 077; python -c 'import secrets; print(secrets.token_hex(32))' > "{{controller_token_file}}"); fi; cd "{{converted_dir}}"; UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" uv run python -m backend.container_controller serve "{{controller_socket}}" @"{{controller_token_file}}" "{{converted_dir}}/jobs" "{{converted_dir}}/jobs" "{{container_engine}}"
+    mkdir -p "$(dirname '{{controller_socket}}')" "{{valkey_data_dir}}"; if [[ ! -s "{{controller_token_file}}" ]]; then (umask 077; python -c 'import secrets; print(secrets.token_hex(32))' > "{{controller_token_file}}"); fi; cd "{{converted_dir}}"; UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" NNM_WANDB_NETWORK="{{wandb_network}}" NNM_WANDB_PROXY_URL="{{wandb_proxy_url}}" uv run python -m backend.container_controller serve "{{controller_socket}}" @"{{controller_token_file}}" "{{converted_dir}}/jobs" "{{converted_dir}}/jobs" "{{container_engine}}"
+
+# Configure the shared administrator-owned W&B account. The command prompts
+# for the key and never accepts it as an argument.
+wandb-connect entity base_url="https://api.wandb.ai": admin-init
+    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" uv run python -m backend.wandb_admin connect --entity "{{entity}}" --base-url "{{base_url}}"
+
+# Print sanitized W&B connection state (never the API key).
+wandb-status:
+    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" uv run python -m backend.wandb_admin status
+
+# Remove the local administrator-owned W&B credential file.
+wandb-disconnect:
+    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" uv run python -m backend.wandb_admin disconnect
 
 # Check that the API is reachable.
 health:

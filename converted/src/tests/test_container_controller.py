@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import threading
@@ -16,6 +17,7 @@ from backend.container_controller import (
     ContainerControllerClient,
     _load_token_argument,
     serve_unix,
+    WandbControllerConfig,
 )
 
 
@@ -136,6 +138,7 @@ def test_authenticated_socket_exposes_lifecycle_without_engine_flags(tmp_path: P
     client = ContainerControllerClient(socket_path, token)
     result = client.submit(spec(tmp_path))
     assert result["pid"] == 9
+    assert client.wandb_capabilities()["available_modes"] == ["disabled", "offline"]
     assert client.finished("vae-1")["state"] == "finished"
     assert client.heartbeat("vae-1")["job_id"] == "vae-1"
     unauthorized = ContainerControllerClient(socket_path, b"wrong")
@@ -178,3 +181,77 @@ def test_controller_loads_hex_token_from_at_file(tmp_path: Path) -> None:
     assert _load_token_argument(token.hex()) == token
     with pytest.raises(ValueError, match="exactly 32"):
         _load_token_argument("00")
+
+
+def test_online_policy_maps_operator_network_and_closes_bounded_stdin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    credentials = tmp_path / "wandb.json"
+    secret = "not-in-argv-or-logs"
+    credentials.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "api_key": secret,
+            "base_url": "https://api.wandb.ai",
+            "entity": "team",
+        }),
+        encoding="utf-8",
+    )
+    credentials.chmod(0o600)
+    config = WandbControllerConfig(
+        credential_file=credentials,
+        network_name="nnm-wandb-egress",
+        proxy_url="http://proxy.internal:8080",
+    )
+    request = ContainerJobSpec(
+        "online-1", IMAGE, tmp_path / "inputs" / "online-1", tmp_path / "artifacts" / "online-1", network="wandb"
+    )
+    command = CliEngineAdapter("podman", executable="podman", wandb_config=config).command(request)
+    assert command[command.index("--network") + 1] == "nnm-wandb-egress"
+    assert "--interactive" in command
+    assert "--wandb-credentials-stdin" in command
+    assert secret not in command
+
+    class Stream:
+        def __init__(self) -> None:
+            self.data = bytearray()
+            self.closed = False
+
+        def write(self, value: bytes) -> None:
+            self.data.extend(value)
+
+        def flush(self) -> None:
+            pass
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Process:
+        pid = 43
+        returncode = 0
+
+        def __init__(self) -> None:
+            self.stdin = Stream()
+
+        def poll(self) -> int:
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return self.returncode
+
+    processes: list[Process] = []
+    monkeypatch.setattr("backend.container_controller.shutil_which", lambda _binary: "/usr/bin/podman")
+    controller = ContainerController(
+        engine=CliEngineAdapter("podman", wandb_config=config),
+        input_root=tmp_path / "inputs",
+        artifact_root=tmp_path / "artifacts",
+        wandb_config=config,
+        popen=lambda _command, **_kwargs: (processes.append(Process()) or processes[-1]),
+    )
+    controller.submit(request)
+    assert processes[0].stdin.closed
+    assert json.loads(bytes(processes[0].stdin.data)) == {
+        "schema_version": 1,
+        "api_key": secret,
+        "base_url": "https://api.wandb.ai",
+        "entity": "team",
+    }

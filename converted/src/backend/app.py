@@ -26,11 +26,12 @@ from backend.auth import (
 )
 from backend.config import dataset_limits_from_environment
 from backend.dataset_store import DatasetArchiveLimits, DatasetArchiveStore, DatasetArchiveValidationError
-from backend.manager import JobManager, PackageIntegrityError, _remove_file
+from backend.manager import JobManager, PackageIntegrityError, WandbUnavailableError, _remove_file
 from backend.package_store import BundleNotFoundError, PackageStore
 from backend.models import (
     JobStatus,
     JobSubmission,
+    BackendCapabilities,
     PairingGrantResponse,
     PairingApprovalInput,
     PairingRequestInput,
@@ -264,6 +265,14 @@ def create_app(
 
         return []
 
+    @app.get("/capabilities", response_model=BackendCapabilities)
+    async def wandb_capabilities(
+        _connection: dict[str, Any] = Depends(current_connection),
+    ) -> BackendCapabilities:
+        """Return authenticated, sanitized training-mode capability state."""
+
+        return BackendCapabilities.model_validate(app.state.manager.wandb_capabilities())
+
     @app.get("/dataset-archives/capabilities", response_model=DatasetArchiveCapabilities)
     async def dataset_archive_capabilities(
         _connection: dict[str, Any] = Depends(current_connection),
@@ -407,6 +416,11 @@ def create_app(
             return app.state.manager.submit(submission, owner_connection_id=connection["id"])
         except BundleNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Unknown package bundle") from exc
+        except WandbUnavailableError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "wandb_online_unavailable", "message": str(exc)},
+            ) from exc
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -487,6 +501,27 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _verified_snapshot_response(path, filename, digest)
+
+    @app.get("/jobs/{job_id}/wandb/offline")
+    async def download_offline_wandb(
+        job_id: str,
+        connection: dict[str, Any] = Depends(current_connection),
+    ) -> FileResponse:
+        """Download one owned offline W&B run from an immutable ZIP snapshot."""
+
+        try:
+            path, filename, digest = app.state.manager.wandb_offline_download(
+                job_id,
+                owner_connection_id=connection["id"],
+            )
+        except (KeyError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="Offline W&B run is not available") from exc
+        return _verified_snapshot_response(
+            path,
+            filename,
+            digest,
+            media_type="application/zip",
+        )
 
     @app.get("/jobs/{job_id}/events")
     def get_events(

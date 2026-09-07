@@ -14,6 +14,50 @@ export interface DatasetInfo {
   definition: DatasetDefinition;
 }
 
+export type WandbMode = "disabled" | "offline" | "online";
+
+/** The only run data that may cross the backend/browser boundary. */
+export interface WandbRun {
+  mode: "offline" | "online";
+  id: string;
+  entity: string | null;
+  project: string;
+  url: string | null;
+}
+
+export interface WandbOnlineCapability {
+  configured: boolean;
+  entity: string | null;
+  base_url: string | null;
+  reason: string | null;
+}
+
+export interface WandbCapabilities {
+  available_modes: WandbMode[];
+  online: WandbOnlineCapability;
+}
+
+/** Accept only the structured run shapes that are safe to hand to a browser. */
+export function isWandbRun(value: unknown): value is WandbRun {
+  if (!value || typeof value !== "object") return false;
+  const run = value as Partial<WandbRun>;
+  if ((run.mode !== "offline" && run.mode !== "online")
+    || typeof run.id !== "string"
+    || (run.entity !== null && typeof run.entity !== "string")
+    || typeof run.project !== "string") return false;
+  if (run.mode === "offline") return run.url === null;
+  if (typeof run.url !== "string") return false;
+  try {
+    const url = new URL(run.url);
+    return (url.protocol === "http:" || url.protocol === "https:")
+      && url.hostname.length > 0
+      && !url.username
+      && !url.password;
+  } catch {
+    return false;
+  }
+}
+
 /** Keep the submitted constructor arguments aligned with the registered schema.
  *
  * This also protects an already-open editor from stale fields left by an older
@@ -41,7 +85,7 @@ export interface TrainingJobStatus {
   compute_unit: string | null;
   error: string | null;
   heartbeat_at: string | null;
-  wandb_url: string | null;
+  wandb_run: WandbRun | null;
   model_package: ModelPackageInfo | null;
   package_error: string | null;
   artifact_dir: string;
@@ -109,7 +153,7 @@ export interface TrainingRequest {
   seed: number;
   optimizer: { target: string; learning_rate: number };
   trainer: { max_epochs: number; accelerator: "auto" | "cpu" | "cuda"; patience: number; min_delta: number };
-  wandb: { project: string; mode: "disabled" | "offline" | "online" };
+  wandb: { project: string; mode: WandbMode };
 }
 export interface ResourceRequest {
   cpu: number; memory_gb: number; gpu: number;
@@ -203,6 +247,10 @@ export class TrainingApiClient {
 
   getSession(): Promise<SessionInfo> {
     return this.request("/session");
+  }
+
+  getWandbCapabilities(): Promise<WandbCapabilities> {
+    return this.request("/capabilities");
   }
 
   revokeSession(): Promise<SessionInfo> {
@@ -403,6 +451,34 @@ export class TrainingApiClient {
         "Il package scaricato non ha superato la verifica di integrità SHA-256; il download è stato annullato. Riprova o rigenera il job");
     }
     return new Blob([bytes], { type: "application/octet-stream" });
+  }
+
+  /**
+   * Download an authenticated offline W&B run and verify it before exposing
+   * any bytes to the caller. The backend digest is authoritative for the
+   * exact ZIP response, not for a mutable job directory.
+   */
+  async downloadWandbOffline(jobId: string): Promise<Blob> {
+    requireWebCrypto();
+    const response = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/wandb/offline`, {
+      headers: this.authHeaders(),
+    });
+    if (!response.ok) throw await responseError(response);
+
+    const header = response.headers.get("x-nnm-sha256");
+    if (header === null) {
+      throw new BackendApiError(502, "wandb_offline_digest_missing",
+        "Il server non ha restituito il digest SHA-256 dell'archivio W&B; il download è stato annullato");
+    }
+    const declared = requireSha256Hex(header, 502, "wandb_offline_digest_invalid",
+      "Il digest SHA-256 dell'archivio W&B non è valido; il download è stato annullato");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bodyDigest = await sha256Hex(bytes);
+    if (bodyDigest !== declared) {
+      throw new BackendApiError(502, "wandb_offline_corrupted",
+        "L'archivio W&B scaricato non ha superato la verifica di integrità SHA-256; il download è stato annullato");
+    }
+    return new Blob([bytes], { type: response.headers.get("content-type") ?? "application/zip" });
   }
 
   async subscribeTrainingEvents(

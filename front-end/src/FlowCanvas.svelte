@@ -762,6 +762,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       isOpen={isSidebarOpen}
       onClose={() => (isSidebarOpen = false)}
       {getSpawnPosition}
+      {trainingController}
     />
   {:else}
     <TrainingSidebar

@@ -33,6 +33,9 @@ import linearInference from "../../../stereotype-packages/core/linear/inference.
 import matmulManifest from "../../../stereotype-packages/core/matmul/manifest.json?raw"
 import matmulDefinition from "../../../stereotype-packages/core/matmul/stereotype.json?raw"
 import matmulInference from "../../../stereotype-packages/core/matmul/inference.lua?raw"
+import transposeManifest from "../../../stereotype-packages/core/transpose/manifest.json?raw"
+import transposeDefinition from "../../../stereotype-packages/core/transpose/stereotype.json?raw"
+import transposeInference from "../../../stereotype-packages/core/transpose/inference.lua?raw"
 import mseLossManifest from "../../../stereotype-packages/core/mse-loss/manifest.json?raw"
 import mseLossDefinition from "../../../stereotype-packages/core/mse-loss/stereotype.json?raw"
 import mseLossInference from "../../../stereotype-packages/core/mse-loss/inference.lua?raw"
@@ -63,6 +66,7 @@ const packages: readonly PackageSelection[] = [
   packageSelection(addManifest, addDefinition, addInference),
   packageSelection(concatManifest, concatDefinition, concatInference),
   packageSelection(matmulManifest, matmulDefinition, matmulInference),
+  packageSelection(transposeManifest, transposeDefinition, transposeInference),
   packageSelection(castManifest, castDefinition, castInference),
   packageSelection(embeddingManifest, embeddingDefinition, embeddingInference),
   packageSelection(crossEntropyManifest, crossEntropyDefinition, crossEntropyInference),
@@ -85,7 +89,7 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, loss, and output packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.mse-loss", "core.output", "core.repeat", "core.scale", "core.softmax", "core.horizontal-repeat", "core.subflow-proxy"]) {
+    for (const id of ["core.input", "core.layer-norm", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.transpose", "core.cast", "core.embedding", "core.cross-entropy", "core.mse-loss", "core.output", "core.repeat", "core.scale", "core.softmax", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(ref(id))
     }
     expect(host.packageDefinition(ref("core.repeat"))?.wheelAdapters).toEqual([
@@ -154,6 +158,45 @@ describe("new core standard-library packages", () => {
     ] }, {})).toEqual({ status: "success", output: { shape: [32, 8], dtype: "float32" } })
 
     expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: ["B", "T", 32], dtype: "float32" },
+      { shape: ["B", 32, 16], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: ["B", "T", 16], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: [2, 1, 3, 4], dtype: "float32" },
+      { shape: [1, 5, 4, 6], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: [2, 5, 3, 6], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: [4], dtype: "float32" },
+      { shape: [4, 8], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: [8], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: [3, 4], dtype: "float32" },
+      { shape: [4], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: [3], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: [4], dtype: "float32" },
+      { shape: [4], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: [], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.transpose"), { kind: "layer", inputs: [
+      { shape: ["B", "T", 32], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: ["B", 32, "T"], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.transpose"), { kind: "layer", inputs: [
+      { shape: [3, 4], dtype: "float32" },
+    ] }, {})).toEqual({ status: "success", output: { shape: [4, 3], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.transpose"), { kind: "layer", inputs: [
+      { shape: [2, 3, 4], dtype: "float32" },
+    ] }, { dim0: 0, dim1: 2 })).toEqual({
+      status: "success", output: { shape: [4, 3, 2], dtype: "float32" },
+    })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
       { shape: [32, 64], dtype: "float32" },
       { shape: [128, 16], dtype: "float32" },
     ] }, {})).toEqual({
@@ -176,7 +219,7 @@ describe("new core standard-library packages", () => {
 
   test("preserves explicit dtype behavior and rejects mismatches", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.linear", "core.cast", "core.embedding", "core.concat", "core.matmul"]) await host.activate(ref(id))
+    for (const id of ["core.linear", "core.cast", "core.embedding", "core.concat", "core.matmul", "core.transpose"]) await host.activate(ref(id))
 
     expect(host.inferForEditor(ref("core.linear"), { kind: "layer", inputs: [{ shape: ["B", 128], dtype: "float16" }] }, {
       in_features: 128, out_features: 64, dtype: "float16",
@@ -211,6 +254,36 @@ describe("new core standard-library packages", () => {
     ] }, {})).toEqual({
       status: "error",
       message: "MatMul inner dimensions are incompatible: input 2 has 16, input 3 has 8",
+    })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: [2, 3, 4], dtype: "float32" },
+      { shape: [5, 4, 6], dtype: "float32" },
+    ] }, {})).toEqual({
+      status: "error",
+      message: "MatMul batch dimensions are incompatible: input 1 has 2, input 2 has 5 at aligned batch dimension 1",
+    })
+
+    expect(host.inferForEditor(ref("core.matmul"), { kind: "join", inputs: [
+      { shape: [], dtype: "float32" },
+      { shape: [1], dtype: "float32" },
+    ] }, {})).toEqual({
+      status: "error",
+      message: "MatMul input 1 must have rank at least 1, got 0",
+    })
+
+    expect(host.inferForEditor(ref("core.transpose"), { kind: "layer", inputs: [
+      { shape: [32], dtype: "float32" },
+    ] }, {})).toEqual({
+      status: "error",
+      message: "Transpose expects a tensor of rank at least 2, got 1",
+    })
+
+    expect(host.inferForEditor(ref("core.transpose"), { kind: "layer", inputs: [
+      { shape: [2, 3, 4], dtype: "float32" },
+    ] }, { dim0: 0, dim1: 3 })).toEqual({
+      status: "error",
+      message: "Transpose dim1: tensor dimension 3 is out of range",
     })
   })
 

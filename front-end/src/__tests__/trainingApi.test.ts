@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob, canonicalDatasetParameters } from "../training/api";
+import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob, canonicalDatasetParameters, isWandbRun } from "../training/api";
 import { trainingLogWindowUrl } from "../training/windows";
 
 afterEach(() => {
@@ -32,6 +32,27 @@ describe("training job actions", () => {
     expect(canCancelTrainingJob("succeeded")).toBe(false);
     expect(canCancelTrainingJob("failed")).toBe(false);
     expect(canCancelTrainingJob("cancelled")).toBe(false);
+  });
+});
+
+describe("structured W&B runs", () => {
+  const baseRun = { id: "run-1", entity: "team", project: "demo" };
+
+  it("accepts only mode-consistent safe run URLs", () => {
+    expect(isWandbRun({ ...baseRun, mode: "offline", url: null })).toBe(true);
+    expect(isWandbRun({ ...baseRun, mode: "offline", url: "https://wandb.test/runs/1" })).toBe(false);
+    expect(isWandbRun({ ...baseRun, mode: "online", url: "https://wandb.test/runs/1" })).toBe(true);
+
+    for (const url of [
+      "javascript:alert(1)",
+      "file:///tmp/run",
+      "data:text/plain,run",
+      "/runs/1",
+      "https://",
+      "not a url",
+    ]) {
+      expect(isWandbRun({ ...baseRun, mode: "online", url })).toBe(false);
+    }
   });
 });
 
@@ -129,6 +150,25 @@ describe("authenticated training API", () => {
       status: 401,
       code: "session_expired",
     });
+  });
+
+  it("loads the sanitized W&B capability contract", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        available_modes: ["disabled", "offline", "online"],
+        online: { configured: true, entity: "team", base_url: "https://api.wandb.ai", reason: null },
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await expect(api.getWandbCapabilities()).resolves.toEqual({
+      available_modes: ["disabled", "offline", "online"],
+      online: { configured: true, entity: "team", base_url: "https://api.wandb.ai", reason: null },
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/capabilities");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
   });
 
   it("requests incremental job logs with authenticated byte cursors", async () => {
@@ -290,6 +330,64 @@ describe("authenticated training API", () => {
     expect(apiError.message).toMatch(/HTTPS|localhost/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(digestMock).toHaveBeenCalledWith("SHA-256", expect.any(Uint8Array));
+  });
+
+  it("downloads and verifies an offline W&B archive", async () => {
+    const expected = await sha256Hex("wandb-run");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("wandb-run", {
+        status: 200,
+        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    const archive = await api.downloadWandbOffline("job-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/jobs/job-1/wandb/offline");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
+    expect(archive.type).toBe("application/zip");
+    expect(await archive.text()).toBe("wandb-run");
+  });
+
+  it("rejects a corrupted offline W&B archive before returning a Blob", async () => {
+    const expected = await sha256Hex("pristine-run");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("corrupted-run", {
+        status: 200,
+        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
+      }),
+    ));
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await expect(api.downloadWandbOffline("job-1")).rejects.toMatchObject<Partial<BackendApiError>>({
+      status: 502,
+      code: "wandb_offline_corrupted",
+    });
+  });
+
+  it("delivers the structured W&B run from SSE without a legacy URL field", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        stream.enqueue(new TextEncoder().encode(
+          'id: 1\ndata: {"type":"wandb_ready","wandb_run":{"mode":"online","id":"run-1","entity":"team","project":"demo","url":"https://wandb.test/runs/1"}}\n\n'
+          + 'id: 2\ndata: {"type":"succeeded"}\n\n',
+        ));
+        stream.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200 })));
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+    const events: Record<string, unknown>[] = [];
+
+    await api.subscribeTrainingEvents("job-1", (event) => events.push(event), new AbortController().signal);
+
+    expect(events[0]).toMatchObject({
+      type: "wandb_ready",
+      wandb_run: { mode: "online", id: "run-1", url: "https://wandb.test/runs/1" },
+    });
   });
 });
 

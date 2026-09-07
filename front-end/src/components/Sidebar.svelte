@@ -7,10 +7,13 @@ Licensed under the GNU General Public License v3 or later.
 
 <script lang="ts">
   import SDropdown from "./SDropdown.svelte";
+  import "../styles/sidebar.css";
   import type { Diagram } from "../Diagram.svelte";
   import type { Node } from "@xyflow/svelte";
   import type { ActivePackageMetadata, EditorInferenceState } from "../type-system/host";
+  import type { PackageRuntimeDiagnostic } from "../type-system/diagnostics";
   import type { ParameterDefinition } from "../type-system/packages/types";
+  import type { TrainingController, TrainingControllerSnapshot } from "../training/controller";
   import {
     formatEditorValue,
     initialPackageParameters,
@@ -29,9 +32,10 @@ Licensed under the GNU General Public License v3 or later.
     isOpen: boolean;
     onClose: () => void;
     getSpawnPosition: () => { x: number; y: number };
+    trainingController?: TrainingController;
   }
 
-  let { diagram, selectedNode, isOpen, onClose, getSpawnPosition }: Props = $props();
+  let { diagram, selectedNode, isOpen, onClose, getSpawnPosition, trainingController }: Props = $props();
 
   let form = $state({
     name: "",
@@ -49,6 +53,7 @@ Licensed under the GNU General Public License v3 or later.
   let sidebarWidth = $state(320);
   let isDragging = $state(false);
   let lastLoadedKey = $state<string | null>(null);
+  let wandbCapabilities = $state<TrainingControllerSnapshot["wandbCapabilities"]>(null);
 
   let isEditing = $derived(selectedNode !== null);
   let selectedPackageIdentity = $derived(selectedNode ? nodePackageIdentity(selectedNode) : undefined);
@@ -89,6 +94,13 @@ Licensed under the GNU General Public License v3 or later.
     lastLoadedKey = key;
     if (selectedNode) loadExistingNode(selectedNode);
     else resetForm();
+  });
+
+  $effect(() => {
+    if (!trainingController) return;
+    return trainingController.subscribe((snapshot) => {
+      wandbCapabilities = snapshot.wandbCapabilities;
+    });
   });
 
   function loadExistingNode(node: Node) {
@@ -262,9 +274,22 @@ Licensed under the GNU General Public License v3 or later.
   });
 
   let diagnosticCount = $derived(packageDiagnostics.length);
-  let runtimeDiagnostics = $derived(diagram.packageRuntimeDiagnostics);
+  let runtimeDiagnostics = $derived.by(() => {
+    const diagnostics: PackageRuntimeDiagnostic[] = [...diagram.packageRuntimeDiagnostics];
+    const online = wandbCapabilities?.online;
+    if (online && !online.configured) {
+      diagnostics.push({
+        occurrenceId: "runtime:wandb-online-capability",
+        severity: "fatal",
+        phase: "validation",
+        message: `W&B online non disponibile: ${online.reason ?? "configurazione incompleta"}`,
+      });
+    }
+    return diagnostics;
+  });
 
   function runtimeDiagnosticIdentity(diagnostic: (typeof runtimeDiagnostics)[number]): string {
+    if (diagnostic.occurrenceId === "runtime:wandb-online-capability") return "W&B backend";
     if (diagnostic.packageId && diagnostic.packageVersion) return `${diagnostic.packageId}@${diagnostic.packageVersion}`;
     if (diagnostic.packageId) return diagnostic.packageId;
     return "Type-system runtime";
@@ -440,7 +465,6 @@ Licensed under the GNU General Public License v3 or later.
 {/if}
 
 <style>
-  @import "../styles/sidebar.css";
   .type-error-panel { margin-top: 16px; border-top: 1px solid #e5e7eb; padding-top: 12px; }
   .type-error-panel-header { display: flex; justify-content: space-between; align-items: center; font-weight: 650; font-size: .85rem; margin-bottom: 8px; }
   .diagnostic-count { min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; background: #e5e7eb; color: #4b5563; font-size: .72rem; }

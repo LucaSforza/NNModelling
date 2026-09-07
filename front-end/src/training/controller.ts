@@ -7,6 +7,8 @@ import {
   type DatasetInfo,
   type PairingGrant,
   type SessionInfo,
+  type WandbCapabilities,
+  type WandbMode,
 } from "./api";
 import {
   forgetBackendConnection,
@@ -57,7 +59,7 @@ export interface TrainingConfig {
   patience: number;
   minDelta: number;
   wandbProject: string;
-  wandbMode: "disabled" | "offline" | "online";
+  wandbMode: WandbMode;
   cpu: number;
   memoryGb: number;
   gpu: number;
@@ -127,6 +129,7 @@ export interface TrainingControllerSnapshot {
   connection: TrainingConnectionView;
   config: TrainingConfig;
   datasets: DatasetInfo[];
+  wandbCapabilities: WandbCapabilities | null;
 }
 
 export type TrainingControllerListener = (snapshot: TrainingControllerSnapshot) => void;
@@ -169,6 +172,7 @@ export class TrainingController {
   private savedConnection: SavedBackendConnection | null = null;
   private pairing: PairingGrant | null = null;
   private connection: TrainingConnectionView = disconnectedView();
+  private wandbCapabilities: WandbCapabilities | null = null;
   private config: TrainingConfig = cloneConfig(DEFAULT_CONFIG);
   private datasets: DatasetInfo[] = [];
   private projectDatasetResources = new Map<string, GeneratedDatasetResources>();
@@ -193,6 +197,7 @@ export class TrainingController {
       connection: { ...this.connection },
       config: cloneConfig(this.config),
       datasets: this.datasets.map((dataset) => ({ ...dataset, definition: { ...dataset.definition, parameters: dataset.definition.parameters.map((parameter) => ({ ...parameter })) } })),
+      wandbCapabilities: cloneWandbCapabilities(this.wandbCapabilities),
     };
   }
 
@@ -202,6 +207,14 @@ export class TrainingController {
 
   getConfig(): TrainingConfig {
     return cloneConfig(this.config);
+  }
+
+  getWandbCapabilities(): WandbCapabilities | null {
+    return cloneWandbCapabilities(this.wandbCapabilities);
+  }
+
+  getAvailableWandbModes(): WandbMode[] {
+    return [...(this.wandbCapabilities?.available_modes ?? ["disabled", "offline"])];
   }
 
   getDatasets(): DatasetInfo[] {
@@ -349,6 +362,7 @@ export class TrainingController {
       this.api = null;
       this.savedConnection = null;
       this.pairing = null;
+      this.wandbCapabilities = null;
       this.datasets = [];
       this.connection = disconnectedView();
       this.emit();
@@ -380,6 +394,12 @@ export class TrainingController {
         ? { ...(patch.datasetParams as Record<string, unknown>) }
         : { ...this.config.datasetParams, ...(patch.datasetParams as Record<string, unknown>) };
     const next = { ...this.config, ...normalizedPatch, datasetParams } as TrainingConfig;
+    if (next.wandbMode === "online" && this.wandbCapabilities && !this.wandbCapabilities.available_modes.includes("online")) {
+      throw new TrainingConfigurationError(
+        this.wandbCapabilities.online.reason ?? "La modalità W&B online non è disponibile",
+        { field: "wandbMode", mode: "online" },
+      );
+    }
     // Draft edits may temporarily omit a required dataset value; submission
     // performs the strict check once the user has finished editing.
     validateConfig(next, this.datasets, { allowIncompleteDatasetParams: true });
@@ -434,6 +454,12 @@ export class TrainingController {
     const dataset = this.datasets.find((candidate) => candidate.reference.ref === config.selectedDataset);
     if (!dataset) throw new TrainingConfigurationError("Seleziona un dataset disponibile prima di accodare il training", { field: "selectedDataset" });
     validateConfig(config, this.datasets);
+    if (config.wandbMode === "online" && !this.wandbCapabilities?.available_modes.includes("online")) {
+      throw new TrainingConfigurationError(
+        this.wandbCapabilities?.online.reason ?? "La modalità W&B online non è disponibile",
+        { field: "wandbMode", mode: "online" },
+      );
+    }
 
     await diagram.waitForPackageRuntime();
     assertCurrent(this, generation);
@@ -515,6 +541,23 @@ export class TrainingController {
       sessionExpiresAt: session.expires_at,
       error: null,
     };
+    this.wandbCapabilities = null;
+    this.emit();
+    await this.loadWandbCapabilities();
+  }
+
+  private async loadWandbCapabilities(): Promise<void> {
+    const api = this.api;
+    if (!api) return;
+    const generation = this.generation;
+    let capabilities: WandbCapabilities;
+    try {
+      capabilities = normalizeWandbCapabilities(await api.getWandbCapabilities());
+    } catch {
+      capabilities = unavailableWandbCapabilities("Lo stato di connessione W&B non è disponibile");
+    }
+    if (this.api !== api || this.generation !== generation) return;
+    this.wandbCapabilities = capabilities;
     this.emit();
   }
 
@@ -545,6 +588,41 @@ export class TrainingController {
     const snapshot = this.snapshot();
     for (const listener of this.listeners) listener(snapshot);
   }
+}
+
+function unavailableWandbCapabilities(reason: string): WandbCapabilities {
+  return {
+    available_modes: ["disabled", "offline"],
+    online: { configured: false, entity: null, base_url: null, reason },
+  };
+}
+
+function normalizeWandbCapabilities(value: WandbCapabilities): WandbCapabilities {
+  const online = value?.online;
+  const configured = online?.configured === true;
+  const available = Array.isArray(value?.available_modes)
+    ? value.available_modes.filter((mode): mode is WandbMode => ["disabled", "offline", "online"].includes(mode))
+    : [];
+  const availableModes = Array.from(new Set(["disabled", "offline", ...available] as WandbMode[]));
+  const onlineIndex = availableModes.indexOf("online");
+  if (!configured && onlineIndex >= 0) availableModes.splice(onlineIndex, 1);
+  return {
+    available_modes: availableModes,
+    online: {
+      configured,
+      entity: typeof online?.entity === "string" ? online.entity : null,
+      base_url: typeof online?.base_url === "string" ? online.base_url : null,
+      reason: typeof online?.reason === "string" ? online.reason : null,
+    },
+  };
+}
+
+function cloneWandbCapabilities(value: WandbCapabilities | null): WandbCapabilities | null {
+  if (!value) return null;
+  return {
+    available_modes: [...value.available_modes],
+    online: { ...value.online },
+  };
 }
 
 function disconnectedView(): TrainingConnectionView {

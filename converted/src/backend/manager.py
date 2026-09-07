@@ -11,11 +11,12 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
 from backend.executors import ContainerExecutor, Executor
-from backend.models import JobStatus, JobSubmission, ResourceRequest
+from backend.models import BackendCapabilities, JobStatus, JobSubmission, ResourceRequest, WandbRun
 from backend.package_store import PackageStore
 from backend.store import JobStore, ValkeyJobStore, utc_now
 from model_package.exporter import build_model_wheel, repackage_model_wheel, validate_package_name
@@ -23,6 +24,10 @@ from backend.dataset_store import DatasetArchiveLimits, DatasetArchiveStore
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+
+
+class WandbUnavailableError(ValueError):
+    """Raised when an explicitly online job cannot be admitted safely."""
 
 # The failed transition is persisted atomically by the store (record update +
 # queue removal in one operation). A bounded retry heals transient store
@@ -182,6 +187,12 @@ class JobManager:
     def submit(self, submission: JobSubmission, *, owner_connection_id: str) -> JobStatus:
         """Validate, materialize and enqueue a complete job document."""
 
+        if submission.training.wandb.mode == "online":
+            capability = self.wandb_capabilities()
+            online = capability["online"]
+            if not online["configured"]:
+                reason = online.get("reason") or "W&B online mode is unavailable"
+                raise WandbUnavailableError(reason)
         if not self.executors:
             raise ValueError(
                 "No container executor is configured; package jobs cannot be submitted"
@@ -233,7 +244,7 @@ class JobManager:
             "compute_unit": None,
             "error": None,
             "heartbeat_at": None,
-            "wandb_url": None,
+            "wandb_run": None,
             "model_package": None,
             "package_error": None,
             "artifact_dir": str(artifact_dir),
@@ -274,6 +285,32 @@ class JobManager:
         """Return every job, including records created before ownership existed."""
 
         return [self._public_status(job) for job in self._sorted_jobs()]
+
+    def wandb_capabilities(self) -> dict[str, Any]:
+        """Return the live, sanitized W&B mode capability of this manager."""
+
+        for executor in self.executors:
+            if getattr(executor, "kind", None) != "container":
+                continue
+            capability = getattr(executor, "wandb_capabilities", None)
+            if not callable(capability):
+                continue
+            try:
+                value = capability()
+                return BackendCapabilities.model_validate(value).model_dump(mode="json")
+            except Exception:
+                # A controller outage is a capability miss, never a reason to
+                # expose an internal exception or admit an online job.
+                break
+        return BackendCapabilities(
+            available_modes=["disabled", "offline"],
+            online={
+                "configured": False,
+                "entity": None,
+                "base_url": None,
+                "reason": "container controller unavailable",
+            },
+        ).model_dump(mode="json")
 
     def run_once(self) -> bool:
         """Claim and start the highest-priority compatible job, if any."""
@@ -366,13 +403,13 @@ class JobManager:
         timestamp = utc_now()
         job["heartbeat_at"] = timestamp
         job["heartbeat"] = details
-        wandb_url = _find_wandb_url(job)
-        if wandb_url and wandb_url != job.get("wandb_url"):
-            job["wandb_url"] = wandb_url
-            self.store.save_job(job_id, job)
-            self._event(job_id, "wandb_ready", {"wandb_url": wandb_url})
-        else:
-            self.store.save_job(job_id, job)
+        wandb_run = _read_wandb_run(job)
+        run_changed = wandb_run is not None and wandb_run != job.get("wandb_run")
+        if run_changed:
+            job["wandb_run"] = wandb_run
+        self.store.save_job(job_id, job)
+        if run_changed:
+            self._event(job_id, "wandb_ready", {"wandb_run": wandb_run})
         self._event(job_id, "heartbeat", details)
 
     def _finished(self, job_id: str, return_code: int, details: dict[str, Any]) -> None:
@@ -381,11 +418,16 @@ class JobManager:
             with self._lock:
                 self._active.pop(job_id, None)
             return
-        wandb_url = _find_wandb_url(job)
-        publish_wandb_url = wandb_url is not None and wandb_url != job.get("wandb_url")
+        manifest_run = _read_wandb_run(job)
+        wandb_run = manifest_run if manifest_run is not None else job.get("wandb_run")
+        if not isinstance(wandb_run, dict):
+            wandb_run = None
+        publish_wandb_run = manifest_run is not None and manifest_run != job.get("wandb_run")
+        if publish_wandb_run:
+            job["wandb_run"] = wandb_run
+            self.store.save_job(job_id, job)
+            self._event(job_id, "wandb_ready", {"wandb_run": wandb_run})
         if return_code == 0:
-            if publish_wandb_url:
-                self._event(job_id, "wandb_ready", {"wandb_url": wandb_url})
             # The wheel is part of the promised output of a successful job:
             # the job is never persisted as ``succeeded`` before the package
             # export committed. A packaging failure (missing/corrupt safe
@@ -398,7 +440,7 @@ class JobManager:
                     "succeeded",
                     finished_at=utc_now(),
                     error=None,
-                    wandb_url=wandb_url,
+                    wandb_run=wandb_run,
                 )
                 self._drop_active(job_id)
                 self._event(job_id, "succeeded", details)
@@ -409,7 +451,7 @@ class JobManager:
                     "failed",
                     finished_at=utc_now(),
                     error=error,
-                    wandb_url=wandb_url,
+                    wandb_run=wandb_run,
                 )
                 self._drop_active(job_id)
                 self._event(job_id, "failed", {"error": error, **details})
@@ -420,11 +462,9 @@ class JobManager:
                 "failed",
                 finished_at=utc_now(),
                 error=error,
-                wandb_url=wandb_url,
+                wandb_run=wandb_run,
             )
             self._drop_active(job_id)
-            if publish_wandb_url:
-                self._event(job_id, "wandb_ready", {"wandb_url": wandb_url})
             self._event(job_id, "failed", {"error": error, **details})
 
     def _drop_active(self, job_id: str) -> None:
@@ -548,6 +588,44 @@ class JobManager:
                 snapshot_dir=self.package_snapshot_dir,
             )
         return snapshot, generated.name, generated_digest
+
+    def wandb_offline_download(
+        self,
+        job_id: str,
+        *,
+        owner_connection_id: str,
+    ) -> tuple[Path, str, str]:
+        """Snapshot an owned offline W&B directory for authenticated download."""
+
+        job = self._owned_job(job_id, owner_connection_id)
+        if job.get("status") not in TERMINAL_STATES:
+            raise FileNotFoundError("Offline W&B run is not available")
+        requested_mode = (
+            job.get("submission", {})
+            .get("training", {})
+            .get("wandb", {})
+            .get("mode")
+        )
+        if requested_mode != "offline":
+            raise FileNotFoundError("Offline W&B run is not available")
+        run = job.get("wandb_run")
+        if not isinstance(run, dict) or run.get("mode") != "offline":
+            run = _read_wandb_run(job)
+        if not isinstance(run, dict) or run.get("mode") != "offline":
+            raise FileNotFoundError("Offline W&B run is not available")
+        artifact_root = Path(job["artifact_dir"]).resolve()
+        wandb_root = (artifact_root / "wandb").resolve()
+        try:
+            wandb_root.relative_to(artifact_root)
+        except ValueError as exc:
+            raise FileNotFoundError("Offline W&B run is not available") from exc
+        if not wandb_root.is_dir():
+            raise FileNotFoundError("Offline W&B run is not available")
+        snapshot, digest = _create_wandb_snapshot(
+            wandb_root,
+            snapshot_dir=self.package_snapshot_dir,
+        )
+        return snapshot, f"wandb-{job_id}.zip", digest
 
     def tail_logs(
         self,
@@ -767,12 +845,73 @@ def _tail_text(path: Path, offset: int, *, limit: int = 64 * 1024) -> dict[str, 
     }
 
 
-def _find_wandb_url(job: dict[str, Any]) -> str | None:
-    """Extract the W&B run URL printed by the known training entry point."""
+def _read_wandb_run(job: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the worker's atomic structured run manifest without log scraping."""
 
-    root = Path(job["artifact_dir"])
-    content = "\n".join(
-        _read_text(root / filename) for filename in ("stdout.log", "stderr.log")
+    try:
+        value = json.loads((Path(job["artifact_dir"]) / "wandb-run.json").read_text(encoding="utf-8"))
+        return WandbRun.model_validate(value).model_dump(mode="json")
+    except (KeyError, OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        # A manifest is optional for disabled jobs and may be observed while a
+        # worker is atomically replacing it.  The next heartbeat retries it.
+        return None
+
+
+def _create_wandb_snapshot(
+    root: Path,
+    *,
+    snapshot_dir: Path | None,
+    chunk_size: int = PACKAGE_SNAPSHOT_CHUNK_SIZE,
+) -> tuple[Path, str]:
+    """Create a path-safe ZIP snapshot and hash exactly the served bytes."""
+
+    files: list[tuple[Path, str]] = []
+    for source in sorted(root.rglob("*")):
+        if source.is_symlink() or not source.is_file():
+            continue
+        try:
+            relative = source.relative_to(root)
+        except ValueError:
+            continue
+        if any(part in {"", ".", ".."} for part in relative.parts):
+            continue
+        files.append((source, relative.as_posix()))
+    if not files:
+        raise FileNotFoundError("Offline W&B run is not available")
+    if snapshot_dir is not None:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix="nnm_wandb_",
+        suffix=".zip",
+        dir=str(snapshot_dir) if snapshot_dir is not None else None,
     )
-    match = re.search(r"https?://wandb\.ai/[A-Za-z0-9._/-]+", content)
-    return match.group(0).rstrip(".,)") if match else None
+    snapshot = Path(raw_path)
+    try:
+        with os.fdopen(descriptor, "wb") as raw:
+            with zipfile.ZipFile(raw, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for source, relative in files:
+                    info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    with archive.open(info, mode="w") as target, source.open("rb") as source_file:
+                        while True:
+                            chunk = source_file.read(chunk_size)
+                            if not chunk:
+                                break
+                            target.write(chunk)
+    except BaseException:
+        _remove_file(snapshot)
+        raise
+    return snapshot, _sha256_file(snapshot, chunk_size=chunk_size)
+
+
+def _sha256_file(path: Path, *, chunk_size: int = PACKAGE_SNAPSHOT_CHUNK_SIZE) -> str:
+    """Hash a private snapshot in bounded chunks."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()

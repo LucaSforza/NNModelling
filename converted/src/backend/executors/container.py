@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from backend.container_controller import (
-    CliEngineAdapter, ContainerCapabilityError, ContainerController, ContainerControllerClient, ContainerJobSpec,
+    CliEngineAdapter,
+    ContainerCapabilityError,
+    ContainerController,
+    ContainerControllerClient,
+    ContainerJobSpec,
+    ControllerProtocolError,
+    WandbControllerConfig,
 )
 from backend.executors.base import FinishedCallback, HeartbeatCallback
 from backend.models import ResourceRequest
@@ -67,7 +73,6 @@ class ContainerExecutor:
         capacity: ResourceRequest | None = None,
         pid_limit: int | None = None,
         timeout_seconds: float | None = None,
-        network: str | None = None,
         popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     ) -> None:
         self.engine = self._engine_argv(engine or os.environ.get("NNM_CONTAINER_ENGINE", "podman"))
@@ -80,13 +85,10 @@ class ContainerExecutor:
             if timeout_seconds is not None
             else float(os.environ.get("NNM_CONTAINER_TIMEOUT_SECONDS", "3600"))
         )
-        network = network or os.environ.get("NNM_CONTAINER_NETWORK", "none")
         if pid_limit < 1:
             raise ValueError("pid_limit must be positive")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
-        if network != "none":
-            raise ValueError("package workers require network='none'")
         self.capacity = capacity or ResourceRequest(
             cpu=os.cpu_count() or 1,
             memory_gb=_memory_gb(),
@@ -94,7 +96,6 @@ class ContainerExecutor:
         )
         self.pid_limit = pid_limit
         self.timeout_seconds = timeout_seconds
-        self.network = network
         self._popen_factory = popen_factory
         self._controller: ContainerController | None = None
         self._remote: ContainerControllerClient | None = None
@@ -120,7 +121,7 @@ class ContainerExecutor:
             "enabled": True,
             "engine": self.engine[0],
             "image": self.image,
-            "network": self.network,
+            "network": "mode-derived",
             "gpu": "unsupported; configure a dedicated GPU executor",
         }
 
@@ -142,7 +143,11 @@ class ContainerExecutor:
         spec = self._spec(job, artifact_path, input_path)
         engine_kind = "docker" if Path(self.engine[0]).name == "docker" else "podman"
         return ContainerController(
-            engine=CliEngineAdapter(engine_kind, executable=self.engine[0]),
+            engine=CliEngineAdapter(
+                engine_kind,
+                executable=self.engine[0],
+                wandb_config=WandbControllerConfig.from_environment(),
+            ),
             input_root=input_path.resolve().parent, artifact_root=artifact_path.resolve().parent,
         ).command(spec)
 
@@ -154,53 +159,91 @@ class ContainerExecutor:
         # Wrapper commands retain Podman's secure defaults unless the invoked
         # executable is explicitly Docker.
         engine_kind = "docker" if Path(self.engine[0]).name == "docker" else "podman"
-        adapter = CliEngineAdapter(engine_kind, executable=self.engine[0])
+        wandb_config = WandbControllerConfig.from_environment()
+        adapter = CliEngineAdapter(
+            engine_kind,
+            executable=self.engine[0],
+            wandb_config=wandb_config,
+        )
         # Production talks only to the operator-launched controller service.
         # An injected popen factory is retained strictly for unit tests and
         # never selects this branch in a deployed backend.
         if self._popen_factory is subprocess.Popen:
-            socket_name = os.environ.get("NNM_CONTAINER_CONTROLLER_SOCKET")
-            token_file = os.environ.get("NNM_CONTAINER_CONTROLLER_TOKEN_FILE")
-            if not socket_name or not token_file:
-                raise ContainerCapabilityError(
-                    "container controller unavailable; configure its authenticated Unix socket"
-                )
-            try:
-                token = Path(token_file).read_bytes()
-            except OSError as exc:
-                raise ContainerCapabilityError("container controller token unavailable") from exc
-            if not token or len(token) > 128:
-                raise ContainerCapabilityError("container controller token is invalid")
-            try:
-                text_token = token.strip().decode("ascii")
-                if len(text_token) % 2 == 0 and text_token and all(c in "0123456789abcdefABCDEF" for c in text_token):
-                    token = bytes.fromhex(text_token)
-            except UnicodeDecodeError:
-                pass
-            if not token:
-                raise ContainerCapabilityError("container controller token is invalid")
-            self._remote = ContainerControllerClient(Path(socket_name), token)
+            self._remote = self._remote_client()
             return None  # type: ignore[return-value]
         controller = ContainerController(
             engine=adapter,
             input_root=input_dir.resolve().parent,
             artifact_root=artifact_dir.resolve().parent,
             dataset_root=(dataset_dir.resolve().parent if dataset_dir is not None else _dataset_root()),
+            wandb_config=wandb_config,
             popen=self._popen_factory,
         )
         self._controller = controller
         return controller
 
+    @staticmethod
+    def _remote_client() -> ContainerControllerClient:
+        """Build a controller RPC client from operator-only environment state."""
+
+        socket_name = os.environ.get("NNM_CONTAINER_CONTROLLER_SOCKET")
+        token_file = os.environ.get("NNM_CONTAINER_CONTROLLER_TOKEN_FILE")
+        if not socket_name or not token_file:
+            raise ContainerCapabilityError(
+                "container controller unavailable; configure its authenticated Unix socket"
+            )
+        try:
+            token = Path(token_file).read_bytes()
+        except OSError as exc:
+            raise ContainerCapabilityError("container controller token unavailable") from exc
+        if not token or len(token) > 128:
+            raise ContainerCapabilityError("container controller token is invalid")
+        try:
+            text_token = token.strip().decode("ascii")
+            if len(text_token) % 2 == 0 and text_token and all(c in "0123456789abcdefABCDEF" for c in text_token):
+                token = bytes.fromhex(text_token)
+        except UnicodeDecodeError:
+            pass
+        if not token:
+            raise ContainerCapabilityError("container controller token is invalid")
+        return ContainerControllerClient(Path(socket_name), token)
+
     def _spec(self, job: dict[str, Any], artifact_dir: str | Path, input_dir: str | Path) -> ContainerJobSpec:
         request = ResourceRequest.model_validate(job.get("resources", {}))
         if request.gpu:
             raise ValueError("GPU package jobs require a dedicated device policy")
+        wandb = job.get("submission", {}).get("training", {}).get("wandb", {})
+        mode = wandb.get("mode", "disabled") if isinstance(wandb, dict) else "disabled"
+        if mode not in {"disabled", "offline", "online"}:
+            raise ValueError("training.wandb.mode must be disabled, offline, or online")
+        network = "wandb" if mode == "online" else "none"
         return ContainerJobSpec(
             job_id=str(job["id"]), image=self.image, input_dir=Path(input_dir), artifact_dir=Path(artifact_dir),
             cpu=request.cpu, memory_gb=request.memory_gb, pid_limit=self.pid_limit,
-            timeout_seconds=self.timeout_seconds, network=self.network,
+            timeout_seconds=self.timeout_seconds, network=network,
             dataset_dir=Path(job["dataset_dir"]).resolve() if job.get("dataset_dir") else _dataset_root(),
         )
+
+    def wandb_capabilities(self) -> dict[str, Any]:
+        """Return the trusted controller's sanitized online capability."""
+
+        if self._remote is not None:
+            try:
+                return self._remote.wandb_capabilities()
+            except (ContainerCapabilityError, ControllerProtocolError, OSError, ConnectionError):
+                return _unavailable_wandb_capabilities("container controller unavailable")
+        if self._popen_factory is subprocess.Popen:
+            try:
+                remote = self._remote_client()
+                self._remote = remote
+                return remote.wandb_capabilities()
+            except (ContainerCapabilityError, ControllerProtocolError, OSError, ConnectionError):
+                return _unavailable_wandb_capabilities("container controller unavailable")
+        online = WandbControllerConfig.from_environment().status()
+        return {
+            "available_modes": ["disabled", "offline"] + (["online"] if online["configured"] else []),
+            "online": online,
+        }
 
     def submit(
         self,
@@ -257,3 +300,12 @@ class ContainerExecutor:
         if self._remote is not None:
             return self._remote.cancel(job_id)
         return self._controller.cancel(job_id) if self._controller is not None else False
+
+
+def _unavailable_wandb_capabilities(reason: str) -> dict[str, Any]:
+    """Build the stable sanitized capability shape for controller outages."""
+
+    return {
+        "available_modes": ["disabled", "offline"],
+        "online": {"configured": False, "entity": None, "base_url": None, "reason": reason},
+    }

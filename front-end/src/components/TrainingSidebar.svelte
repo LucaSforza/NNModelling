@@ -3,12 +3,16 @@
   import type { Diagram } from "../Diagram.svelte";
   import {
     BackendApiError,
+    isWandbRun,
     TrainingApiClient,
     canCancelTrainingJob,
     type DatasetInfo,
     type PairingGrant,
     type TrainingJobLogs,
     type TrainingJobStatus,
+    type WandbCapabilities,
+    type WandbMode,
+    type WandbRun,
   } from "../training/api";
   import { TrainingController, type TrainingControllerSnapshot } from "../training/controller";
   import { trainingLogWindowUrl } from "../training/windows";
@@ -52,7 +56,8 @@
   let minDelta = $state("0");
   let seed = $state("42");
   let wandbProject = $state("NeuralNetworks");
-  let wandbMode = $state<"disabled" | "offline" | "online">("disabled");
+  let wandbMode = $state<WandbMode>("disabled");
+  let wandbCapabilities = $state.raw<WandbCapabilities | null>(null);
   let cpu = $state("4");
   let memoryGb = $state("8");
   let gpu = $state("0");
@@ -96,6 +101,7 @@
   function applyControllerSnapshot(snapshot: TrainingControllerSnapshot): void {
     const wasActive = connectionState === "active";
     const view = snapshot.connection;
+    wandbCapabilities = snapshot.wandbCapabilities;
     connectionState = view.status;
     backendUrl = view.baseUrl ?? backendUrl;
     deviceName = view.deviceName ?? "";
@@ -234,7 +240,7 @@
       successMessage = `Job ${job.id} accodato.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);
-      startEvents(job.id, (wandbUrl) => openWandbWindow(wandbWindow, wandbUrl));
+      startEvents(job.id, (wandbRun) => openWandbWindow(wandbWindow, wandbRun));
       await loadJobLogs(job.id);
       await refreshJobs();
     } catch (error) {
@@ -246,14 +252,14 @@
     }
   }
 
-  function startEvents(jobId: string, onWandbReady?: (url: string) => void) {
+  function startEvents(jobId: string, onWandbReady?: (run: WandbRun) => void) {
     eventAbort?.abort();
     eventAbort = new AbortController();
     void requireApi().subscribeTrainingEvents(
       jobId,
       (event) => {
-        if (event.type === "wandb_ready" && typeof event.wandb_url === "string") {
-          onWandbReady?.(event.wandb_url);
+        if (event.type === "wandb_ready" && isWandbRun(event.wandb_run)) {
+          onWandbReady?.(event.wandb_run);
         }
         void refreshJobs();
       },
@@ -291,7 +297,27 @@
   }
 
   function openWandb(job: TrainingJobStatus) {
-    if (job.wandb_url) window.open(job.wandb_url, "_blank", "noopener,noreferrer");
+    const run = job.wandb_run;
+    if (run && isWandbRun(run) && run.mode === "online" && run.url) {
+      window.open(run.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  async function downloadWandbOffline(job: TrainingJobStatus) {
+    if (job.wandb_run?.mode !== "offline") return;
+    try {
+      const blob = await requireApi().downloadWandbOffline(job.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `wandb-${job.id.replace(/[^A-Za-z0-9._-]/g, "_")}.zip`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      handleConnectionError(error);
+    }
   }
 
   function openWaitingWindow(message: string): Window | null {
@@ -308,11 +334,12 @@
     if (target) target.location.href = trainingLogWindowUrl(window.location.href, jobId);
   }
 
-  function openWandbWindow(popup: Window | null, wandbUrl: string) {
+  function openWandbWindow(popup: Window | null, run: WandbRun) {
+    if (!isWandbRun(run) || run.mode !== "online" || !run.url) return;
     if (popup && !popup.closed) {
-      popup.location.replace(wandbUrl);
+      popup.location.replace(run.url);
     } else {
-      window.open(wandbUrl, "_blank", "noopener,noreferrer");
+      window.open(run.url, "_blank", "noopener,noreferrer");
     }
   }
 
@@ -365,6 +392,7 @@
   function formatExpiry(value: string | null | undefined): string {
     return value ? new Date(value).toLocaleString() : "non disponibile";
   }
+
 </script>
 
 <aside class="training-sidebar">
@@ -459,10 +487,34 @@
 
     <section>
       <h3>W&B</h3>
+      {#if wandbCapabilities?.online}
+        <div class="wandb-capability" aria-live="polite">
+          {#if wandbCapabilities.online.configured}
+            <strong>Online configurato</strong>
+            <small>Entity: {wandbCapabilities.online.entity ?? "amministratore"}</small>
+            <small>Base URL: {wandbCapabilities.online.base_url ?? "non disponibile"}</small>
+          {:else}
+            <strong>Online non disponibile</strong>
+            <small>{wandbCapabilities.online.reason ?? "Configurazione W&B mancante"}</small>
+          {/if}
+        </div>
+      {/if}
       <div class="grid">
         <label>Project<input bind:value={wandbProject} /></label>
-        <label>Mode<input bind:value={wandbMode} /></label>
+        <label>Mode
+          <select value={wandbMode} onchange={(event) => {
+            wandbMode = (event.currentTarget as HTMLSelectElement).value as WandbMode;
+            syncConfigFromDraft();
+          }}>
+            <option value="disabled">Disabilitato</option>
+            <option value="offline">Offline</option>
+            <option value="online" disabled={!wandbCapabilities?.available_modes.includes("online")}>Online (consigliato)</option>
+          </select>
+        </label>
       </div>
+      {#if wandbMode === "online" && !wandbCapabilities?.available_modes.includes("online")}
+        <small class="wandb-warning">La modalità online resta selezionata ma non può essere inviata finché il backend non la abilita.</small>
+      {/if}
     </section>
 
     <section>
@@ -489,7 +541,8 @@
           <small>priorità {job.priority} · {job.executor ?? "in coda"}</small>
           {#if job.error}<pre>{job.error}</pre>{/if}
           {#if canCancelTrainingJob(job.status)}<button onclick={() => cancel(job.id)}>Annulla</button>{/if}
-          {#if job.wandb_url}<button onclick={() => openWandb(job)}>Apri W&B</button>{/if}
+          {#if job.wandb_run && isWandbRun(job.wandb_run) && job.wandb_run.mode === "online" && job.wandb_run.url}<button onclick={() => openWandb(job)}>Apri W&B</button>{/if}
+          {#if job.wandb_run?.mode === "offline"}<button onclick={() => void downloadWandbOffline(job)}>Scarica W&B offline</button>{/if}
           <button onclick={() => openLogWindow(job.id)}>Apri terminale</button>
           {#if job.model_package}
             <button onclick={() => void downloadModelPackage(job)}>Scarica wheel</button>
