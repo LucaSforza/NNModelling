@@ -1,0 +1,41 @@
+{
+  "batch": {
+    "inputs": {
+      "features": {
+        "dtype": "int32",
+        "shape": [
+          "B",
+          128
+        ]
+      }
+    },
+    "targets": {
+      "target": {
+        "dtype": "float32",
+        "shape": [
+          "B",
+          2
+        ]
+      }
+    }
+  },
+  "classes": {
+    "count": 2,
+    "names": [
+      "ham",
+      "spam"
+    ]
+  },
+  "id": "spamham",
+  "name": "Enron Spam",
+  "parameters": [
+    {
+      "default": 32,
+      "name": "B",
+      "required": true,
+      "type": "integer"
+    }
+  ],
+  "schemaVersion": 1,
+  "version": "1.0.0"
+}
