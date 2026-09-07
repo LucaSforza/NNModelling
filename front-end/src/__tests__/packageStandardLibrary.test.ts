@@ -24,6 +24,9 @@ import horizontalRepeatInference from "../../../stereotype-packages/core/horizon
 import inputManifest from "../../../stereotype-packages/core/input/manifest.json?raw"
 import inputDefinition from "../../../stereotype-packages/core/input/stereotype.json?raw"
 import inputInference from "../../../stereotype-packages/core/input/inference.lua?raw"
+import layerNormManifest from "../../../stereotype-packages/core/layer-norm/manifest.json?raw"
+import layerNormDefinition from "../../../stereotype-packages/core/layer-norm/stereotype.json?raw"
+import layerNormInference from "../../../stereotype-packages/core/layer-norm/inference.lua?raw"
 import linearManifest from "../../../stereotype-packages/core/linear/manifest.json?raw"
 import linearDefinition from "../../../stereotype-packages/core/linear/stereotype.json?raw"
 import linearInference from "../../../stereotype-packages/core/linear/inference.lua?raw"
@@ -54,6 +57,7 @@ import subflowProxyInference from "../../../stereotype-packages/core/subflow-pro
 
 const packages: readonly PackageSelection[] = [
   packageSelection(inputManifest, inputDefinition, inputInference),
+  packageSelection(layerNormManifest, layerNormDefinition, layerNormInference),
   packageSelection(linearManifest, linearDefinition, linearInference),
   packageSelection(positionalEncodingManifest, positionalEncodingDefinition, positionalEncodingInference),
   packageSelection(addManifest, addDefinition, addInference),
@@ -123,6 +127,14 @@ describe("new core standard-library packages", () => {
     expect(host.inferForEditor(ref("core.softmax"), { kind: "layer", inputs: [{ shape: ["B", 10], dtype: "float32" }] }, {
       dim: 2,
     })).toEqual({ status: "error", message: "Softmax dimension 2 is out of range for rank 2" })
+
+    expect(host.inferForEditor(ref("core.layer-norm"), { kind: "layer", inputs: [{ shape: ["B", "T", 128], dtype: "float32" }] }, {
+      normalized_shape: 128,
+    })).toEqual({ status: "success", output: { shape: ["B", "T", 128], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.layer-norm"), { kind: "layer", inputs: [{ shape: ["B", "T", 64], dtype: "float32" }] }, {
+      normalized_shape: 128,
+    })).toEqual({ status: "error", message: "LayerNorm expected last dimension 128, got 64" })
 
     expect(host.inferForEditor(ref("core.concat"), { kind: "join", inputs: [
       { shape: ["B", 16], dtype: "float32" },

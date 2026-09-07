@@ -1,0 +1,26 @@
+{
+  "name": "LayerNorm",
+  "description": "Normalizes the last tensor dimension independently for each sample.",
+  "kind": "layer",
+  "view": {
+    "color": "#9370db",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "normalized_shape": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "top"
+    },
+    "eps": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.00001
+    },
+    "elementwise_affine": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

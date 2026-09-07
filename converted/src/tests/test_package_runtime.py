@@ -197,6 +197,24 @@ def test_softmax_package_normalizes_along_declared_dimension() -> None:
     assert torch.allclose(output.sum(dim=-1), torch.ones(2))
 
 
+def test_layer_norm_package_normalizes_the_last_dimension() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/layer-norm/pytorch.py").read_text()
+    model = compile_package_graph({
+        "packages": [_package("core.layer-norm", source)],
+        "graph": _graph(
+            "core.layer-norm",
+            parameters={"normalized_shape": 4, "eps": 1e-5},
+        ),
+    })
+
+    value = torch.tensor([[1.0, 2.0, 3.0, 4.0], [4.0, 3.0, 2.0, 1.0]])
+    output = model.prediction(value)
+
+    expected = torch.nn.functional.layer_norm(value, (4,), eps=1e-5)
+    torch.testing.assert_close(output, expected)
+
+
 def test_positional_encoding_package_adds_fixed_sinusoidal_table() -> None:
     root = Path(__file__).parents[3]
     source = (root / "stereotype-packages/core/positional-encoding/pytorch.py").read_text()
