@@ -30,7 +30,12 @@ admin-init:
 
 # Start the FastAPI backend in the foreground.
 backend: admin-init
-    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_VALKEY_URL="{{valkey_url}}" NNM_ADMIN_TOKEN_FILE="{{admin_token_file}}" NNM_CONTAINER_IMAGE="{{container_image}}" NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" NNM_CONTAINER_CONTROLLER_SOCKET="{{controller_socket}}" NNM_CONTAINER_CONTROLLER_TOKEN_FILE="{{controller_token_file}}" uv run uvicorn backend.app:app --host "{{api_host}}" --port "{{api_port}}"
+    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_VALKEY_URL="{{valkey_url}}" NNM_ADMIN_TOKEN_FILE="{{admin_token_file}}" NNM_CONTAINER_IMAGE="{{container_image}}" NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" NNM_CONTAINER_CONTROLLER_SOCKET="{{controller_socket}}" NNM_CONTAINER_CONTROLLER_TOKEN_FILE="{{controller_token_file}}" uv run python -m backend.cli --host "{{api_host}}" --port "{{api_port}}"
+
+# Start the backend with all dataset byte limits disabled. File-count and
+# archive safety validation remain enabled; this can exhaust host resources.
+backend-unsafe-unlimited-dataset-size: admin-init
+    cd "{{converted_dir}}" && UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_VALKEY_URL="{{valkey_url}}" NNM_ADMIN_TOKEN_FILE="{{admin_token_file}}" NNM_CONTAINER_IMAGE="{{container_image}}" NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" NNM_CONTAINER_CONTROLLER_SOCKET="{{controller_socket}}" NNM_CONTAINER_CONTROLLER_TOKEN_FILE="{{controller_token_file}}" uv run python -m backend.cli --host "{{api_host}}" --port "{{api_port}}" --unsafe-unlimited-dataset-size
 
 # Start the trusted container controller separately. Only this process needs
 # access to the local Podman/Docker socket; FastAPI connects through its RPC.

@@ -80,7 +80,7 @@ class DatasetArchiveInfo(BaseModel):
     reference: DatasetReference
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     size: int = Field(ge=0)
-    limit: int = Field(gt=0)
+    limit: int | None = Field(default=None, gt=0)
 
 
 class DatasetArchiveCapabilities(BaseModel):
@@ -89,7 +89,7 @@ class DatasetArchiveCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     format: Literal["zip"] = "zip"
-    max_bytes: int = Field(gt=0)
+    max_bytes: int | None = Field(default=None, gt=0)
 
 
 class ResourceRequest(BaseModel):

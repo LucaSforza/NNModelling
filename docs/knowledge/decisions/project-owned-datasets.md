@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-08-29
+updated: 2026-09-07
 ---
 
 # Project-owned datasets and named training batches
@@ -183,6 +183,26 @@ The UI must state the current backend limit before upload and show transferred
 bytes and terminal failure. Large datasets require a later design for chunking,
 resume, quotas, garbage collection and object storage; they must not silently
 stretch this v1 path.
+
+### Dataset archive resource-limit contract
+
+The process owns one immutable limit configuration shared by the FastAPI upload
+path and `JobManager`'s `DatasetArchiveStore`. Defaults are 64 MiB compressed,
+16 MiB for each archive member, 64 MiB total uncompressed and 2048 members.
+`--max-dataset-size SIZE` replaces all three byte limits with the same positive
+`B`, `KiB`, `MiB` or `GiB` value; this deliberately raises the per-file limit
+too. The legacy `NNM_DATASET_MAX_ARCHIVE_BYTES` positive integer byte count
+changes only the compressed limit, and an explicit CLI choice takes precedence.
+
+`--unsafe-unlimited-dataset-size` is the only unbounded mode. It represents the
+three byte limits as `None`, never as a sentinel integer. Streaming upload checks
+therefore stop enforcing byte counts, and the public capability and upload
+result serialize the corresponding limit as `null`. The mode remains bounded
+to 2048 members and preserves confined POSIX paths, traversal/absolute/backslash
+rejection, duplicate and special-file rejection, declarative metadata checks,
+SHA-256 verification, connection ownership, isolation and atomic publication.
+It is explicitly unsafe because compressed input, in-memory upload and expanded
+content can consume unlimited process resources.
 
 ## Authoring and failure semantics
 

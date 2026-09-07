@@ -24,7 +24,8 @@ from backend.auth import (
     ValkeyAuthStore,
     parse_duration,
 )
-from backend.dataset_store import DatasetArchiveStore, DatasetArchiveValidationError
+from backend.config import dataset_limits_from_environment
+from backend.dataset_store import DatasetArchiveLimits, DatasetArchiveStore, DatasetArchiveValidationError
 from backend.manager import JobManager, PackageIntegrityError, _remove_file
 from backend.package_store import BundleNotFoundError, PackageStore
 from backend.models import (
@@ -113,6 +114,7 @@ def create_app(
     auth_service: AuthService | None = None,
     admin_token: str | None = None,
     allowed_origins: list[str] | None = None,
+    dataset_limits: DatasetArchiveLimits | None = None,
 ) -> FastAPI:
     """Create the API application with injectable services for tests."""
 
@@ -140,7 +142,8 @@ def create_app(
         allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-NNM-Admin-Token", "X-NNM-SHA256"],
         expose_headers=["X-NNM-SHA256"],
     )
-    app.state.manager = manager or JobManager.from_environment()
+    resolved_dataset_limits = dataset_limits or dataset_limits_from_environment()
+    app.state.manager = manager or JobManager.from_environment(dataset_limits=resolved_dataset_limits)
     if hasattr(app.state.manager, "package_store"):
         app.state.package_store = app.state.manager.package_store
     else:
@@ -153,13 +156,11 @@ def create_app(
     )
     app.state.dataset_store = DatasetArchiveStore(
         dataset_root,
-        max_archive_bytes=int(os.getenv("NNM_DATASET_MAX_ARCHIVE_BYTES", "67108864")),
+        limits=resolved_dataset_limits,
     )
-    if hasattr(app.state.manager, "dataset_store"):
-        # Upload and submission must share one authenticated, digest-addressed
-        # archive store; otherwise a project reference could not be resolved by
-        # the scheduler after the upload response.
-        app.state.manager.dataset_store = app.state.dataset_store
+    # Upload and submission share one authenticated, digest-addressed store;
+    # otherwise the scheduler could not resolve the reference returned by API.
+    app.state.manager.dataset_store = app.state.dataset_store
     app.state.auth = auth_service or _auth_from_environment(in_memory=injected_manager is not None)
     app.state.admin_token = admin_token if admin_token is not None else _read_admin_token()
 
@@ -296,7 +297,7 @@ def create_app(
                     "code": "dataset_archive_length_invalid",
                     "message": "content-length must be a non-negative integer",
                 })
-            if declared_size > store.max_archive_bytes:
+            if store.max_archive_bytes is not None and declared_size > store.max_archive_bytes:
                 raise HTTPException(status_code=413, detail={
                     "code": "dataset_archive_too_large",
                     "message": f"dataset archive exceeds maximum size of {store.max_archive_bytes} bytes",
@@ -305,7 +306,7 @@ def create_app(
         data = bytearray()
         async for chunk in request.stream():
             data.extend(chunk)
-            if len(data) > store.max_archive_bytes:
+            if store.max_archive_bytes is not None and len(data) > store.max_archive_bytes:
                 raise HTTPException(status_code=413, detail={
                     "code": "dataset_archive_too_large",
                     "message": f"dataset archive exceeds maximum size of {store.max_archive_bytes} bytes",
@@ -678,12 +679,3 @@ def _client_host(request: Request) -> str:
 def _auth_http_error(exc: AuthError, *, not_found_codes: set[str] | None = None) -> HTTPException:
     status_code = 404 if not_found_codes and exc.code in not_found_codes else 401
     return HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)})
-
-
-app = create_app()
-
-
-if __name__ == "__main__":  # pragma: no cover
-    import uvicorn
-
-    uvicorn.run("backend.app:app", host="0.0.0.0", port=8000, reload=False)

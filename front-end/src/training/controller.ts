@@ -452,7 +452,7 @@ export class TrainingController {
         ?? ("datasetResources" in diagram ? diagram.datasetResources : undefined)?.get(datasetReference.ref);
       if (!resources) throw new TrainingConfigurationError("Il dataset del progetto non è disponibile per l'upload", { field: "selectedDataset" });
       const capabilities = await this.getApi().datasetArchiveCapabilities();
-      const archive = await buildDatasetArchive(resources, { maxBytes: capabilities.max_bytes });
+      const archive = await buildDatasetArchive(resources, { maxBytes: capabilities.max_bytes ?? undefined });
       datasetReference = (await this.getApi().uploadDatasetArchive(archive.bytes)).reference;
       this.projectDatasetReferences.set(dataset.reference.ref, datasetReference);
     }

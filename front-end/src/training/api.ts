@@ -126,10 +126,10 @@ export interface DatasetArchiveUploadResponse {
   reference: DatasetReference;
   digest: string;
   size: number;
-  limit: number;
+  limit: number | null;
 }
 
-export interface DatasetArchiveCapabilities { format: "zip"; max_bytes: number }
+export interface DatasetArchiveCapabilities { format: "zip"; max_bytes: number | null }
 
 export interface PairingGrant {
   request_id: string;

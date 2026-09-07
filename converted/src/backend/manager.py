@@ -19,7 +19,7 @@ from backend.models import JobStatus, JobSubmission, ResourceRequest
 from backend.package_store import PackageStore
 from backend.store import JobStore, ValkeyJobStore, utc_now
 from model_package.exporter import build_model_wheel, repackage_model_wheel, validate_package_name
-from backend.dataset_store import DatasetArchiveStore
+from backend.dataset_store import DatasetArchiveLimits, DatasetArchiveStore
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
@@ -87,7 +87,7 @@ class JobManager:
         self._thread: threading.Thread | None = None
 
     @classmethod
-    def from_environment(cls) -> "JobManager":
+    def from_environment(cls, *, dataset_limits: DatasetArchiveLimits | None = None) -> "JobManager":
         """Build a production manager from backend environment variables."""
 
         converted_dir = Path(
@@ -108,7 +108,17 @@ class JobManager:
                     image=container_image,
                 )
             )
-        return cls(store, artifact_root, executors, package_store=package_store)
+        dataset_store = DatasetArchiveStore(
+            os.getenv("NNM_BACKEND_DATASET_ROOT", str(artifact_root / "datasets")),
+            limits=dataset_limits,
+        )
+        return cls(
+            store,
+            artifact_root,
+            executors,
+            package_store=package_store,
+            dataset_store=dataset_store,
+        )
 
     def start(self) -> None:
         """Start the scheduler thread and recover persisted queue metadata."""

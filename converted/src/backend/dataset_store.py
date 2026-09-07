@@ -14,9 +14,10 @@ import os
 import stat
 import tempfile
 import zipfile
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
-from collections.abc import Mapping
 
 from dataset.contracts import (
     DatasetContractError,
@@ -34,6 +35,40 @@ MAX_DATASET_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 REQUIRED_DATASET_FILES = frozenset({"manifest.json", "dataset.json", "dataset.py"})
 
 
+@dataclass(frozen=True)
+class DatasetArchiveLimits:
+    """Resource limits for validating one uploaded dataset archive."""
+
+    max_archive_bytes: int | None = MAX_DATASET_ARCHIVE_BYTES
+    max_file_bytes: int | None = MAX_DATASET_FILE_BYTES
+    max_uncompressed_bytes: int | None = MAX_DATASET_UNCOMPRESSED_BYTES
+    max_files: int = MAX_DATASET_FILES
+
+    def __post_init__(self) -> None:
+        for name in ("max_archive_bytes", "max_file_bytes", "max_uncompressed_bytes"):
+            value = getattr(self, name)
+            if value is not None and value < 1:
+                raise ValueError(f"{name} must be positive or None")
+        if self.max_files < 1:
+            raise ValueError("max_files must be positive")
+
+    @classmethod
+    def uniform_size_limit(cls, max_bytes: int) -> "DatasetArchiveLimits":
+        """Apply one finite limit to compressed, per-file and expanded bytes."""
+
+        return cls(
+            max_archive_bytes=max_bytes,
+            max_file_bytes=max_bytes,
+            max_uncompressed_bytes=max_bytes,
+        )
+
+    @classmethod
+    def unsafe_unlimited_size(cls) -> "DatasetArchiveLimits":
+        """Disable size checks while retaining the bounded file count."""
+
+        return cls(max_archive_bytes=None, max_file_bytes=None, max_uncompressed_bytes=None)
+
+
 class DatasetArchiveNotFoundError(KeyError):
     """The archive is missing or is not owned by the requesting connection."""
 
@@ -45,11 +80,24 @@ class DatasetArchiveValidationError(ValueError):
 class DatasetArchiveStore:
     """Persist one complete project dataset archive per content digest."""
 
-    def __init__(self, root: str | Path, *, max_archive_bytes: int = MAX_DATASET_ARCHIVE_BYTES) -> None:
-        if max_archive_bytes < 1:
-            raise ValueError("max_archive_bytes must be positive")
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        limits: DatasetArchiveLimits | None = None,
+        max_archive_bytes: int | None = None,
+    ) -> None:
+        if limits is not None and max_archive_bytes is not None:
+            raise ValueError("limits and max_archive_bytes are mutually exclusive")
+        if limits is None:
+            limits = (
+                DatasetArchiveLimits(max_archive_bytes=max_archive_bytes)
+                if max_archive_bytes is not None
+                else DatasetArchiveLimits()
+            )
         self.root = Path(root).resolve()
-        self.max_archive_bytes = max_archive_bytes
+        self.limits = limits
+        self.max_archive_bytes = limits.max_archive_bytes
         self.archive_root = self.root / "archives"
         self.owner_root = self.root / "owners"
         self.archive_root.mkdir(parents=True, exist_ok=True)
@@ -71,7 +119,7 @@ class DatasetArchiveStore:
 
         if not isinstance(archive, bytes):
             raise DatasetArchiveValidationError("dataset archive must be bytes")
-        if len(archive) > self.max_archive_bytes:
+        if self.max_archive_bytes is not None and len(archive) > self.max_archive_bytes:
             raise DatasetArchiveValidationError(self._size_error(len(archive)))
         if not _is_owner_id(owner_connection_id):
             raise DatasetArchiveValidationError("owner connection is invalid")
@@ -79,7 +127,7 @@ class DatasetArchiveStore:
         if declared_digest is not None:
             if not _is_digest(declared_digest) or declared_digest.lower() != digest:
                 raise DatasetArchiveValidationError("dataset archive digest mismatch")
-        metadata = _validate_archive(archive, max_archive_bytes=self.max_archive_bytes)
+        metadata = _validate_archive(archive, limits=self.limits)
         record = {
             "digest": digest,
             "size": len(archive),
@@ -132,7 +180,7 @@ class DatasetArchiveStore:
         archive_path = self._archive_path(digest)
         if not archive_path.is_file() or _sha256_file(archive_path) != digest:
             raise DatasetArchiveValidationError("stored dataset archive digest cannot be verified")
-        metadata = _validate_archive(archive_path.read_bytes(), max_archive_bytes=self.max_archive_bytes)
+        metadata = _validate_archive(archive_path.read_bytes(), limits=self.limits)
         if (
             record["id"] != metadata["id"]
             or record["version"] != metadata["version"]
@@ -276,13 +324,12 @@ class DatasetArchiveStore:
         return self.owner_root / owner_connection_id / f"{digest}.acl"
 
     def _size_error(self, size: int) -> str:
+        assert self.max_archive_bytes is not None
         return f"dataset archive exceeds maximum size ({self.max_archive_bytes} bytes; received {size})"
 
 
-def _validate_archive(archive: bytes, *, max_archive_bytes: int) -> dict[str, Any]:
+def _validate_archive(archive: bytes, *, limits: DatasetArchiveLimits) -> dict[str, Any]:
     """Validate ZIP closure and return only declarative metadata."""
-
-    del max_archive_bytes  # The compressed archive size is checked by ``put``.
     try:
         stream = zipfile.ZipFile(__import__("io").BytesIO(archive))
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
@@ -291,7 +338,7 @@ def _validate_archive(archive: bytes, *, max_archive_bytes: int) -> dict[str, An
         infos = stream.infolist()
         if not infos:
             raise DatasetArchiveValidationError("dataset archive is empty")
-        if len(infos) > MAX_DATASET_FILES:
+        if len(infos) > limits.max_files:
             raise DatasetArchiveValidationError("dataset archive contains too many files")
         names: set[str] = set()
         total_size = 0
@@ -300,10 +347,10 @@ def _validate_archive(archive: bytes, *, max_archive_bytes: int) -> dict[str, An
             if name in names:
                 raise DatasetArchiveValidationError(f"dataset archive contains duplicate path: {name}")
             names.add(name)
-            if info.file_size > MAX_DATASET_FILE_BYTES:
+            if limits.max_file_bytes is not None and info.file_size > limits.max_file_bytes:
                 raise DatasetArchiveValidationError(f"dataset archive file exceeds the maximum size: {name}")
             total_size += info.file_size
-            if total_size > MAX_DATASET_UNCOMPRESSED_BYTES:
+            if limits.max_uncompressed_bytes is not None and total_size > limits.max_uncompressed_bytes:
                 raise DatasetArchiveValidationError("dataset archive expands beyond the maximum size")
         if not REQUIRED_DATASET_FILES.issubset(names):
             missing = ", ".join(sorted(REQUIRED_DATASET_FILES - names))

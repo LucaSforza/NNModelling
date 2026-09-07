@@ -37,6 +37,11 @@ Important configuration boundaries include:
 - admin and pairing TTL configuration;
 - optional backend bearer token for the MCP remote-training client.
 
+Start FastAPI through `PYTHONPATH=src uv run python -m backend.cli`. Dataset
+archive limits use the documented CLI options in `converted/README.md`; the
+justfile also provides `backend-unsafe-unlimited-dataset-size` for the explicit
+unsafe mode. Do not use that mode on an untrusted or resource-constrained host.
+
 Do not expose Valkey to the LAN. The pairing contract assumes a trusted LAN and
 does not authorize direct Internet exposure.
 
