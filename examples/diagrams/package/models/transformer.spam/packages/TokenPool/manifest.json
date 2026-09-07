@@ -1,0 +1,17 @@
+{
+  "dependencies": {},
+  "entrypoints": {
+    "definition": "stereotype.json",
+    "inference": {
+      "file": "inference.lua",
+      "language": "lua"
+    },
+    "pytorch": {
+      "file": "pytorch.py",
+      "language": "python"
+    }
+  },
+  "id": "tokenpool",
+  "schemaVersion": 1,
+  "version": "1.0.0"
+}
