@@ -827,6 +827,14 @@ class _Services:
 def _resolve_package(catalog: dict[tuple[str, str], ValidatedPackage], reference: Mapping[str, Any]) -> ValidatedPackage:
     key = (reference.get("id"), reference.get("version"))
     package = catalog.get(key)
+    if package is None and isinstance(key[0], str) and isinstance(key[1], str):
+        matches = [
+            candidate
+            for (package_id, version), candidate in catalog.items()
+            if package_id == key[0] and _version_matches(version, key[1])
+        ]
+        if len(matches) == 1:
+            package = matches[0]
     if package is None:
         raise PackageValidationError(f"package {key[0]}@{key[1]} is not in dependency closure")
     return package

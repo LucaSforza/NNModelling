@@ -13,6 +13,7 @@ import torch
 
 from package_runtime import PackageValidationError, compile_package_graph
 from package_runtime.jcs import canonicalize
+from package_runtime.compiler import _resolve_package
 from package_runtime.loader import bundle_digest
 
 
@@ -42,6 +43,11 @@ def _graph(package_id: str, *, parameters: dict[str, Any] | None = None) -> dict
         ],
         "edges": [{"source": "input", "target": "layer", "targetHandle": "in-0"}],
     }
+
+
+def test_resolve_package_accepts_caret_version_reference() -> None:
+    package = object()
+    assert _resolve_package({("core.concat", "0.1.0"): package}, {"id": "core.concat", "version": "^0.1.0"}) is package
 
 
 def test_jcs_vectors_match_ecmascript_serialization() -> None:
