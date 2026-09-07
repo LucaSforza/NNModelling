@@ -45,6 +45,9 @@ import repeatInference from "../../../stereotype-packages/core/repeat/inference.
 import scaleManifest from "../../../stereotype-packages/core/scale/manifest.json?raw"
 import scaleDefinition from "../../../stereotype-packages/core/scale/stereotype.json?raw"
 import scaleInference from "../../../stereotype-packages/core/scale/inference.lua?raw"
+import softmaxManifest from "../../../stereotype-packages/core/softmax/manifest.json?raw"
+import softmaxDefinition from "../../../stereotype-packages/core/softmax/stereotype.json?raw"
+import softmaxInference from "../../../stereotype-packages/core/softmax/inference.lua?raw"
 import subflowProxyManifest from "../../../stereotype-packages/core/subflow-proxy/manifest.json?raw"
 import subflowProxyDefinition from "../../../stereotype-packages/core/subflow-proxy/stereotype.json?raw"
 import subflowProxyInference from "../../../stereotype-packages/core/subflow-proxy/inference.lua?raw"
@@ -63,6 +66,7 @@ const packages: readonly PackageSelection[] = [
   packageSelection(outputManifest, outputDefinition, outputInference),
   packageSelection(repeatManifest, repeatDefinition, repeatInference),
   packageSelection(scaleManifest, scaleDefinition, scaleInference),
+  packageSelection(softmaxManifest, softmaxDefinition, softmaxInference),
   packageSelection(horizontalRepeatManifest, horizontalRepeatDefinition, horizontalRepeatInference),
   packageSelection(subflowProxyManifest, subflowProxyDefinition, subflowProxyInference),
 ]
@@ -77,7 +81,7 @@ afterEach(async () => {
 describe("new core standard-library packages", () => {
   test("runs source, layer, join, loss, and output packages without a host switch", async () => {
     host = await TypeSystemHost.create(packages)
-    for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.mse-loss", "core.output", "core.repeat", "core.scale", "core.horizontal-repeat", "core.subflow-proxy"]) {
+    for (const id of ["core.input", "core.linear", "core.positional-encoding", "core.add", "core.concat", "core.matmul", "core.cast", "core.embedding", "core.cross-entropy", "core.mse-loss", "core.output", "core.repeat", "core.scale", "core.softmax", "core.horizontal-repeat", "core.subflow-proxy"]) {
       await host.activate(ref(id))
     }
     expect(host.packageDefinition(ref("core.repeat"))?.wheelAdapters).toEqual([
@@ -111,6 +115,14 @@ describe("new core standard-library packages", () => {
     expect(host.inferForEditor(ref("core.positional-encoding"), { kind: "layer", inputs: [{ shape: ["B", "T", 32], dtype: "float32" }] }, {
       d_model: 64, max_len: 128,
     })).toEqual({ status: "error", message: "Positional Encoding expects embedding dimension 64, got 32" })
+
+    expect(host.inferForEditor(ref("core.softmax"), { kind: "layer", inputs: [{ shape: ["B", 10], dtype: "float32" }] }, {
+      dim: -1,
+    })).toEqual({ status: "success", output: { shape: ["B", 10], dtype: "float32" } })
+
+    expect(host.inferForEditor(ref("core.softmax"), { kind: "layer", inputs: [{ shape: ["B", 10], dtype: "float32" }] }, {
+      dim: 2,
+    })).toEqual({ status: "error", message: "Softmax dimension 2 is out of range for rank 2" })
 
     expect(host.inferForEditor(ref("core.concat"), { kind: "join", inputs: [
       { shape: ["B", 16], dtype: "float32" },

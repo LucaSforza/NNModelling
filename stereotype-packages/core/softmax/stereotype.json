@@ -1,0 +1,17 @@
+{
+  "name": "Softmax",
+  "description": "Normalizes tensor values into probabilities along one dimension.",
+  "kind": "layer",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "dim": {
+      "type": "integer",
+      "default": -1,
+      "position": "bottom"
+    }
+  }
+}

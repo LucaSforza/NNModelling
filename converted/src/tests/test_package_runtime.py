@@ -182,6 +182,21 @@ def test_scale_package_multiplies_objective_scalar_without_worker_logic() -> Non
     assert torch.equal(model.prediction(torch.tensor([5.0])), torch.tensor([0.5]))
 
 
+def test_softmax_package_normalizes_along_declared_dimension() -> None:
+    root = Path(__file__).parents[3]
+    source = (root / "stereotype-packages/core/softmax/pytorch.py").read_text()
+    model = compile_package_graph({
+        "packages": [_package("core.softmax", source)],
+        "graph": _graph("core.softmax", parameters={"dim": -1}),
+    })
+
+    value = torch.tensor([[1.0, 2.0, 3.0], [3.0, 2.0, 1.0]])
+    output = model.prediction(value)
+
+    assert torch.allclose(output, torch.softmax(value, dim=-1))
+    assert torch.allclose(output.sum(dim=-1), torch.ones(2))
+
+
 def test_positional_encoding_package_adds_fixed_sinusoidal_table() -> None:
     root = Path(__file__).parents[3]
     source = (root / "stereotype-packages/core/positional-encoding/pytorch.py").read_text()
