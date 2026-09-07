@@ -17,3 +17,9 @@ Current package and project ownership is defined by:
 
 The accepted typing relationship between model Inputs and selected datasets is
 defined by [dataset-driven model input types](dataset-driven-input-types.md).
+
+The shape semantics of the core matrix multiplication package are defined by
+[arbitrary-rank MatMul](matmul-shape-semantics.md).
+
+Package-bundle digest canonicalization and integrity errors are defined by
+[package-bundle canonicalization](package-bundle-canonicalization.md).
