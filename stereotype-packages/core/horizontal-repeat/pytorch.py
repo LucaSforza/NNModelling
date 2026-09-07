@@ -50,7 +50,10 @@ class HorizontalRepeat(nn.Module):
 
         # The STACKED tensors are the actual trainable state of this module.
         for i, param in enumerate(params.values()):
-            self.register_parameter(f"_stacked_param_{i}", param)
+            self.register_parameter(
+                f"_stacked_param_{i}",
+                nn.Parameter(param, requires_grad=param.requires_grad),
+            )
 
         for i, buffer in enumerate(buffers.values()):
             self.register_buffer(f"_stacked_buffer_{i}", buffer)
@@ -61,7 +64,7 @@ class HorizontalRepeat(nn.Module):
             for i, name in enumerate(self._param_names)
         }
 
-    def _buffers(self) -> dict[str, torch.Tensor]:
+    def _stacked_buffers(self) -> dict[str, torch.Tensor]:
         return {
             name: getattr(self, f"_stacked_buffer_{i}")
             for i, name in enumerate(self._buffer_names)
@@ -69,7 +72,7 @@ class HorizontalRepeat(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         params = self._params()
-        buffers = self._buffers()
+        buffers = self._stacked_buffers()
 
         def forward_single(p, b, x):
             return functional_call(
