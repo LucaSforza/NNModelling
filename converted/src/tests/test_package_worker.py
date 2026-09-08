@@ -11,7 +11,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from dataset.contracts import DatasetBatchContract, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
+from dataset.contracts import DatasetBatchContract, DatasetClassMetadata, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
 from package_runtime import PackageValidationError
 from package_worker import (
     _dataset_loaders,
@@ -163,6 +163,66 @@ def test_training_passes_named_batch_to_objective(tmp_path: Path, monkeypatch: p
     model = ObjectiveModel()
     train(model, {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1, "patience": 0}}, "package": training_package()}, tmp_path)
     assert torch.equal(model.targets[0], torch.tensor([1, 0], dtype=torch.long))
+
+
+def test_classification_worker_logs_metrics_and_final_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    definition = DEFINITION.model_copy(update={"classes": DatasetClassMetadata(count=2, names=("ham", "spam"))})
+    batches = [TrainingBatch({"image": torch.tensor([[1.0], [-1.0]])}, {"label": torch.tensor([1, 0])})]
+
+    class Dataset:
+        def division(self):
+            loader = DataLoader(batches, batch_size=None)
+            return {"train": loader, "validation": loader, "test": loader}
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(()))
+
+        def objective(self, inputs, targets):
+            return (inputs["image"].mean() * self.weight - targets["label"].float().mean()).square()
+
+        def prediction(self, inputs):
+            value = inputs["image"][:, 0] * self.weight
+            return torch.stack((-value, value), dim=1)
+
+    class Tracker:
+        def __init__(self):
+            self.epochs = []
+            self.final = None
+        def log_epoch(self, *args, **kwargs):
+            self.epochs.append(kwargs)
+        def finish(self, **kwargs):
+            self.final = kwargs
+        def abort(self):
+            raise AssertionError("unexpected tracker abort")
+
+    tracker = Tracker()
+    monkeypatch.setattr("package_worker.resolve_dataset", lambda _training: (Dataset(), definition, REFERENCE, {}))
+    monkeypatch.setattr("package_worker.create_tracker", lambda *args, **kwargs: tracker)
+    summary = train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1, "patience": 0}}, "package": training_package()}, tmp_path)
+
+    assert tracker.epochs[0]["train_classification"]["accuracy"] == 1.0
+    assert tracker.final["classification"]["labels"] == ["ham", "spam"]
+    assert tracker.final["classification"]["confusion_matrix"] == [[1, 0], [0, 1]]
+    assert summary["classification"]["training_seconds"] >= 0
+
+
+def test_classification_worker_rejects_invalid_prediction_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    definition = DEFINITION.model_copy(update={"classes": DatasetClassMetadata(count=2)})
+    batch = TrainingBatch({"image": torch.ones(1, 1)}, {"label": torch.zeros(1, dtype=torch.long)})
+    class Dataset:
+        def division(self):
+            loader = DataLoader([batch], batch_size=None)
+            return {"train": loader, "validation": loader, "test": loader}
+    class Model(torch.nn.Module):
+        def objective(self, *_args):
+            return torch.ones((), requires_grad=True)
+        def prediction(self, _inputs):
+            return torch.ones(1)
+    monkeypatch.setattr("package_worker.resolve_dataset", lambda _training: (Dataset(), definition, REFERENCE, {}))
+    with pytest.raises(ValueError, match="prediction must return logits"):
+        train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1}}, "package": training_package()}, tmp_path)
 
 
 def test_training_propagates_typed_missing_objective_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
