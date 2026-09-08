@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from baseline_transformer import TransformerSpamClassifier, _batches, set_seed
+from baseline_transformer import CONFUSION_MATRIX_CONVENTION, LABELS, TransformerSpamClassifier, _batches, set_seed
 
 
 def test_model_matches_spamham_shape_and_parameter_count() -> None:
@@ -30,3 +30,8 @@ def test_batch_adapter_converts_one_hot_targets() -> None:
 
     assert features.dtype == torch.int32
     assert labels.tolist() == [0, 1]
+
+
+def test_confusion_matrix_convention_is_explicit() -> None:
+    assert LABELS == ("ham", "spam")
+    assert "rows=actual, columns=predicted" in CONFUSION_MATRIX_CONVENTION

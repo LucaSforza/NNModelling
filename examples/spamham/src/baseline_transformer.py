@@ -32,6 +32,8 @@ from torch.utils.data import DataLoader
 SEQUENCE_LENGTH = 128
 MODEL_DIMENSION = 128
 NUM_CLASSES = 2
+LABELS = ("ham", "spam")
+CONFUSION_MATRIX_CONVENTION = "rows=actual, columns=predicted; labels=[ham, spam]"
 
 
 class TransformerSpamClassifier(nn.Module):
@@ -141,6 +143,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = nn.CrossEntropyLoss()
     train_examples = len(divisions["train"].dataset)
+    processed_train_examples = 0
     started = time.perf_counter()
     train_loss = validation_loss = 0.0
     for _epoch in range(args.epochs):
@@ -155,6 +158,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
             optimizer.step()
             train_loss += loss.item() * target.numel()
             seen += target.numel()
+            processed_train_examples += target.numel()
         train_loss /= seen
         validation_loss, _accuracy, _matrix, _count = evaluate(model, divisions["validation"], device)
     training_seconds = time.perf_counter() - started
@@ -168,6 +172,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     return {
         "accuracy": accuracy,
         "confusion_matrix": matrix,
+        "confusion_matrix_labels": list(LABELS),
+        "confusion_matrix_convention": CONFUSION_MATRIX_CONVENTION,
         "train_loss": train_loss,
         "validation_loss": final_validation_loss,
         "test_loss": test_loss,
@@ -179,7 +185,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "examples": examples,
         "validation_examples": validation_examples,
         "train_examples": train_examples,
-        "throughput_examples_per_second": train_examples * args.epochs / training_seconds if training_seconds else 0.0,
+        "processed_train_examples": processed_train_examples,
+        "throughput_examples_per_second": processed_train_examples / training_seconds if training_seconds else 0.0,
         "training_seconds": training_seconds,
         "evaluation_seconds": evaluation_seconds,
         "total_seconds": training_seconds + evaluation_seconds,
@@ -227,7 +234,7 @@ def main() -> None:
         print(json.dumps(metrics, sort_keys=True))
         return
     print(f"accuracy: {metrics['accuracy']:.4f}")
-    print(f"confusion matrix: {metrics['confusion_matrix']}")
+    print(f"confusion matrix ({metrics['confusion_matrix_convention']}): {metrics['confusion_matrix']}")
     print(f"training seconds: {metrics['training_seconds']:.2f}")
     for key in ("train_loss", "validation_loss", "trainable_parameters", "seed", "device", "epochs", "batch_size", "examples", "throughput_examples_per_second"):
         print(f"{key}: {metrics[key]}")
