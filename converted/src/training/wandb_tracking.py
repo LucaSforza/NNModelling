@@ -115,7 +115,7 @@ def _classification_metrics(value: Mapping[str, Any], *, binary: bool) -> dict[s
 
     expected = set(CLASSIFICATION_METRICS)
     if not binary:
-        expected -= {"specificity"}
+        expected = {"accuracy", "macro_precision", "macro_recall", "macro_f1"}
     if set(value) != expected:
         raise ValueError(f"classification metrics must contain exactly {sorted(expected)}")
     result: dict[str, float] = {}
@@ -135,9 +135,9 @@ def _classification_final(value: Mapping[str, Any]) -> tuple[dict[str, float], l
     binary = value["binary"]
     if not isinstance(binary, bool):
         raise ValueError("classification final payload binary must be a boolean")
-    expected = required | _CLASSIFICATION_REQUIRED
-    if not binary:
-        expected -= {"specificity"}
+    expected = required | (_CLASSIFICATION_REQUIRED if binary else {
+        "accuracy", "macro_precision", "macro_recall", "macro_f1"
+    })
     if set(value) != expected:
         raise ValueError("classification final payload has unexpected or missing fields")
     metrics = _classification_metrics(

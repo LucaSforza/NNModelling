@@ -257,3 +257,67 @@ def test_classification_rejects_non_finite_metric(tmp_path: Path) -> None:
             1.0,
             train_classification=metrics,
         )
+
+
+def test_multiclass_logs_only_macro_metrics(tmp_path: Path) -> None:
+    sdk = FakeSdk()
+    tracker = WandbTracker(
+        mode="offline",
+        project="demo",
+        run_name="nnm-job-multiclass",
+        artifacts_path=tmp_path,
+        config={},
+        sdk=sdk,
+    )
+    metrics = {
+        "accuracy": 0.75,
+        "macro_precision": 0.7,
+        "macro_recall": 0.72,
+        "macro_f1": 0.71,
+    }
+    tracker.log_epoch(
+        1,
+        0.5,
+        0.4,
+        train_classification=metrics,
+        validation_classification=metrics,
+        binary_classification=False,
+    )
+    assert set(sdk.run.logs[0][0]) == {
+        "train/loss",
+        "validation/loss",
+        "train/accuracy",
+        "train/macro_precision",
+        "train/macro_recall",
+        "train/macro_f1",
+        "validation/accuracy",
+        "validation/macro_precision",
+        "validation/macro_recall",
+        "validation/macro_f1",
+    }
+    tracker.finish(
+        best_loss=0.4,
+        completed_epochs=1,
+        num_parameters=3,
+        classification={
+            "loss": 0.3,
+            **metrics,
+            "count": 3,
+            "labels": ["a", "b", "c"],
+            "actual": [0, 1, 2],
+            "predicted": [0, 2, 2],
+            "confusion_matrix": [[1, 0, 0], [0, 0, 1], [0, 0, 1]],
+            "binary": False,
+        },
+        training_seconds=1.0,
+    )
+    assert set(sdk.run.logs[1][0]) == {
+        "test/loss",
+        "test/accuracy",
+        "test/macro_precision",
+        "test/macro_recall",
+        "test/macro_f1",
+        "test/examples",
+        "training/seconds",
+        "test/confusion_matrix",
+    }
