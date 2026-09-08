@@ -4,7 +4,7 @@ kind: task
 status: in_progress
 plan: ../plan.md
 role: integration
-depends_on: [T01, T02, T03]
+depends_on: [T01, T02, T03, T05, T06]
 parallel_with: []
 write_scope:
   - docs/knowledge/architecture/remote-training.md
@@ -41,7 +41,7 @@ must remain within the owning task's declared scope.
 
 ## Out of scope
 
-- New logging features, W&B Artifacts, sweeps, resume, per-user accounts, and
+- Logging features outside the approved classification telemetry, W&B Artifacts, sweeps, resume, per-user accounts, and
   deployment of an egress proxy.
 
 ## Work
