@@ -37,6 +37,10 @@ reconfiguring anything.
   Treat that socket as host-administrator authority.
 - Worker images must be immutable digest references. Never silently use a
   mutable tag or a host-Python fallback.
+- When code or dependencies executed by the worker change, run
+  `just --justfile converted/backend/justfile worker-build`, then restart
+  FastAPI with the printed `NNM_CONTAINER_IMAGE` digest. Restarting a backend
+  alone deliberately preserves its previously configured worker image.
 - Disabled and offline W&B jobs use `--network none` and receive no credential.
   Online jobs require an operator-managed egress network, allowlisting proxy,
   and owner-only credential file delivered to the worker over stdin.

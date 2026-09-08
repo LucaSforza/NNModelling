@@ -26,6 +26,21 @@ Before startup, run:
 just --justfile converted/backend/justfile container-config
 ```
 
+## Worker-image lifecycle
+
+The package worker runs immutable code from `NNM_CONTAINER_IMAGE`; a FastAPI
+restart does not rebuild or replace that image. Whenever a change affects
+`package_worker.py`, training/runtime code, worker dependencies, the lockfile,
+or the worker Dockerfile, build a fresh local image first:
+
+```bash
+just --justfile converted/backend/justfile worker-build
+```
+
+The recipe prints an `NNM_CONTAINER_IMAGE=localhost/nnm-worker@sha256:...`
+line. Use that exact digest to start or restart FastAPI. The local tag is only a
+build label and must never be passed to the backend in place of the digest.
+
 Inspect an occupied port and its owning PID before stopping anything. A healthy
 listener owned by the current workflow should be reused.
 

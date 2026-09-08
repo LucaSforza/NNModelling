@@ -22,6 +22,12 @@ wandb_proxy_url := env_var_or_default("NNM_WANDB_PROXY_URL", "")
 default:
     @just --list
 
+# Build the package worker from this checkout and print its immutable reference.
+# The printed digest, not the mutable local tag, is the value for NNM_CONTAINER_IMAGE.
+worker-build tag="local":
+    podman build --file "{{backend_dir}}/Dockerfile" --tag "localhost/nnm-worker:{{tag}}" "{{converted_dir}}"
+    @podman image inspect --format '{{ "{{" }}.Digest{{ "}}" }}' "localhost/nnm-worker:{{tag}}" | sed 's#^#NNM_CONTAINER_IMAGE=localhost/nnm-worker@#'
+
 # Start Valkey in the foreground with persistent local data.
 valkey:
     mkdir -p "{{valkey_data_dir}}"
