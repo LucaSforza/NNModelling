@@ -1,71 +1,118 @@
 services:
   valkey:
-    image: valkey/valkey:8
-    command: ["valkey-server", "/usr/local/etc/valkey/valkey.conf", "--dir", "/data", "--bind", "0.0.0.0", "--protected-mode", "no"]
+    image: ${NNM_VALKEY_IMAGE:-docker.io/valkey/valkey:8}
+    command:
+      - valkey-server
+      - /usr/local/etc/valkey/valkey.conf
+      - --dir
+      - /data
+      - --bind
+      - 0.0.0.0
+      - --protected-mode
+      - "no"
     volumes:
-      - valkey-data:/data
+      # Preserve pairing, queue and job metadata from the host deployment.
+      - ${NNM_HOST_VALKEY_DATA:?set NNM_HOST_VALKEY_DATA to the Valkey data directory}:/data
       - ./valkey.conf:/usr/local/etc/valkey/valkey.conf:ro
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   backend:
+    image: ${NNM_BACKEND_IMAGE:-localhost/nnm-backend:4c1083b}
     build:
       context: ..
       dockerfile: backend/Dockerfile
+    command:
+      - uv
+      - run
+      - python
+      - -m
+      - backend.cli
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --unsafe-unlimited-dataset-size
+    user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
     environment:
       NNM_VALKEY_URL: valkey://valkey:6379/0
-      NNM_BACKEND_ARTIFACT_ROOT: /app/jobs
+      NNM_BACKEND_ARTIFACT_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}
+      NNM_BACKEND_PACKAGE_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}/packages
+      NNM_BACKEND_DATASET_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}/datasets
       NNM_ADMIN_TOKEN_FILE: /run/secrets/nnm-admin-token
-      NNM_ALLOWED_ORIGINS: ${NNM_ALLOWED_ORIGINS:-http://127.0.0.1:5174}
+      NNM_ALLOWED_ORIGINS: ${NNM_ALLOWED_ORIGINS:-http://127.0.0.1:5174,http://localhost:5174,http://127.0.0.1:5173,http://localhost:5173}
       NNM_SESSION_TTL: ${NNM_SESSION_TTL:-24h}
-      NNM_CONTAINER_ENGINE: ${NNM_CONTAINER_ENGINE:-podman}
+      NNM_CONTAINER_ENGINE: "${NNM_CONTAINER_ENGINE:-podman}"
       NNM_CONTAINER_IMAGE: ${NNM_CONTAINER_IMAGE:?set NNM_CONTAINER_IMAGE to a digest-pinned worker image}
-      NNM_CONTAINER_DATA_ROOT: /app/data
+      NNM_CONTAINER_DATA_ROOT: ${NNM_HOST_DATA:?set NNM_HOST_DATA to the absolute host data directory}
       NNM_CONTAINER_CONTROLLER_SOCKET: /run/nnm/controller.sock
       NNM_CONTAINER_CONTROLLER_TOKEN_FILE: /run/secrets/nnm-controller-token
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - backend-jobs:/app/jobs
-      - ../valkey-data/admin.token:/run/secrets/nnm-admin-token:ro
+      # These paths must match the host paths seen by Podman workers.
+      - ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}:${NNM_HOST_JOBS}:rw
       - controller-socket:/run/nnm:ro
-      - ${NNM_CONTAINER_CONTROLLER_TOKEN_FILE:-../valkey-data/controller.token}:/run/secrets/nnm-controller-token:ro
+      - ${NNM_HOST_ADMIN_TOKEN:?set NNM_HOST_ADMIN_TOKEN to the admin token path}:/run/secrets/nnm-admin-token:ro
+      - ${NNM_HOST_CONTROLLER_TOKEN:?set NNM_HOST_CONTROLLER_TOKEN to the controller token path}:/run/secrets/nnm-controller-token:ro
     depends_on:
       valkey:
         condition: service_healthy
+      controller:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
 
-  # The only service with access to the host container-engine socket. FastAPI
-  # can reach this service only through the owner-only authenticated Unix
-  # socket above; it has no engine CLI capability or socket mount.
+  # The only service allowed to access the host Podman socket. FastAPI reaches
+  # it through the owner-only authenticated Unix socket above.
   controller:
+    image: ${NNM_BACKEND_IMAGE:-localhost/nnm-backend:4c1083b}
     build:
       context: ..
       dockerfile: backend/Dockerfile
+    user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
     environment:
-      NNM_CONTAINER_ENGINE: ${NNM_CONTAINER_ENGINE:-podman}
-      NNM_CONTAINER_DATA_ROOT: ${NNM_CONTAINER_DATA_ROOT:-/app/data}
+      NNM_CONTAINER_ENGINE: "${NNM_CONTAINER_ENGINE:-podman}"
+      NNM_CONTAINER_DATA_ROOT: ${NNM_HOST_DATA:?set NNM_HOST_DATA to the absolute host data directory}
       NNM_WANDB_CREDENTIAL_FILE: /run/secrets/nnm-wandb-credentials
-      NNM_WANDB_NETWORK: ${NNM_WANDB_NETWORK:-}
-      NNM_WANDB_PROXY_URL: ${NNM_WANDB_PROXY_URL:-}
+      NNM_WANDB_NETWORK: ${NNM_WANDB_NETWORK:-nnm-wandb-egress}
+      NNM_WANDB_PROXY_URL: ${NNM_WANDB_PROXY_URL:-http://10.89.42.2:3128}
       CONTAINER_HOST: ${NNM_CONTAINER_HOST:-unix:///run/podman/podman.sock}
       DOCKER_HOST: ${NNM_CONTAINER_HOST:-unix:///run/podman/podman.sock}
-    command: ["uv", "run", "python", "-m", "backend.container_controller", "serve", "/run/nnm/controller.sock", "@/run/secrets/nnm-controller-token", "/app/jobs", "/app/jobs", "${NNM_CONTAINER_ENGINE:-podman}"]
+    command:
+      - uv
+      - run
+      - python
+      - -m
+      - backend.container_controller
+      - serve
+      - /run/nnm/controller.sock
+      - "@/run/secrets/nnm-controller-token"
+      - ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}
+      - ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}
+      - "${NNM_CONTAINER_ENGINE:-podman}"
     volumes:
-      - backend-jobs:/app/jobs
-      - ${NNM_CONTAINER_DATA_ROOT:-../data}:/app/data:ro
+      - ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}:${NNM_HOST_JOBS}:rw
+      - ${NNM_HOST_DATA:?set NNM_HOST_DATA to the absolute host data directory}:${NNM_HOST_DATA}:ro
       - controller-socket:/run/nnm
-      - ${NNM_CONTAINER_CONTROLLER_TOKEN_FILE:-../valkey-data/controller.token}:/run/secrets/nnm-controller-token:ro
+      - ${NNM_HOST_CONTROLLER_TOKEN:?set NNM_HOST_CONTROLLER_TOKEN to the controller token path}:/run/secrets/nnm-controller-token:ro
       - ${NNM_WANDB_CREDENTIAL_FILE:-../valkey-data/wandb-credentials.json}:/run/secrets/nnm-wandb-credentials:ro
       # This is deliberately mounted only in the controller service.
-      - ${NNM_CONTAINER_ENGINE_SOCKET:-/run/user/1000/podman/podman.sock}:${NNM_CONTAINER_ENGINE_SOCKET_TARGET:-/run/podman/podman.sock}
-    depends_on:
-      valkey:
-        condition: service_healthy
+      - ${NNM_CONTAINER_ENGINE_SOCKET:-/run/user/1000/podman/podman.sock}:/run/podman/podman.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import stat, os; assert stat.S_ISSOCK(os.stat('/run/nnm/controller.sock').st_mode)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
 
 volumes:
-  valkey-data:
-  backend-jobs:
   controller-socket:

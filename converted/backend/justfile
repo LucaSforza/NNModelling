@@ -114,6 +114,13 @@ test:
 docker-up: admin-init
     NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_IMAGE="{{container_image}}" docker compose -f "{{backend_dir}}/docker-compose.yml" up --build
 
+# Start the standard local Podman Compose deployment. This builds the worker
+# first and passes its immutable digest to the backend services.
+# For non-standard user requirements, the backend administrator should invoke
+# `podman compose` directly instead of using this standard `just compose` path.
+compose: worker-build
+    mkdir -p "$(dirname '{{controller_socket}}')" "{{converted_dir}}/jobs" "{{container_data_root}}"; systemctl --user start podman.socket; NNM_CONTAINER_IMAGE="$$(podman image inspect --format '{{ "{{" }}.Digest{{ "}}" }}' localhost/nnm-worker:local | sed 's#^#localhost/nnm-worker@#')" NNM_HOST_VALKEY_DATA="{{valkey_data_dir}}" NNM_HOST_JOBS="{{converted_dir}}/jobs" NNM_HOST_DATA="{{container_data_root}}" NNM_HOST_ADMIN_TOKEN="{{admin_token_file}}" NNM_HOST_CONTROLLER_TOKEN="{{controller_token_file}}" NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" podman compose --project-name nnm-backend -f "{{backend_dir}}/docker-compose.yml" up --build -d
+
 # Stop the Docker deployment without deleting its volumes.
 docker-down:
     docker compose -f "{{backend_dir}}/docker-compose.yml" down
