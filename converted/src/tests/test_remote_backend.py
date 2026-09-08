@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,61 @@ def test_offline_download_requires_explicit_submission_mode(tmp_path: Path) -> N
 
     with pytest.raises(FileNotFoundError):
         manager.wandb_offline_download(queued.id, owner_connection_id=OWNER)
+
+
+def test_active_cancellation_persists_before_stopping_executor(tmp_path: Path) -> None:
+    observed_statuses: list[str] = []
+
+    class ObservingExecutor(ControllerExecutor):
+        def cancel(self, job_id: str) -> bool:
+            job = manager.store.get_job(job_id)
+            assert job is not None
+            observed_statuses.append(job["status"])
+            return True
+
+    manager = JobManager(InMemoryJobStore(), tmp_path, [ObservingExecutor()])
+    queued = manager.submit(_submission(manager, mode="disabled"), owner_connection_id=OWNER)
+    manager._set_status(queued.id, "running", started_at=queued.created_at)
+    manager._active[queued.id] = (manager.executors[0], {"pid": 1})
+
+    manager.admin_cancel(queued.id)
+
+    assert observed_statuses == ["cancelled"]
+    assert manager.admin_status(queued.id).status == "cancelled"
+
+
+def test_cancelling_during_executor_startup_waits_for_the_executor_handle(tmp_path: Path) -> None:
+    class BlockingExecutor(ControllerExecutor):
+        name = "blocking-container"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancelled = threading.Event()
+
+        def cancel(self, job_id: str) -> bool:
+            del job_id
+            self.cancelled.set()
+            return True
+
+    executor = BlockingExecutor()
+    manager = JobManager(InMemoryJobStore(), tmp_path, [executor])
+    queued = manager.submit(_submission(manager, mode="disabled"), owner_connection_id=OWNER)
+    manager._set_status(queued.id, "running", started_at=queued.created_at)
+
+    # Hold the same critical section used by the scheduler while it is
+    # between starting a job and registering its executor handle.
+    manager._lock.acquire()
+    cancel_thread = threading.Thread(target=manager.admin_cancel, args=(queued.id,))
+    cancel_thread.start()
+    cancel_thread.join(timeout=0.2)
+    assert cancel_thread.is_alive()
+    manager._active[queued.id] = (executor, {"pid": 1})
+    manager._lock.release()
+
+    cancel_thread.join(timeout=2)
+    assert not cancel_thread.is_alive()
+    assert executor.cancelled.wait(timeout=2)
+    assert manager.admin_status(queued.id).status == "cancelled"
 
 
 def test_authenticated_capability_endpoint_is_scoped(tmp_path: Path) -> None:

@@ -173,3 +173,39 @@ def test_remote_controller_does_not_require_engine_binary(tmp_path: Path, monkey
         lambda _event: None, lambda _code, _metadata: None,
     )
     assert result == {"pid": 7}
+
+
+@pytest.mark.parametrize("failure", ["unknown", "broken-pipe"])
+def test_remote_monitor_reconciles_lost_controller_state(failure: str) -> None:
+    class Remote:
+        def finished(self, _job_id: str) -> dict[str, object]:
+            if failure == "broken-pipe":
+                raise BrokenPipeError("controller disconnected")
+            return {"state": "unknown"}
+
+    executor = ContainerExecutor(image=IMAGE)
+    executor._remote = Remote()  # type: ignore[assignment]
+    finished: list[tuple[int, dict[str, object]]] = []
+
+    executor._monitor_remote(
+        "lost-job",
+        lambda _heartbeat: pytest.fail("lost controller must not emit a heartbeat"),
+        lambda code, details: finished.append((code, details)),
+    )
+
+    assert finished == [(1, {
+        "job_id": "lost-job",
+        "controller_lost": True,
+        "error": "Container controller lost the job state; the job must be resubmitted.",
+    })]
+
+
+def test_cancel_returns_false_when_remote_controller_disconnects() -> None:
+    class Remote:
+        def cancel(self, _job_id: str) -> bool:
+            raise BrokenPipeError("controller disconnected")
+
+    executor = ContainerExecutor(image=IMAGE)
+    executor._remote = Remote()  # type: ignore[assignment]
+
+    assert executor.cancel("lost-job") is False

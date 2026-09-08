@@ -485,6 +485,8 @@ class JobManager:
             content = Path(stderr_path).read_text(encoding="utf-8", errors="replace").strip()
             if content:
                 return content[-4000:]
+        if isinstance(details.get("error"), str):
+            return details["error"]
         return f"Training executor failed: {details}"
 
     def cancel(self, job_id: str, *, owner_connection_id: str) -> JobStatus:
@@ -496,21 +498,30 @@ class JobManager:
     def admin_cancel(self, job_id: str) -> JobStatus:
         """Cancel any queued or active job as the backend administrator."""
 
-        job = self.store.get_job(job_id)
-        if job is None:
-            raise KeyError(job_id)
-        if job["status"] == "queued":
-            self.store.remove_from_queue(job_id, int(job["priority"]))
-            self._set_status(job_id, "cancelled", finished_at=utc_now())
-            self._event(job_id, "cancelled", {})
-        elif job["status"] == "running":
-            with self._lock:
+        # Serialize cancellation with ``run_once``. Without this lock a job
+        # can be marked cancelled after it enters ``running`` but before its
+        # executor handle is registered, so the worker keeps running and the
+        # cancellation request never reaches it.
+        with self._lock:
+            job = self.store.get_job(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job["status"] == "queued":
+                self.store.remove_from_queue(job_id, int(job["priority"]))
+                self._set_status(job_id, "cancelled", finished_at=utc_now())
+                self._event(job_id, "cancelled", {})
+            elif job["status"] == "running":
                 active = self._active.get(job_id)
-            if active:
-                active[0].cancel(job_id)
-            self._set_status(job_id, "cancelled", finished_at=utc_now())
-            self._event(job_id, "cancelled", {})
-        return self.admin_status(job_id)
+                # Persist the terminal state before stopping the process. The
+                # executor monitor may report its signal exit concurrently;
+                # seeing ``cancelled`` makes that callback a no-op instead of
+                # overwriting the user's cancellation with ``failed``.
+                self._set_status(job_id, "cancelled", finished_at=utc_now())
+                self._event(job_id, "cancelled", {})
+                if active:
+                    if not active[0].cancel(job_id):
+                        self._drop_active(job_id)
+            return self.admin_status(job_id)
 
     def logs(self, job_id: str, *, owner_connection_id: str) -> dict[str, str]:
         """Read logs from a job owned by one connection."""
