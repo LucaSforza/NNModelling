@@ -71,13 +71,19 @@ Start only missing components in persistent terminals:
 
 2. Start the MCP stdio server through the client's configured MCP transport.
    For direct debugging, or when the client exposes no transport, keep this in
-   a persistent terminal:
+   a persistent terminal. Set `NNM_PROJECT_ROOT` to the directory that
+   contains the package-format projects before starting it; otherwise
+   `open_project` rejects every path with `PROJECT_PATH_ROOT_UNCONFIGURED`.
+   For the repository's bundled examples:
 
    ```bash
+   NNM_PROJECT_ROOT="${PWD}/examples/diagrams/package/models" \
    .agents/skills/nnmodelling-mcp/scripts/nnm-stack.sh mcp
    ```
 
-   Reuse a server already listening on port 9339. Never start a second one.
+   Replace the root with the containing directory when working with projects
+   outside the bundled examples. Reuse a server already listening on port
+   9339 only when it was started with the same project root.
 
 3. Open `http://127.0.0.1:5174` through the Codex in-app Browser. Do not run
    the `browser` subcommand or open a second external copy of the page.

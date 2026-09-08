@@ -1,0 +1,4 @@
+interface:
+  display_name: "NNModelling Backend Administrator"
+  short_description: "Operate and troubleshoot the training backend"
+  default_prompt: "Use $nnmodelling-backend-admin to start and verify the NNModelling training backend."

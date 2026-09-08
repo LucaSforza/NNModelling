@@ -80,6 +80,14 @@ Reuse `.agents/skills/nnmodelling-mcp/scripts/nnm-stack.sh` for the shared
 frontend/MCP lifecycle and external-browser fallback; do not reconstruct those
 commands manually.
 
+## Backend administration
+
+Load `.agents/skills/nnmodelling-backend-admin/SKILL.md` before starting,
+configuring, diagnosing, or repairing the package-training backend, Valkey,
+container controller, worker images, browser pairing, dataset limits, jobs, or
+W&B connectivity. Use `nnmodelling-mcp` alongside it when the task crosses into
+the live editor or selected-editor training workflow.
+
 ## Cross-package invariants
 
 - The browser's `DiagramCore` is the only authority for live diagram state.
