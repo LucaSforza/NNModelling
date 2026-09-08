@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import argparse
-
 import torch
 
 from baseline_transformer import TransformerSpamClassifier, _batches, set_seed
@@ -12,7 +10,8 @@ def test_model_matches_spamham_shape_and_parameter_count() -> None:
     logits = model(torch.zeros((3, 128), dtype=torch.int32))
 
     assert logits.shape == (3, 2)
-    assert sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad) > 100_000
+    assert sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad) == 413_186
+    assert not model.position.requires_grad
 
 
 def test_seed_reproduces_model_initialization() -> None:

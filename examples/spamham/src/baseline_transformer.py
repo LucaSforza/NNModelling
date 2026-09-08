@@ -40,7 +40,15 @@ class TransformerSpamClassifier(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.embedding = nn.Embedding(128, MODEL_DIMENSION, dtype=torch.float32)
-        self.position = nn.Parameter(torch.zeros(SEQUENCE_LENGTH, MODEL_DIMENSION))
+        position = torch.arange(SEQUENCE_LENGTH, dtype=torch.float32).unsqueeze(1)
+        divisor = torch.exp(
+            torch.arange(0, MODEL_DIMENSION, 2, dtype=torch.float32)
+            * (-torch.log(torch.tensor(10000.0)) / MODEL_DIMENSION)
+        )
+        positional_encoding = torch.zeros(SEQUENCE_LENGTH, MODEL_DIMENSION)
+        positional_encoding[:, 0::2] = torch.sin(position * divisor)
+        positional_encoding[:, 1::2] = torch.cos(position * divisor)
+        self.register_buffer("position", positional_encoding)
         self.layers = nn.ModuleList(
             [
                 nn.TransformerEncoderLayer(
@@ -55,7 +63,6 @@ class TransformerSpamClassifier(nn.Module):
                 for _ in range(2)
             ]
         )
-        self.norm = nn.LayerNorm(MODEL_DIMENSION, eps=1e-5)
         self.classifier = nn.Linear(MODEL_DIMENSION, NUM_CLASSES)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
@@ -66,7 +73,6 @@ class TransformerSpamClassifier(nn.Module):
         hidden = self.embedding(features.long()) + self.position.unsqueeze(0)
         for layer in self.layers:
             hidden = layer(hidden)
-        hidden = self.norm(hidden)
         return self.classifier(hidden.mean(dim=1))
 
 
@@ -151,11 +157,13 @@ def train(args: argparse.Namespace) -> dict[str, object]:
             seen += target.numel()
         train_loss /= seen
         validation_loss, _accuracy, _matrix, _count = evaluate(model, divisions["validation"], device)
-    final_validation_loss, _validation_accuracy, _validation_matrix, validation_examples = evaluate(
+    training_seconds = time.perf_counter() - started
+    evaluation_started = time.perf_counter()
+    final_validation_loss, _, _, validation_examples = evaluate(
         model, divisions["validation"], device
     )
     test_loss, accuracy, matrix, examples = evaluate(model, divisions["test"], device)
-    elapsed = time.perf_counter() - started
+    evaluation_seconds = time.perf_counter() - evaluation_started
     parameters = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     return {
         "accuracy": accuracy,
@@ -171,8 +179,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "examples": examples,
         "validation_examples": validation_examples,
         "train_examples": train_examples,
-        "throughput_examples_per_second": examples / elapsed if elapsed else 0.0,
-        "training_seconds": elapsed,
+        "throughput_examples_per_second": train_examples * args.epochs / training_seconds if training_seconds else 0.0,
+        "training_seconds": training_seconds,
+        "evaluation_seconds": evaluation_seconds,
+        "total_seconds": training_seconds + evaluation_seconds,
     }
 
 
@@ -181,13 +191,31 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, required=True)
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--learning-rate", type=float, default=0.001)
+    parser.add_argument("--epochs", type=_positive_int, default=5)
+    parser.add_argument("--batch-size", type=_positive_int, default=32)
+    parser.add_argument("--learning-rate", type=_positive_float, default=0.001)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=("cpu", "cuda"), default=None)
     parser.add_argument("--json", action="store_true", help="emit metrics as one JSON object")
     return parser.parse_args()
+
+
+def _positive_int(value: str) -> int:
+    """Parse a strictly positive integer CLI value."""
+
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    """Parse a strictly positive floating-point CLI value."""
+
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
 
 
 def main() -> None:
