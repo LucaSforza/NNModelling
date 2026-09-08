@@ -393,9 +393,6 @@ class _ClassificationAccumulator:
             f1.append(2 * p * r / (p + r) if p + r else 0.0)
         result = {
             "accuracy": accuracy,
-            "precision": sum(precision) / len(precision),
-            "recall": sum(recall) / len(recall),
-            "f1": sum(f1) / len(f1),
             "macro_precision": sum(precision) / len(precision),
             "macro_recall": sum(recall) / len(recall),
             "macro_f1": sum(f1) / len(f1),

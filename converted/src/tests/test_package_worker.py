@@ -15,6 +15,7 @@ from dataset.contracts import DatasetBatchContract, DatasetClassMetadata, Datase
 from package_runtime import PackageValidationError
 from package_worker import (
     _dataset_loaders,
+    _ClassificationAccumulator,
     _materialize_dataset_inputs,
     _normalized_training,
     _validate_graph_bindings,
@@ -223,6 +224,13 @@ def test_classification_worker_rejects_invalid_prediction_shape(tmp_path: Path, 
     monkeypatch.setattr("package_worker.resolve_dataset", lambda _training: (Dataset(), definition, REFERENCE, {}))
     with pytest.raises(ValueError, match="prediction must return logits"):
         train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1}}, "package": training_package()}, tmp_path)
+
+
+def test_multiclass_metrics_expose_only_macro_variants() -> None:
+    accumulator = _ClassificationAccumulator(3)
+    accumulator.add(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 1]))
+    metrics = accumulator.metrics(binary=False)
+    assert set(metrics) == {"accuracy", "macro_precision", "macro_recall", "macro_f1"}
 
 
 def test_training_propagates_typed_missing_objective_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
