@@ -25,6 +25,18 @@ WANDB_MODES = frozenset({"disabled", "offline", "online"})
 DEFAULT_WANDB_PROJECT = "NeuralNetworks"
 _WANDB_FIELDS = frozenset({"mode", "project"})
 
+CLASSIFICATION_METRICS = (
+    "accuracy",
+    "precision",
+    "recall",
+    "f1",
+    "specificity",
+    "macro_precision",
+    "macro_recall",
+    "macro_f1",
+)
+_CLASSIFICATION_REQUIRED = frozenset(CLASSIFICATION_METRICS)
+
 
 def normalize_wandb_config(value: Any) -> dict[str, str]:
     """Validate and normalize the browser-facing W&B mode/project object."""
@@ -96,6 +108,71 @@ def _set_summary(run: Any, key: str, value: Any) -> None:
     summary = getattr(run, "summary", None)
     if summary is not None:
         summary[key] = value
+
+
+def _classification_metrics(value: Mapping[str, Any], *, binary: bool) -> dict[str, float]:
+    """Validate the finite scalar metrics accepted by the tracker API."""
+
+    expected = set(CLASSIFICATION_METRICS)
+    if not binary:
+        expected -= {"specificity"}
+    if set(value) != expected:
+        raise ValueError(f"classification metrics must contain exactly {sorted(expected)}")
+    result: dict[str, float] = {}
+    for key, raw in value.items():
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw):
+            raise ValueError(f"classification metric {key!r} must be a finite number")
+        result[key] = float(raw)
+    return result
+
+
+def _classification_final(value: Mapping[str, Any]) -> tuple[dict[str, float], list[list[int]], list[int], list[int], list[str], int, bool]:
+    """Validate final test metrics and the data needed for a W&B confusion plot."""
+
+    required = {"loss", "count", "labels", "actual", "predicted", "confusion_matrix", "binary"}
+    if not required.issubset(value):
+        raise ValueError("classification final payload has unexpected or missing fields")
+    binary = value["binary"]
+    if not isinstance(binary, bool):
+        raise ValueError("classification final payload binary must be a boolean")
+    expected = required | _CLASSIFICATION_REQUIRED
+    if not binary:
+        expected -= {"specificity"}
+    if set(value) != expected:
+        raise ValueError("classification final payload has unexpected or missing fields")
+    metrics = _classification_metrics(
+        {key: value[key] for key in CLASSIFICATION_METRICS if key in value}, binary=binary
+    )
+    loss = value["loss"]
+    count = value["count"]
+    if isinstance(loss, bool) or not isinstance(loss, (int, float)) or not math.isfinite(loss):
+        raise ValueError("classification final loss must be a finite number")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise ValueError("classification final count must be a non-negative integer")
+    labels = value["labels"]
+    actual = value["actual"]
+    predicted = value["predicted"]
+    matrix = value["confusion_matrix"]
+    if (
+        not isinstance(labels, list)
+        or not labels
+        or any(not isinstance(label, str) or not label for label in labels)
+        or not isinstance(actual, list)
+        or not isinstance(predicted, list)
+        or len(actual) != len(predicted)
+        or len(actual) != count
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in actual + predicted)
+        or not isinstance(matrix, list)
+        or len(matrix) != len(labels)
+        or any(
+            not isinstance(row, list)
+            or len(row) != len(labels)
+            or any(isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in row)
+            for row in matrix
+        )
+    ):
+        raise ValueError("classification final payload has invalid labels, examples, or matrix")
+    return metrics, matrix, actual, predicted, labels, count, binary
 
 
 class WandbTracker:
@@ -190,13 +267,45 @@ class WandbTracker:
 
         return self._run
 
-    def log_epoch(self, epoch: int, train_loss: float, validation_loss: float) -> None:
-        """Record the two package training metrics for one epoch."""
+    def log_epoch(
+        self,
+        epoch: int,
+        train_loss: float,
+        validation_loss: float,
+        *,
+        train_classification: Mapping[str, Any] | None = None,
+        validation_classification: Mapping[str, Any] | None = None,
+        binary_classification: bool = True,
+    ) -> None:
+        """Record losses and, when supplied, classification metrics for one epoch."""
+
+        if isinstance(train_loss, bool) or not isinstance(train_loss, (int, float)) or not math.isfinite(train_loss):
+            raise ValueError("train_loss must be a finite number")
+        if isinstance(validation_loss, bool) or not isinstance(validation_loss, (int, float)) or not math.isfinite(validation_loss):
+            raise ValueError("validation_loss must be a finite number")
+        train_values = (
+            _classification_metrics(train_classification, binary=binary_classification)
+            if train_classification is not None
+            else None
+        )
+        validation_values = (
+            _classification_metrics(validation_classification, binary=binary_classification)
+            if validation_classification is not None
+            else None
+        )
 
         if self._run is None:
             return
+        values: dict[str, float] = {
+            "train/loss": float(train_loss),
+            "validation/loss": float(validation_loss),
+        }
+        if train_values is not None:
+            values.update({f"train/{key}": metric for key, metric in train_values.items()})
+        if validation_values is not None:
+            values.update({f"validation/{key}": metric for key, metric in validation_values.items()})
         self._run.log(
-            {"train/loss": float(train_loss), "validation/loss": float(validation_loss)},
+            values,
             step=int(epoch),
         )
 
@@ -206,6 +315,8 @@ class WandbTracker:
         best_loss: float | None,
         completed_epochs: int,
         num_parameters: int,
+        classification: Mapping[str, Any] | None = None,
+        training_seconds: float | None = None,
     ) -> None:
         """Publish final metrics, explicitly finish the SDK run, and write its manifest."""
 
@@ -214,11 +325,45 @@ class WandbTracker:
         if self._run is None:
             self._finished = True
             return
+        final_values = None
+        if classification is not None:
+            final_values = _classification_final(classification)
+        if training_seconds is not None and (
+            isinstance(training_seconds, bool)
+            or not isinstance(training_seconds, (int, float))
+            or not math.isfinite(training_seconds)
+            or training_seconds < 0
+        ):
+            raise ValueError("training_seconds must be a non-negative finite number")
         normalized_best = best_loss if best_loss is not None and math.isfinite(best_loss) else None
         try:
             _set_summary(self._run, "best_loss", normalized_best)
             _set_summary(self._run, "completed_epochs", int(completed_epochs))
             _set_summary(self._run, "num_parameters", int(num_parameters))
+            if final_values is not None:
+                metrics, matrix, actual, predicted, labels, count, _binary = final_values
+                final_log = {f"test/{key}": value for key, value in metrics.items()}
+                final_log["test/loss"] = float(classification["loss"])
+                final_log["test/examples"] = count
+                if training_seconds is not None:
+                    final_log["training/seconds"] = float(training_seconds)
+                plot = getattr(getattr(self._sdk, "plot", None), "confusion_matrix", None)
+                if plot is None:
+                    raise RuntimeError("W&B SDK does not provide confusion_matrix plotting")
+                final_log["test/confusion_matrix"] = plot(
+                    probs=None, y_true=actual, preds=predicted, class_names=labels
+                )
+                for key, value in final_log.items():
+                    if key != "test/confusion_matrix":
+                        _set_summary(self._run, key, value)
+                _set_summary(self._run, "test/confusion_matrix_values", matrix)
+                _set_summary(
+                    self._run,
+                    "confusion_matrix_convention",
+                    f"rows=actual, columns=predicted; labels={labels}",
+                )
+                _set_summary(self._run, "confusion_matrix_labels", labels)
+                self._run.log(final_log, step=int(completed_epochs))
         finally:
             self._run.finish()
             self._finished = True

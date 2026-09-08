@@ -18,11 +18,11 @@ class FakeRun:
 
     def __init__(self) -> None:
         self.summary: dict[str, object] = {}
-        self.logs: list[tuple[dict[str, float], int]] = []
+        self.logs: list[tuple[dict[str, object], int]] = []
         self.finish_count = 0
         self.finish_exit_codes: list[int | None] = []
 
-    def log(self, values: dict[str, float], *, step: int) -> None:
+    def log(self, values: dict[str, object], *, step: int) -> None:
         self.logs.append((values, step))
 
     def finish(self, *, exit_code: int | None = None) -> None:
@@ -42,6 +42,10 @@ class FakeSdk:
         self.kwargs: dict[str, object] | None = None
         self.init_environment: dict[str, str | None] | None = None
         self.run = FakeRun()
+        self.plot = self
+
+    def confusion_matrix(self, **kwargs: object) -> dict[str, object]:
+        return kwargs
 
     def init(self, **kwargs: object) -> FakeRun:
         self.kwargs = kwargs
@@ -171,3 +175,85 @@ def test_abort_marks_failed_finish_when_sdk_supports_exit_code(tmp_path: Path) -
     )
     tracker.abort()
     assert sdk.run.finish_exit_codes == [1]
+
+
+def test_classification_metrics_and_confusion_matrix_are_logged(tmp_path: Path) -> None:
+    sdk = FakeSdk()
+    tracker = WandbTracker(
+        mode="offline",
+        project="demo",
+        run_name="nnm-job-classification",
+        artifacts_path=tmp_path,
+        config={"wandb": {"mode": "offline", "project": "demo"}},
+        sdk=sdk,
+    )
+    metrics = {
+        "accuracy": 0.8,
+        "precision": 0.75,
+        "recall": 0.6,
+        "f1": 0.6667,
+        "specificity": 1.0,
+        "macro_precision": 0.875,
+        "macro_recall": 0.8,
+        "macro_f1": 0.8333,
+    }
+    tracker.log_epoch(
+        1, 0.5, 0.4, train_classification=metrics, validation_classification=metrics
+    )
+    tracker.finish(
+        best_loss=0.4,
+        completed_epochs=1,
+        num_parameters=7,
+        training_seconds=12.5,
+        classification={
+            "loss": 0.3,
+            **metrics,
+            "count": 4,
+            "labels": ["ham", "spam"],
+            "actual": [0, 1, 1, 0],
+            "predicted": [0, 1, 0, 0],
+            "confusion_matrix": [[2, 0], [1, 1]],
+            "binary": True,
+        },
+    )
+    epoch_log = sdk.run.logs[0][0]
+    assert epoch_log["train/accuracy"] == 0.8
+    final_log = sdk.run.logs[1][0]
+    assert final_log["test/examples"] == 4
+    assert final_log["training/seconds"] == 12.5
+    assert final_log["test/confusion_matrix"] == {
+        "probs": None,
+        "y_true": [0, 1, 1, 0],
+        "preds": [0, 1, 0, 0],
+        "class_names": ["ham", "spam"],
+    }
+    assert sdk.run.summary["test/confusion_matrix_values"] == [[2, 0], [1, 1]]
+    assert sdk.run.summary["confusion_matrix_labels"] == ["ham", "spam"]
+
+
+def test_classification_rejects_non_finite_metric(tmp_path: Path) -> None:
+    tracker = WandbTracker(
+        mode="offline",
+        project="demo",
+        run_name="nnm-job-classification",
+        artifacts_path=tmp_path,
+        config={},
+        sdk=FakeSdk(),
+    )
+    with pytest.raises(ValueError, match="finite number"):
+        metrics = {
+            "accuracy": float("nan"),
+            "precision": 0.5,
+            "recall": 0.5,
+            "f1": 0.5,
+            "specificity": 0.5,
+            "macro_precision": 0.5,
+            "macro_recall": 0.5,
+            "macro_f1": 0.5,
+        }
+        tracker.log_epoch(
+            1,
+            1.0,
+            1.0,
+            train_classification=metrics,
+        )
