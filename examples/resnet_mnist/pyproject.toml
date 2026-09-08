@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Standalone NNModelling ResNet MNIST consumer example"
 requires-python = ">=3.12"
 dependencies = [
-    "nnm-resnet-mnist-reference",
+    "nnm-resnet-mnist",
     "pillow>=12.0",
     "torchvision>=0.28",
 ]
@@ -13,4 +13,4 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-nnm-resnet-mnist-reference = { path = "nnm_resnet_mnist_reference-0.1.0-py3-none-any.whl" }
+nnm-resnet-mnist = { path = "nnm_resnet_mnist-0.1.0-py3-none-any.whl" }

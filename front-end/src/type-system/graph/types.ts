@@ -2,10 +2,36 @@ import type { Edge, Node } from "@xyflow/svelte"
 import type { EditorInferenceState } from "../host"
 import type { TensorType } from "../tensor-type"
 import type { PackageIdentity } from "../../core/types"
+import type { DatasetDefinition, DatasetParameterValue, ResolvedDatasetContract } from "../../project-workspace/dataset-contract"
 
 export type TypeGraphSnapshot = {
   readonly nodes: readonly Node[]
   readonly edges: readonly Edge[]
+}
+
+/** Dataset selection supplied by the editor to dataset-scoped inference. */
+export type DatasetInferenceContext = {
+  readonly definition: DatasetDefinition
+  readonly parameters: Readonly<Record<string, DatasetParameterValue>>
+}
+
+export type ResolvedGraphDataset = ResolvedDatasetContract
+
+/** Stable batch slot assigned to one top-level Input node. */
+export type GraphInputBinding = {
+  readonly nodeId: string
+  readonly name: string
+}
+
+/** One loss package's declarative external batch operand. */
+export type GraphObjectiveBinding = {
+  readonly nodeId: string
+  readonly packageId: string
+  readonly externalInputs: readonly {
+    readonly name: string
+    readonly source: string
+    readonly transform?: "flatten_batch"
+  }[]
 }
 
 export type GraphNodeResult = EditorInferenceState | {
@@ -23,6 +49,8 @@ export type GraphInferenceResult = {
   readonly objectiveTerminals?: readonly string[]
   readonly trainingComplete?: boolean
   readonly trainingDiagnostics?: readonly string[]
+  readonly inputBindings?: readonly GraphInputBinding[]
+  readonly objectiveBindings?: readonly GraphObjectiveBinding[]
 }
 
 export type PackageNodeData = {

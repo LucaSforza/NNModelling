@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob, canonicalDatasetParameters } from "../training/api";
+import { BackendApiError, SseParser, TrainingApiClient, canCancelTrainingJob, canonicalDatasetParameters, isWandbRun } from "../training/api";
 import { trainingLogWindowUrl } from "../training/windows";
 
 afterEach(() => {
@@ -9,19 +9,17 @@ afterEach(() => {
 describe("training job actions", () => {
   it("submits only parameters from the current dataset schema", () => {
     const dataset = {
-      target: "dataset.autoencoder_mnist.AutoencoderMNIST",
-      name: "AutoencoderMNIST",
-      doc: "",
-      num_classes: null,
-      parameters: [
+      reference: { kind: "project", id: "example.vae-mnist", version: "0.1.0", ref: "project_example_vae_mnist_0_1_0", digest: "a".repeat(64) },
+      manifest: { schemaVersion: 1, id: "example.vae-mnist", version: "0.1.0", entrypoints: { definition: "dataset.json", python: "dataset.py" } },
+      definition: { schemaVersion: 1, id: "example.vae-mnist", version: "0.1.0", name: "VAE MNIST", parameters: [
         { name: "batch_size", type: "int", default: 32, required: false },
         { name: "num_workers", type: "int", default: 0, required: false },
         { name: "train_size", type: "float", default: 0.8, required: false },
-      ],
+      ], batch: { inputs: { image: { shape: ["B", 1, 28, 28], dtype: "float32" } }, targets: { target: { shape: ["B", 1, 28, 28], dtype: "float32" } } } },
     };
 
     expect(canonicalDatasetParameters(dataset, {
-      batch_size: "128", num_workers: "0", train_size: "0.8", root: "/tmp/old-editor",
+      batch_size: "128", num_workers: "0", train_size: "0.8", unexpected: "ignored",
     })).toEqual({ batch_size: "128", num_workers: "0", train_size: "0.8" });
   });
 
@@ -37,7 +35,39 @@ describe("training job actions", () => {
   });
 });
 
+describe("structured W&B runs", () => {
+  const baseRun = { id: "run-1", entity: "team", project: "demo" };
+
+  it("accepts only mode-consistent safe run URLs", () => {
+    expect(isWandbRun({ ...baseRun, mode: "offline", url: null })).toBe(true);
+    expect(isWandbRun({ ...baseRun, mode: "offline", url: "https://wandb.test/runs/1" })).toBe(false);
+    expect(isWandbRun({ ...baseRun, mode: "online", url: "https://wandb.test/runs/1" })).toBe(true);
+
+    for (const url of [
+      "javascript:alert(1)",
+      "file:///tmp/run",
+      "data:text/plain,run",
+      "/runs/1",
+      "https://",
+      "not a url",
+    ]) {
+      expect(isWandbRun({ ...baseRun, mode: "online", url })).toBe(false);
+    }
+  });
+});
+
 describe("authenticated training API", () => {
+  it("explains package bundle integrity failures", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: { code: "package_bundle_digest_mismatch", message: "internal" } }),
+      { status: 422, headers: { "content-type": "application/json" } },
+    )))
+    await expect(new TrainingApiClient("http://backend", "token").getSession()).rejects.toMatchObject({
+      status: 422,
+      code: "package_bundle_digest_mismatch",
+      message: "Il modello non può essere avviato perché frontend e backend hanno calcolato firme diverse per il bundle. Nessun training è stato avviato; ricarica il progetto e riprova.",
+    })
+  })
   it("uploads a package bundle through the authenticated package endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ bundle_ref: "bundle-1", digest: "a".repeat(64), size: 12 }), { status: 200 }),
@@ -88,7 +118,7 @@ describe("authenticated training API", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
   });
 
-  it("submits the requested package name", async () => {
+    it("does not put a package name in the training submission", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }),
     );
@@ -101,11 +131,10 @@ describe("authenticated training API", () => {
       training: {},
       resources: {},
       priority: 0,
-      package_name: "nnm_mnist_classifier",
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toMatchObject({ package_name: "nnm_mnist_classifier" });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("package_name");
   });
 
   it("exposes machine-readable authentication errors", async () => {
@@ -121,6 +150,25 @@ describe("authenticated training API", () => {
       status: 401,
       code: "session_expired",
     });
+  });
+
+  it("loads the sanitized W&B capability contract", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        available_modes: ["disabled", "offline", "online"],
+        online: { configured: true, entity: "team", base_url: "https://api.wandb.ai", reason: null },
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await expect(api.getWandbCapabilities()).resolves.toEqual({
+      available_modes: ["disabled", "offline", "online"],
+      online: { configured: true, entity: "team", base_url: "https://api.wandb.ai", reason: null },
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/capabilities");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
   });
 
   it("requests incremental job logs with authenticated byte cursors", async () => {
@@ -149,10 +197,10 @@ describe("authenticated training API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    const wheel = await api.downloadModelPackage("job-1", expected);
+    const wheel = await api.downloadModelPackage("job-1", "nnm_vae");
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.lan:8000/jobs/job-1/package");
+    expect(url).toBe("http://backend.lan:8000/jobs/job-1/package?packageName=nnm_vae");
     expect(url).not.toContain("very-secret-token");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
     expect(await wheel.text()).toBe("wheel");
@@ -168,7 +216,7 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
       code: "package_corrupted",
     });
@@ -185,9 +233,9 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
-      code: "package_digest_mismatch",
+      code: "package_corrupted",
     });
   });
 
@@ -198,7 +246,7 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
       code: "package_digest_missing",
     });
@@ -214,7 +262,7 @@ describe("authenticated training API", () => {
     ));
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 502,
       code: "package_digest_invalid",
     });
@@ -227,7 +275,7 @@ describe("authenticated training API", () => {
 
     await expect(api.downloadModelPackage("job-1", "cazz")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 400,
-      code: "invalid_expected_digest",
+      code: "invalid_package_name",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -238,7 +286,7 @@ describe("authenticated training API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = new TrainingApiClient("http://backend.lan:8000");
 
-    await expect(api.downloadModelPackage("job-1", expected)).rejects.toMatchObject<Partial<BackendApiError>>({
+    await expect(api.downloadModelPackage("job-1", "nnm_vae")).rejects.toMatchObject<Partial<BackendApiError>>({
       status: 401,
       code: "missing_token",
     });
@@ -252,7 +300,7 @@ describe("authenticated training API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    const error = await api.downloadModelPackage("job-1", expected).catch((caught: unknown) => caught);
+    const error = await api.downloadModelPackage("job-1", "nnm_vae").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(BackendApiError);
     const apiError = error as BackendApiError;
     expect(apiError.status).toBe(400);
@@ -274,7 +322,7 @@ describe("authenticated training API", () => {
     vi.stubGlobal("crypto", { subtle: { digest: digestMock } });
     const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
 
-    const error = await api.downloadModelPackage("job-1", expected).catch((caught: unknown) => caught);
+    const error = await api.downloadModelPackage("job-1", "nnm_vae").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(BackendApiError);
     const apiError = error as BackendApiError;
     expect(apiError.status).toBe(400);
@@ -282,6 +330,64 @@ describe("authenticated training API", () => {
     expect(apiError.message).toMatch(/HTTPS|localhost/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(digestMock).toHaveBeenCalledWith("SHA-256", expect.any(Uint8Array));
+  });
+
+  it("downloads and verifies an offline W&B archive", async () => {
+    const expected = await sha256Hex("wandb-run");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("wandb-run", {
+        status: 200,
+        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    const archive = await api.downloadWandbOffline("job-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.lan:8000/jobs/job-1/wandb/offline");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer very-secret-token");
+    expect(archive.type).toBe("application/zip");
+    expect(await archive.text()).toBe("wandb-run");
+  });
+
+  it("rejects a corrupted offline W&B archive before returning a Blob", async () => {
+    const expected = await sha256Hex("pristine-run");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("corrupted-run", {
+        status: 200,
+        headers: { "content-type": "application/zip", "x-nnm-sha256": expected },
+      }),
+    ));
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+
+    await expect(api.downloadWandbOffline("job-1")).rejects.toMatchObject<Partial<BackendApiError>>({
+      status: 502,
+      code: "wandb_offline_corrupted",
+    });
+  });
+
+  it("delivers the structured W&B run from SSE without a legacy URL field", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        stream.enqueue(new TextEncoder().encode(
+          'id: 1\ndata: {"type":"wandb_ready","wandb_run":{"mode":"online","id":"run-1","entity":"team","project":"demo","url":"https://wandb.test/runs/1"}}\n\n'
+          + 'id: 2\ndata: {"type":"succeeded"}\n\n',
+        ));
+        stream.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200 })));
+    const api = new TrainingApiClient("http://backend.lan:8000", "very-secret-token");
+    const events: Record<string, unknown>[] = [];
+
+    await api.subscribeTrainingEvents("job-1", (event) => events.push(event), new AbortController().signal);
+
+    expect(events[0]).toMatchObject({
+      type: "wandb_ready",
+      wandb_run: { mode: "online", id: "run-1", url: "https://wandb.test/runs/1" },
+    });
   });
 });
 

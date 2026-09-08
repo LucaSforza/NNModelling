@@ -194,3 +194,58 @@ input[type="color"] { padding: 2px; cursor: pointer; height: 35px; }
   font-size: 0.8rem;
   line-height: 1.2;
 }
+
+.runtime-diagnostic-panel {
+  margin-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 12px;
+}
+
+.runtime-diagnostic-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-family: sans-serif;
+  font-size: .85rem;
+  font-weight: 650;
+}
+
+.runtime-diagnostics-empty {
+  color: #6b7280;
+  font-size: .8rem;
+}
+
+.runtime-diagnostic-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px;
+  margin-top: 6px;
+  border: 1px solid #fdba74;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: .8rem;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.runtime-diagnostic-item:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.runtime-diagnostic-node {
+  cursor: pointer;
+}
+
+.runtime-diagnostic-node:hover {
+  filter: brightness(.98);
+}
+
+.runtime-diagnostic-node-label {
+  color: #9a3412;
+  font-size: .72rem;
+}

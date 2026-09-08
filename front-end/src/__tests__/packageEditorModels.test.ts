@@ -24,10 +24,10 @@ class MemoryDiagram extends DiagramCore {
 
 describe("package model editor acceptance", () => {
   test.each([
-    ["transformer.json", ["B", "T", 512]],
-    ["variational-autoencoder.json", ["B", 784]],
-    ["resnet.json", ["B", 224, 224, 1000]],
-    ["resnet-product.json", ["B", 1000]],
+    ["transformer.json", [1, 1, 512]],
+    ["variational-autoencoder.json", [1, 784]],
+    ["resnet.json", [1, 224, 224, 1000]],
+    ["resnet-product.json", [1, 1000]],
   ] as const)("imports and infers %s", async (file, expectedShape) => {
     runtime = await EditorTypeSystemRuntime.create()
     const scenario = JSON.parse(await readFile(resolve(modelRoot, file), "utf8")) as SemanticModelScenario & { output: string }
@@ -40,7 +40,8 @@ describe("package model editor acceptance", () => {
     const loaded = new MemoryDiagram()
     expect(loaded.importFromJson(persisted)).toBe(true)
 
-    const result = runtime.infer({ nodes: loaded.nodes, edges: loaded.edges })
+    runtime.setDatasetCatalog([snapshot.datasetContext.definition])
+    const result = runtime.infer({ nodes: loaded.nodes, edges: loaded.edges }, snapshot.datasetContext)
     expect(result.complete).toBe(true)
     expect(result.terminals).toEqual([scenario.output])
     expect(result.nodes.get(scenario.output)).toEqual({
@@ -64,12 +65,12 @@ describe("package model editor acceptance", () => {
       data: {
         package: identity(packageId, name),
         name: id,
-        params,
+        params: packageId === "core.input" ? { ...params, binding: "input" } : params,
         ...(packageId === "core.add" ? { inputsCount: 2 } : {}),
       },
     })
     const nodes: Node[] = [
-      packageNode("input", "core.input", "Input", { shape: ["B", "T", 128], dtype: "float32" }),
+      packageNode("input", "core.input", "Input", {}),
       packageNode("mha", "core.horizontal-repeat", "Horizontal Repeat", {
         times: 2,
         join: { id: "core.concat", version: "^0.1.0", parameters: { dim: -1 } },
@@ -97,30 +98,40 @@ describe("package model editor acceptance", () => {
       edge("q", "qk", 0), edge("k", "qk", 1),
       edge("qk", "qkv", 0), edge("v", "qkv", 1),
     ]
-    const concatResult = runtime.infer({ nodes, edges })
-    expect(concatResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: ["B", "T", 64], dtype: "float32" } })
+    const datasetContext = {
+      definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }, { name: "T", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", "T", 128], dtype: "float32" as const } }, targets: {} } },
+      parameters: { B: 1, T: 1 },
+    }
+    runtime.setDatasetCatalog([datasetContext.definition])
+    const concatResult = runtime.infer({ nodes, edges }, datasetContext)
+    expect(concatResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: [1, 1, 64], dtype: "float32" } })
 
     const addNode = nodes.find((node) => node.id === "mha")!
     addNode.data = {
       ...addNode.data,
       params: { times: 2, join: { id: "core.add", version: "^0.1.0", parameters: {} } },
     }
-    const addResult = runtime.infer({ nodes, edges })
-    expect(addResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: ["B", "T", 32], dtype: "float32" } })
+    const addResult = runtime.infer({ nodes, edges }, datasetContext)
+    expect(addResult.nodes.get("mha")).toEqual({ status: "success", output: { shape: [1, 1, 32], dtype: "float32" } })
   })
 
   test("refreshes package inference after an editor parameter update", async () => {
     runtime = await EditorTypeSystemRuntime.create()
     const source = new MemoryDiagram()
     const input = source.addPackageNode({ id: "core.input", version: "0.1.0", name: "Input" }, "input", 0, 0, {
-      params: { shape: ["B", 8], dtype: "float32" },
+      params: { binding: "input" },
     })
     const linear = source.addPackageNode({ id: "core.linear", version: "0.1.0", name: "Linear" }, "layer", 0, 100, {
       params: { in_features: 8, out_features: 4, dtype: "float32" },
     })
     source.addEdge(input.id, linear.id)
-    expect(runtime.infer({ nodes: source.nodes, edges: source.edges }).nodes.get(linear.id)).toEqual({
-      status: "success", output: { shape: ["B", 4], dtype: "float32" },
+    const datasetContext = {
+      definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", 8], dtype: "float32" as const } }, targets: {} } },
+      parameters: { B: 1 },
+    }
+    runtime.setDatasetCatalog([datasetContext.definition])
+    expect(runtime.infer({ nodes: source.nodes, edges: source.edges }, datasetContext).nodes.get(linear.id)).toEqual({
+      status: "success", output: { shape: [1, 4], dtype: "float32" },
     })
 
     const reactiveParams = new Proxy({ in_features: 8, out_features: 4, dtype: "float16" }, {})
@@ -130,7 +141,7 @@ describe("package model editor acceptance", () => {
     expect(source.nodes.find((node) => node.id === linear.id)?.data.params).toEqual({
       in_features: 8, out_features: 4, dtype: "float16",
     })
-    expect(runtime.infer({ nodes: source.nodes, edges: source.edges }).nodes.get(linear.id)).toEqual({
+    expect(runtime.infer({ nodes: source.nodes, edges: source.edges }, datasetContext).nodes.get(linear.id)).toEqual({
       status: "error", message: "Linear expects dtype float16, got float32",
     })
   })

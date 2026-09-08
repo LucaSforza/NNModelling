@@ -10,12 +10,17 @@ class Parameters(TypedDict):
 
 
 class SequentialMatMul(torch.nn.Module):
-    """Use PyTorch's optimal matrix-chain multiplication for short joins."""
+    """Multiply a join left to right, including arbitrary batch dimensions."""
 
     def forward(self, *inputs: torch.Tensor) -> torch.Tensor:
         if len(inputs) < 2:
             raise ValueError("MatMul expects at least 2 inputs")
-        return torch.linalg.multi_dot(inputs)
+        if _all_matrices(inputs):
+            return torch.linalg.multi_dot(inputs)
+        output = inputs[0]
+        for input_tensor in inputs[1:]:
+            output = torch.matmul(output, input_tensor)
+        return output
 
 
 class ParallelMatMul(torch.nn.Module):
@@ -29,6 +34,11 @@ class ParallelMatMul(torch.nn.Module):
     def forward(self, *inputs: torch.Tensor) -> torch.Tensor:
         if len(inputs) != self.input_count:
             raise ValueError(f"MatMul expected {self.input_count} inputs, got {len(inputs)}")
+        if not _all_matrices(inputs):
+            output = inputs[0]
+            for input_tensor in inputs[1:]:
+                output = torch.matmul(output, input_tensor)
+            return output
         if inputs[0].device.type != "cuda":
             return torch.linalg.multi_dot(inputs)
 
@@ -100,6 +110,15 @@ def _optimal_plan(inputs: tuple[torch.Tensor, ...]):
             plans[(start, end)] = best_plan
 
     return plans[(0, count - 1)]
+
+
+def _all_matrices(inputs: tuple[torch.Tensor, ...]) -> bool:
+    """Return whether every operand is a rank-2 matrix."""
+
+    for input_tensor in inputs:
+        if input_tensor.ndim != 2:
+            return False
+    return True
 
 
 def build(

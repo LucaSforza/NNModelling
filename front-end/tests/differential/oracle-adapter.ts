@@ -1,9 +1,9 @@
 import { resolve } from "node:path"
 import { pathToFileURL, fileURLToPath } from "node:url"
 
-import { Context } from "@deepseek-ai/cordis"
+import { Context } from "cordis"
 
-import { PROTOCOL_VERSION, parseRequest, type InputInferenceRequest, type ModelInferenceRequest, type ProtocolOutcome, type ProtocolRequest, type ProtocolResponse, type TensorType } from "./protocol"
+import { PROTOCOL_VERSION, parseRequest, type ModelInferenceRequest, type ProtocolOutcome, type ProtocolRequest, type ProtocolResponse, type TensorType } from "./protocol"
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)))
 const oracleRoot = resolve(process.env.STEREOTYPE_LAB_DIR ?? resolve(repositoryRoot, ".cache/stereotype-lab"))
@@ -24,18 +24,13 @@ async function main(): Promise<void> {
     const { PackageRegistry } = await referenceModule<typeof import("../../../.cache/stereotype-lab/src/packages/registry.ts")>("src/packages/registry.ts")
     const { PackageLoader } = await referenceModule<typeof import("../../../.cache/stereotype-lab/src/packages/loader.ts")>("src/packages/loader.ts")
     const { LuaPackageInferenceRuntime } = await referenceModule<typeof import("../../../.cache/stereotype-lab/src/packages/lua-runtime.ts")>("src/packages/lua-runtime.ts")
-    const packageIds = request.protocolVersion === 1 ? ["core.input"] : request.packages
+    const packageIds = request.packages
     const packageDirectories = packageIds.map(packageId => resolve(oracleRoot, "packages/core", packageId.slice("core.".length)))
     const catalog = await PackageCatalog.create(packageDirectories)
     const loader = new PackageLoader(context, catalog, new PackageRegistry(), new LuaPackageInferenceRuntime())
     for (const packageId of packageIds) leases.push(await loader.load(packageId))
-    if (request.protocolVersion === 1) {
-      const result = loader.infer(request.packageId, request.context, request.parameters)
-      outcome = result
-    } else {
-      const definitions = new Map(request.packages.map(packageId => [packageId, catalog.get(packageId)!.definition]))
-      outcome = inferGraph(loader, definitions, request)
-    }
+    const definitions = new Map(request.packages.map(packageId => [packageId, catalog.get(packageId)!.definition]))
+    outcome = inferGraph(loader, definitions, request)
   } catch (cause) {
     outcome = { status: "fault", message: cause instanceof Error ? cause.message : String(cause) }
   } finally {
@@ -45,7 +40,7 @@ async function main(): Promise<void> {
   const response: ProtocolResponse = {
     protocolVersion: PROTOCOL_VERSION,
     implementation: "oracle",
-    ...(request?.protocolVersion === 2 ? { modelId: request.modelId } : {}),
+    ...(request ? { modelId: request.modelId } : {}),
     revision,
     outcome,
   }
@@ -58,6 +53,13 @@ function inferGraph(loader: any, definitions: ReadonlyMap<string, { readonly kin
     const definition = definitions.get(node.packageId)
     if (!definition) return { status: "error", message: `package '${node.packageId}' is not selected` }
     const inputs: TensorType[] = []
+    if (definition.kind === "input") {
+      const binding = node.inputBinding ?? node.id
+      const output = request.dataset.inputs[binding]
+      if (!output) return { status: "error", message: `Input binding '${binding}' is missing from dataset` }
+      outputs.set(node.id, output)
+      continue
+    }
     for (const inputId of node.inputs) {
       const input = outputs.get(inputId)
       if (!input) return { status: "error", message: `node '${node.id}' is evaluated before input '${inputId}'` }

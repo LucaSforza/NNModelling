@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-08-28
+updated: 2026-09-07
 ---
 
 # Package backend standard and least-privilege execution
@@ -54,11 +54,12 @@ FastAPI may parse and validate bounded declarative data:
 - bundle schema, canonical digest and archive paths;
 - package identities, versions and declared dependency closure;
 - graph topology, containment, handle ordering and resource limits;
-- typed training configuration and dataset registry names.
+- typed training configuration, dataset descriptors and opaque dataset
+  references.
 
-Python package code, PyTorch model construction, dataset access and training
-run only in a short-lived worker container. AST inspection is diagnostic input
-validation, never a sandbox.
+Python package code, project dataset code, PyTorch model construction, dataset
+access and training run only in a short-lived worker container. AST inspection
+is diagnostic input validation, never a sandbox.
 
 The worker container uses the least privilege available from the selected
 engine:
@@ -66,7 +67,7 @@ engine:
 - rootless Podman or rootless Docker by default;
 - non-root worker user;
 - read-only image/root filesystem;
-- read-only input bundle and operator-managed dataset mounts;
+- read-only model bundle and resolved dataset mounts;
 - one narrowly scoped writable artifact directory;
 - dropped capabilities, `no-new-privileges`, default seccomp and the host's
   SELinux/AppArmor policy;
@@ -90,7 +91,7 @@ The controller accepts a versioned, server-generated `ContainerJobSpec` only:
 - job ID and immutable input/artifact roots under configured directories;
 - an allowlisted image digest;
 - normalized CPU, memory, PID, timeout and network policy;
-- the fixed worker entrypoint and declared dataset mounts.
+- the fixed worker entrypoint and server-resolved dataset mounts.
 
 It rejects arbitrary engine flags, host paths, commands, image names and shell
 strings. It creates, monitors, logs, times out and cancels the one container
@@ -120,9 +121,10 @@ package or training contracts.
 
 Package jobs use a typed, versioned package-native training specification. Each
 field is either normalized and applied or rejected; no field is silently
-ignored. The contract covers dataset registry selection, constructor
-parameters, batch size, workers, split, seed, optimizer, objective/loss,
-epochs, early stopping, accelerator, W&B mode and resource limits.
+ignored. The contract covers an opaque dataset reference, declaratively typed
+dataset parameters, batch size, workers, split, seed, optimizer,
+objective/loss, epochs, early stopping, accelerator, W&B mode and resource
+limits.
 
 The seed is applied before model construction, dataset splitting or loader
 creation. The objective receives targets through an explicit runtime contract;
@@ -130,19 +132,53 @@ loss behavior is never selected by output-shape heuristics or a package-ID
 special case. The accepted compilation and target-binding model is defined by
 the [prediction/objective program decision](prediction-objective-programs.md).
 
-Datasets are pre-installed/registered or mounted by the operator. The browser
-cannot provide an import path, host path or dataset Python source. Network and
-W&B online mode are disabled unless the operator explicitly enables a policy
-that grants only the required egress.
+The VAE project dataset is uploaded as untrusted content-addressed data.
+FastAPI validates its declarative contract but never imports its Python; only
+the least-privilege worker loads it from a server-resolved read-only mount.
+The browser cannot provide an import path or host path. Network remains denied
+for ordinary and offline jobs. W&B online mode is an implemented opt-in
+controller policy that grants only the required egress as specified below.
+
+Project dataset ownership, named training batches and the bounded upload v1 are
+defined by the
+[project-owned dataset decision](project-owned-datasets.md). Large or resumable
+dataset transfer is not implied by accepting browser-supplied dataset code.
+
+## W&B policy
+
+There is one package-native W&B integration, owned by the worker. The backend
+administrator configures a shared account with local `wandb-connect`,
+`wandb-status` and `wandb-disconnect` recipes. The API key is prompted for,
+verified against W&B Cloud or an administrator-selected self-hosted base URL,
+and stored in a versioned mode-0600 file. It is never a browser/API field.
+
+Browser users choose only `disabled`, `offline` or `online` and a project. The
+administrator fixes entity and base URL; the worker derives a fresh run name
+from the immutable job ID. Disabled mode does not initialize the SDK. Offline
+mode initializes the SDK without credentials or network and produces an owned,
+digest-verified downloadable run archive. Online mode is admitted only when
+the controller has valid credentials, an operator-named network and a proxy
+URL. The network's firewall is the enforcement boundary and must deny direct
+egress except through the allowlisting proxy.
+
+For an online worker, the controller supplies proxy variables but transports
+the credential over a bounded stdin pipe that is closed before training. The
+credential is not placed in argv, the engine environment, RPC, mounts, job
+state, artifacts or public status. W&B initialization/logging failures fail the
+requested online job without fallback. Status and SSE use the worker's atomic
+structured run manifest rather than log parsing. W&B dataset/model Artifact
+upload, sweeps, resume and per-user credentials are outside this standard.
 
 ## Artifact contract
 
 The worker produces safetensors and resolved metadata as intermediate files,
-then builds the portable wheel before the job can become `succeeded`. The
-wheel contains the package-native runtime, vendored package resources, the
-resolved semantic graph, declarative input adapters and verified weights. The
-authenticated download remains `GET /jobs/{id}/package` with an SHA-256
-manifest.
+then builds a server-named template wheel before the job can become
+`succeeded`. The wheel contains the package-native runtime, vendored package
+resources, the resolved semantic graph, declarative input adapters and
+verified weights. Authenticated download is
+`GET /jobs/{id}/package?packageName=nnm_<suffix>`; the server regenerates
+the importable package under the requested name and returns the digest of the
+served bytes.
 
 The `training_package` status field, `/training-package` endpoint,
 `nnm-trained-package/v1` ZIP and checkout-dependent VAE consumer are removed.
@@ -165,3 +201,4 @@ download uses the authenticated connection ownership contract.
 - Network package installation during a job.
 - A second NNTree compatibility variant in the backend API.
 - A second public checkpoint-download format.
+- Per-user W&B accounts or unrestricted worker Internet access.

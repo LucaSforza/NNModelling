@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import fs from "node:fs/promises";
 import type { ServerContext } from "../src/server";
 import type { BrowserRPCClient } from "../src/browser-client";
 
@@ -23,6 +24,7 @@ import * as inspectionTools from "../src/tools/inspection";
 import * as lifecycleTools from "../src/tools/lifecycle";
 import * as validationTools from "../src/tools/validation";
 import * as connectionTools from "../src/tools/connection";
+import * as projectTools from "../src/tools/project";
 
 // ── Test Helper ─────────────────────────────────────────────────────────
 
@@ -42,8 +44,43 @@ function createMockBrowser(): BrowserRPCClient {
 function createTestContext(): ServerContext {
   return {
     browser: createMockBrowser(),
+    projectRoot: "/tmp",
+    projectPaths: new Map(),
   };
 }
+
+describe("project tools", () => {
+  it("validates and forwards an explicit project path without exposing handles", async () => {
+    const ctx = createTestContext();
+    const parent = await fs.mkdtemp("/tmp/nnm-project-");
+    const input = { projectPath: `${parent}/demo`, id: "demo", version: "0.1.0", name: "Demo" };
+    try {
+      const result = await projectTools.create_project.handler(ctx, input);
+      expect(ctx.browser.call).toHaveBeenCalledWith("create_project", expect.objectContaining({ projectPath: input.projectPath, modelJson: expect.any(String), resources: expect.any(Object) }));
+      expect(result).toEqual({});
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects paths outside the configured root before browser RPC", async () => {
+    const ctx = createTestContext();
+    await expect(projectTools.open_project.handler({ ...ctx, projectRoot: "/tmp/projects" }, { projectPath: "/tmp/other/demo" })).rejects.toThrow("inside");
+    expect(ctx.browser.call).not.toHaveBeenCalled();
+  });
+
+  it("rolls back only the directory created when activation fails", async () => {
+    const parent = await fs.mkdtemp("/tmp/nnm-project-");
+    const ctx = createTestContext();
+    (ctx.browser.call as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("activation failed"));
+    try {
+      await expect(projectTools.create_project.handler(ctx, { projectPath: `${parent}/demo`, id: "demo", version: "0.1.0", name: "Demo" })).rejects.toThrow("activation failed");
+      await expect(fs.stat(`${parent}/demo`)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true });
+    }
+  });
+});
 
 // ── Graph Tools ─────────────────────────────────────────────────────────
 
@@ -261,6 +298,20 @@ describe("inspection tools", () => {
 
     expect(mockBrowser.call).toHaveBeenCalledWith("graph_statistics", {});
     expect(result).toEqual(expectedResult);
+  });
+
+  it("get_package_diagnostics is a stateless browser proxy", async () => {
+    const expectedResult = {
+      packageRuntimeReady: false,
+      packageRuntimeDiagnostics: [{ occurrenceId: "runtime:one", severity: "fatal", phase: "activation", message: "one" }],
+    };
+    (mockBrowser.call as ReturnType<typeof vi.fn>).mockResolvedValue(expectedResult);
+
+    const result = await inspectionTools.get_package_diagnostics.handler(ctx, {});
+
+    expect(mockBrowser.call).toHaveBeenCalledWith("get_package_diagnostics", {});
+    expect(result).toBe(expectedResult);
+    expect(Object.keys(inspectionTools)).not.toContain("packageCatalog");
   });
 });
 

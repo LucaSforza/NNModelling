@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: implemented
-updated: 2026-08-22
+updated: 2026-08-29
 ---
 
 # Package type-system cutover
@@ -52,16 +52,23 @@ integration.
 
 ## Current package policy
 
-The working product uses bundled packages. The existing lifecycle and lease
-model should be retained while it is useful, but it is not a mandate to add a
-package manager or more lifecycle machinery.
+The product uses immutable bundled core packages plus the complete custom
+package set declared and physically owned by the current model. Upstream Cordis
+owns activation lifecycle; the writable project workspace owns custom package
+files and authoring. See
+[`local-package-runtime.md`](local-package-runtime.md),
+[`model-scoped-stereotype-packages.md`](model-scoped-stereotype-packages.md) and
+[`project-workspaces-and-stereotype-authoring.md`](project-workspaces-and-stereotype-authoring.md).
 
-Future NNModelling versions should be able to obtain trusted stereotype
-packages published by other people on GitHub. Discovery, download, integrity,
-trust, version selection and installation need evidence-driven design when
-that work starts. For now, external installation, dependency solving,
-lockfiles, provenance, hot reload and Python sandboxing are temporary
-non-goals.
+The former visible local-directory installer and global IndexedDB ownership
+path are not part of the supported package policy. Transitional implementation
+code is removed by the writable-project initiative rather than preserved as a
+second custom-package source.
+
+Remote discovery, download, marketplaces, a general dependency solver,
+lockfiles and hot reload remain non-goals. Acquiring third-party packages is a
+separate future design; a node or installed record never causes implicit
+package discovery for the current model.
 
 ## Backend boundary
 

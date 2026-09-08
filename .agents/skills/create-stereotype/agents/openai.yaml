@@ -1,0 +1,5 @@
+interface:
+  display_name: "Create Stereotype"
+  short_description: "Create and test NNModelling stereotypes"
+  default_prompt: "Use $create-stereotype to add a new NNModelling stereotype package."
+  brand_color: "#4779C4"

@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-22
+updated: 2026-08-29
 ---
 
 # System architecture
@@ -15,34 +15,40 @@ lives under `docs2/`.
 | Area | Responsibility | State authority |
 | --- | --- | --- |
 | `front-end/` | Svelte editor, graph mutations, package catalog, Lua type inference and browser RPC | Browser `DiagramCore` |
-| `stereotype-packages/` | Independently identified definitions, Lua inference and future PyTorch entrypoints | Package manifest and resources |
+| `stereotype-packages/` | Globally shared core definitions, Lua inference and PyTorch entrypoints | Core package manifests and resources |
 | `mcp-server/` | Thin proxy to the selected browser tab | No diagram or type state |
 | `converted/` | Package compiler/runtime, authenticated API, scheduler and worker controller | Valkey job state and backend stores |
-| `examples/` | Package-format editable diagrams and historical compiled fixtures | Format-specific fixtures |
+| `examples/` | Editable model diagrams and model-owned package resources | Model manifest and bundle resources |
 
 ## Current frontend flow
 
 ```text
-bundled stereotype packages
-        |
-        v
-browser package catalog -> TypeSystemHost / Cordis -> isolated Lua inference
-        |                                             |
-        v                                             v
-DiagramCore graph <---------------------------- semantic type state
-        |
-        v
-visible editor and browser-backed MCP
+core package records ────────────────┐
+                                     ├─> staged model package scope
+model manifest + local package dirs ─┘       = core + current custom packages
+                                                   |
+                                                   v
+                                      Cordis services/Fibers + Lua inference
+                                                   |
+                                                   v
+                                      DiagramCore graph + semantic type state
+                                                   |
+                                      ┌────────────┴────────────┐
+                                      v                         v
+                              visible editor + MCP       backend bundle export
 ```
 
 The browser is the only source of truth for a live diagram. The MCP server
 routes request/response RPC and must not mirror the graph, catalog or inferred
 types. See [Browser-backed MCP](browser-mcp.md).
 
-Every frontend node stores exact package ID, version and display name.
-Definition metadata drives topology, parameters, presentation and dtype
-controls; package-owned Lua drives inference. The frontend contains no central
-package-ID inference switch.
+Every frontend node persists only exact package ID and version. Definition
+metadata drives topology, parameters, presentation and dtype controls;
+package-owned Lua drives inference. A model JSON also persists its model
+manifest, whose relative `customPackages` entries are the complete model-owned
+package scope. Custom resources live inside the writable project directory;
+filesystem handles and absolute paths never enter project JSON, MCP or backend
+payloads. The frontend contains no central package-ID inference switch.
 
 ## Backend boundary
 
@@ -58,6 +64,13 @@ That target makes package graphs the only backend format and places all
 remains the sole frontend semantic authority; PyTorch is never a type-
 inference fallback.
 
+Built-in and project-owned datasets share one declarative parameter and named
+tensor-slot contract. Project dataset archives travel separately from model
+packages, resolve through opaque ownership-scoped references and are imported
+only inside the isolated worker; FastAPI never executes project dataset Python.
+See the accepted
+[project-owned dataset decision](../decisions/project-owned-datasets.md).
+
 See [Remote training](remote-training.md), the [pairing contract](../contracts/pairing.md),
 and the [model-package contract](../contracts/model-package.md).
 
@@ -65,9 +78,20 @@ and the [model-package contract](../contracts/model-package.md).
 
 - `DiagramCore` owns every live graph mutation and snapshot.
 - Every frontend node has exact package identity and primitive parameter data.
+- Bundled core packages activate during bootstrap; custom package resources are
+  owned by and loaded from the current writable project.
+- The active package scope is the immutable core set plus the exact custom
+  package set declared by the current model manifest. Switching models removes
+  the previous custom scope before exposing the new one.
+- A model custom package is loaded only from its validated model-relative
+  directory; an undeclared package is not discovered or activated implicitly.
+- Project datasets are likewise exhaustive manifest-owned resources; their
+  source and data paths cannot escape the project directory.
 - Type semantics come from activated package definitions and Lua rules.
 - Expected semantic errors, unresolved editor state and runtime faults remain
   distinct.
+- The browser owns package diagnostics and MCP forwards them without a second
+  catalog or runtime state.
 - Join inputs retain `targetHandle` order.
 - Every edge connects endpoints in the same immediate containment scope.
 - Hidden children of collapsed subflows remain part of graph semantics.

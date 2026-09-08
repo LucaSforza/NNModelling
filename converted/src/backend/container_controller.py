@@ -19,10 +19,19 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
+from urllib.parse import urlparse
+
+from backend.wandb_credentials import (
+    CredentialError,
+    MAX_CREDENTIAL_BYTES,
+    WandbCredentials,
+    load_credentials as load_wandb_credentials,
+)
 
 
 _DIGEST_IMAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
 _JOB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_NETWORK_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _WORKER = ("/app/.venv/bin/python", "-m", "package_worker")
 _RPC_VERSION = 1
 
@@ -34,12 +43,124 @@ def _dataset_root() -> Path:
     return Path(os.environ.get("NNM_CONTAINER_DATA_ROOT", str(default))).expanduser().resolve()
 
 
+def _environment_setting(name: str) -> str | None:
+    """Return one trimmed, optional operator setting."""
+
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+def _valid_proxy_url(value: str) -> bool:
+    """Accept a plain operator proxy endpoint, never proxy credentials."""
+
+    try:
+        parsed = urlparse(value)
+        username = parsed.username
+        password = parsed.password
+        hostname = parsed.hostname
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(hostname)
+        and username is None
+        and password is None
+        and not parsed.query
+        and not parsed.fragment
+        and len(value) <= 500
+    )
+
+
 class ContainerCapabilityError(RuntimeError):
     """The configured engine cannot satisfy a package job."""
 
 
 class ControllerProtocolError(RuntimeError):
     """The trusted controller rejected or failed an RPC request."""
+
+
+class WandbConfigurationError(ContainerCapabilityError):
+    """The operator's W&B online policy is incomplete or invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class WandbControllerConfig:
+    """Operator-owned W&B routing and credential-file configuration.
+
+    A browser job carries only the ``none``/``wandb`` policy name.  This
+    object is resolved by the trusted controller process and is never
+    serialized into the controller RPC request.
+    """
+
+    credential_file: Path | None = None
+    network_name: str | None = None
+    proxy_url: str | None = None
+
+    @classmethod
+    def from_environment(cls) -> "WandbControllerConfig":
+        """Load the operator policy without accepting any browser input."""
+
+        credential = _environment_setting("NNM_WANDB_CREDENTIAL_FILE")
+        network = _environment_setting("NNM_WANDB_NETWORK")
+        proxy = _environment_setting("NNM_WANDB_PROXY_URL")
+        return cls(
+            credential_file=Path(credential).expanduser() if credential else None,
+            network_name=network,
+            proxy_url=proxy,
+        )
+
+    def status(self) -> dict[str, Any]:
+        """Return sanitized capability metadata suitable for an API response."""
+
+        credentials: WandbCredentials | None = None
+        reason: str | None = None
+        try:
+            credentials = self.load_credentials()
+        except WandbConfigurationError as exc:
+            reason = str(exc)
+        if reason is None and not self.network_name:
+            reason = "W&B online mode requires an operator-configured container network"
+        elif reason is None and not _NETWORK_NAME.fullmatch(self.network_name or ""):
+            reason = "W&B online mode has an invalid operator network configuration"
+        elif reason is None and not self.proxy_url:
+            reason = "W&B online mode requires an operator-configured proxy URL"
+        elif reason is None and not _valid_proxy_url(self.proxy_url or ""):
+            reason = "W&B online mode has an invalid operator proxy URL"
+        return {
+            "configured": reason is None,
+            "entity": credentials.entity if credentials else None,
+            "base_url": credentials.base_url if credentials else None,
+            "reason": reason,
+        }
+
+    def load_credentials(self) -> WandbCredentials:
+        """Read the bounded, administrator-owned credential file."""
+
+        if self.credential_file is None:
+            raise WandbConfigurationError("W&B credentials are not configured")
+        try:
+            if self.credential_file.lstat().st_size > MAX_CREDENTIAL_BYTES:
+                raise WandbConfigurationError("W&B credentials are too large")
+        except OSError as exc:
+            raise WandbConfigurationError("W&B credentials are not available") from exc
+        try:
+            return load_wandb_credentials(self.credential_file)
+        except CredentialError as exc:
+            raise WandbConfigurationError(str(exc)) from exc
+        except OSError as exc:
+            raise WandbConfigurationError("W&B credentials are not available") from exc
+
+    def credential_payload(self) -> bytes:
+        """Return the bounded JSON payload sent over a worker's stdin pipe."""
+
+        if not self.status()["configured"]:
+            raise WandbConfigurationError("W&B online mode is not configured")
+        payload = json.dumps(self.load_credentials().to_mapping(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if len(payload) + 1 > MAX_CREDENTIAL_BYTES:
+            raise WandbConfigurationError("W&B credentials are too large")
+        return payload + b"\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +189,8 @@ class ContainerJobSpec:
             raise ValueError("invalid job id")
         if not _DIGEST_IMAGE.fullmatch(self.image):
             raise ValueError("image must be pinned by sha256 digest")
-        if self.network != "none":
-            raise ValueError("package workers require network=none")
+        if self.network not in {"none", "wandb"}:
+            raise ValueError("network policy must be 'none' or 'wandb'")
         if self.cpu < 1 or self.memory_gb <= 0 or self.pid_limit < 1:
             raise ValueError("invalid resource limit")
         if self.timeout_seconds <= 0 or self.output_limit_bytes < 1:
@@ -126,11 +247,18 @@ class EngineAdapter(Protocol):
 class CliEngineAdapter:
     """Build argv for either rootless Podman or Docker."""
 
-    def __init__(self, name: str = "podman", *, executable: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str = "podman",
+        *,
+        executable: str | None = None,
+        wandb_config: WandbControllerConfig | None = None,
+    ) -> None:
         if name not in {"podman", "docker"}:
             raise ValueError("engine must be podman or docker")
         self.name = name
         self.executable = executable or name
+        self.wandb_config = wandb_config or WandbControllerConfig.from_environment()
 
     def command(self, spec: ContainerJobSpec) -> list[str]:
         input_dir = spec.input_dir.resolve()
@@ -141,9 +269,10 @@ class CliEngineAdapter:
         # datasets remain read-only and unlabeled.
         if self.name == "podman":
             artifact_mount += ",relabel=shared"
+        network, wandb_options = self._network_options(spec)
         command = [
             self.executable, "run", "--rm", "--name", f"nnm-package-{spec.job_id[:32]}",
-            "--read-only", "--network", "none", "--cap-drop", "ALL",
+            "--read-only", "--network", network, "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--pids-limit", str(spec.pid_limit),
             *(("--userns", "keep-id") if self.name == "podman" else ()),
             "--cpus", str(spec.cpu), "--memory", f"{spec.memory_gb:g}g",
@@ -160,19 +289,58 @@ class CliEngineAdapter:
                 "--env", "NNM_DATASET_ROOT=/app/data",
                 "--mount", f"type=bind,src={spec.dataset_dir.resolve()},dst=/app/data,readonly",
             ]
+        if wandb_options:
+            command[command.index(spec.image):command.index(spec.image)] = wandb_options
+            command.extend(("--wandb-credentials-stdin",))
         return command
+
+    def _network_options(self, spec: ContainerJobSpec) -> tuple[str, list[str]]:
+        """Resolve the closed policy to engine flags using operator config."""
+
+        if spec.network not in {"none", "wandb"}:
+            raise ValueError("network policy must be 'none' or 'wandb'")
+        if spec.network == "none":
+            return "none", []
+        status = self.wandb_config.status()
+        if not status["configured"]:
+            raise ContainerCapabilityError(
+                f"W&B online capability unavailable: {status['reason']}"
+            )
+        proxy = self.wandb_config.proxy_url
+        assert proxy is not None
+        # Proxy credentials are rejected by ``status``.  The empty NO_PROXY
+        # value makes accidental direct bypasses less likely; the named
+        # operator network remains the actual egress boundary.
+        return self.wandb_config.network_name or "", [
+            "--interactive",
+            "--env", f"HTTP_PROXY={proxy}",
+            "--env", f"HTTPS_PROXY={proxy}",
+            "--env", "NO_PROXY=",
+        ]
 
 
 class ContainerController:
     """Own container lifecycle and turn missing capabilities into errors."""
 
-    def __init__(self, *, engine: EngineAdapter, input_root: Path, artifact_root: Path,
-                 dataset_root: Path | None = None,
-                 popen: Callable[..., subprocess.Popen[Any]] = subprocess.Popen) -> None:
+    def __init__(
+        self,
+        *,
+        engine: EngineAdapter,
+        input_root: Path,
+        artifact_root: Path,
+        dataset_root: Path | None = None,
+        wandb_config: WandbControllerConfig | None = None,
+        popen: Callable[..., subprocess.Popen[Any]] = subprocess.Popen,
+    ) -> None:
         self.engine = engine
         self.input_root = input_root.resolve()
         self.artifact_root = artifact_root.resolve()
         self.dataset_root = dataset_root.resolve() if dataset_root is not None else None
+        self.wandb_config = wandb_config or getattr(
+            engine, "wandb_config", WandbControllerConfig.from_environment()
+        )
+        if hasattr(engine, "wandb_config"):
+            engine.wandb_config = self.wandb_config  # type: ignore[attr-defined]
         self._popen = popen
         self._active: dict[str, subprocess.Popen[Any]] = {}
         self._finished: dict[str, dict[str, Any]] = {}
@@ -183,6 +351,16 @@ class ContainerController:
                       dataset_root=self.dataset_root)
         return self.engine.command(spec)
 
+    def wandb_capabilities(self) -> dict[str, Any]:
+        """Return sanitized mode capability metadata for the API process."""
+
+        online = self.wandb_config.status()
+        return {
+            "available_modes": ["disabled", "offline"]
+            + (["online"] if online["configured"] else []),
+            "online": online,
+        }
+
     def submit(self, spec: ContainerJobSpec, *, on_heartbeat: Callable[[dict[str, Any]], None] | None = None,
                on_finished: Callable[[int, dict[str, Any]], None] | None = None) -> dict[str, Any]:
         command = self.command(spec)
@@ -190,16 +368,43 @@ class ContainerController:
             raise ContainerCapabilityError(f"container engine unavailable: {command[0]}")
         spec.input_dir.mkdir(parents=True, exist_ok=True)
         spec.artifact_dir.mkdir(parents=True, exist_ok=True)
+        credential_payload = self.wandb_config.credential_payload() if spec.network == "wandb" else None
         stdout_path = spec.artifact_dir / "stdout.log"
         stderr_path = spec.artifact_dir / "stderr.log"
         stdout = stdout_path.open("ab")
         stderr = stderr_path.open("ab")
+        popen_options: dict[str, Any] = {
+            "stdout": stdout,
+            "stderr": stderr,
+            "start_new_session": True,
+        }
+        if credential_payload is not None:
+            # The only secret handoff is this short-lived pipe.  It is written
+            # and closed before monitoring (and before package code can run).
+            popen_options["stdin"] = subprocess.PIPE
+        process: subprocess.Popen[Any] | None = None
         try:
-            process = self._popen(command, stdout=stdout, stderr=stderr, start_new_session=True)
+            process = self._popen(command, **popen_options)
+            if credential_payload is not None:
+                stream = getattr(process, "stdin", None)
+                if stream is None:
+                    raise ContainerCapabilityError("worker stdin is unavailable for W&B credentials")
+                try:
+                    stream.write(credential_payload)
+                    stream.flush()
+                finally:
+                    stream.close()
         except Exception:
-            stdout.close(); stderr.close()
+            stdout.close()
+            stderr.close()
+            if process is not None and getattr(process, "poll", lambda: None)() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except (AttributeError, OSError, ProcessLookupError):
+                    pass
             raise
         stdout.close(); stderr.close()
+        assert process is not None
         with self._lock:
             self._active[spec.job_id] = process
         started = time.monotonic()
@@ -320,6 +525,8 @@ def serve_unix(controller: ContainerController, socket_path: Path, *, token: byt
                     payload = request.get("payload", {})
                     if op == "submit":
                         result = controller.submit(ContainerJobSpec.from_json(payload))
+                    elif op == "wandb_capabilities":
+                        result = controller.wandb_capabilities()
                     elif op == "cancel":
                         result = {"cancelled": controller.cancel(payload["job_id"])}
                     elif op in {"status", "heartbeat", "finished"}:
@@ -333,7 +540,7 @@ def serve_unix(controller: ContainerController, socket_path: Path, *, token: byt
                     else:
                         raise ValueError("unsupported controller operation")
                     conn.sendall(_rpc_response(request, result=result))
-                except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+                except (KeyError, TypeError, ValueError, OSError, ContainerCapabilityError, json.JSONDecodeError) as exc:
                     conn.sendall(_rpc_response(locals().get("request", {}), error=str(exc)))
     finally:
         server.close(); socket_path.unlink(missing_ok=True)
@@ -362,6 +569,11 @@ class ContainerControllerClient:
     def submit(self, spec: ContainerJobSpec) -> dict[str, Any]:
         return self.call("submit", spec.to_json())
 
+    def wandb_capabilities(self) -> dict[str, Any]:
+        """Read sanitized W&B capability metadata from the trusted controller."""
+
+        return self.call("wandb_capabilities", {})
+
     def cancel(self, job_id: str) -> bool:
         return bool(self.call("cancel", {"job_id": job_id})["cancelled"])
 
@@ -388,8 +600,18 @@ def controller_main(argv: list[str]) -> int:
     except (OSError, ValueError) as exc:
         print(f"controller token unavailable: {exc}", file=sys.stderr)
         return 1
-    dataset_root = _dataset_root()
-    controller = ContainerController(engine=CliEngineAdapter(engine), input_root=Path(input_root), artifact_root=Path(artifact_root), dataset_root=dataset_root)
+    # Built-in data lives under ``converted/data`` while project archives are
+    # extracted under ``converted/jobs/<job>/dataset``.  Both are manager-owned
+    # paths below this shared root; the controller still rejects everything
+    # outside it during per-job validation.
+    dataset_root = Path(input_root).resolve().parent
+    controller = ContainerController(
+        engine=CliEngineAdapter(engine),
+        input_root=Path(input_root),
+        artifact_root=Path(artifact_root),
+        dataset_root=dataset_root,
+        wandb_config=WandbControllerConfig.from_environment(),
+    )
     serve_unix(controller, Path(socket_name), token=token)
     return 0
 

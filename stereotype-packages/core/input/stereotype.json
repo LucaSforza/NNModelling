@@ -8,15 +8,8 @@
     "height": 100
   },
   "parameters": {
-    "shape": {
-      "type": "shape",
-      "default": ["B", 28, 28],
-      "position": "top"
-    },
-    "dtype": {
-      "type": "dtype",
-      "choices": ["float16", "bfloat16", "float32", "float64", "int8", "uint8", "int16", "int32", "int64", "bool"],
-      "default": "float32"
+    "binding": {
+      "type": "string"
     }
   }
 }

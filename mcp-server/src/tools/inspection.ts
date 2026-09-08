@@ -81,3 +81,12 @@ export const list_stereotypes = {
     return ctx.browser.call("list_stereotypes", input);
   },
 };
+
+/** Retrieve browser-owned fatal package/runtime diagnostics verbatim. */
+export const get_package_diagnostics = {
+  schema: z.object({}),
+
+  async handler(ctx: ServerContext, _input: z.infer<typeof this.schema>) {
+    return ctx.browser.call("get_package_diagnostics", {});
+  },
+};

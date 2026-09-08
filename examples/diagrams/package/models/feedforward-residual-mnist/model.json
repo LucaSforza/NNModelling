@@ -1,0 +1,746 @@
+{
+  "nodes": [
+    {
+      "id": "53361dca-e0f0-4d23-9625-9b54976b0719",
+      "type": "custom",
+      "position": {
+        "x": 167,
+        "y": 0
+      },
+      "width": 30,
+      "height": 30,
+      "data": {
+        "package": {
+          "id": "core.input",
+          "version": "0.1.0",
+          "name": "Input"
+        },
+        "name": "Input",
+        "color": "#ffffff",
+        "params": {
+          "shape": [
+            "B",
+            1,
+            28,
+            28
+          ],
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 30,
+        "height": 30
+      },
+      "selected": false
+    },
+    {
+      "id": "3109b515-c5d4-43b5-b703-632dc05bd274",
+      "type": "custom",
+      "position": {
+        "x": 92,
+        "y": 126
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.flatten",
+          "version": "0.1.0",
+          "name": "Flatten"
+        },
+        "name": "flatten",
+        "color": "#a9a9a9",
+        "params": {
+          "start_dim": 1,
+          "end_dim": -1
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "a393e778-0cf6-4dcf-aca2-5a0adbcfdf4b",
+      "type": "custom",
+      "position": {
+        "x": 92,
+        "y": 322
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "name": "stem",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 784,
+          "out_features": 128,
+          "bias": true,
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "f9f0014a-f72f-4be2-a262-0814562c0ce5",
+      "type": "custom",
+      "position": {
+        "x": 92,
+        "y": 518
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0",
+          "name": "ReLU"
+        },
+        "name": "stem_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "7c55464f-2d0f-4e75-9ce5-37d262fa51b8",
+      "type": "custom",
+      "position": {
+        "x": 159,
+        "y": 714
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "name": "block1_linear1",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 128,
+          "out_features": 128,
+          "bias": true,
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "7c57594b-0655-498e-a533-a8162f33bc12",
+      "type": "custom",
+      "position": {
+        "x": 159,
+        "y": 910
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0",
+          "name": "ReLU"
+        },
+        "name": "block1_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "451aa4f4-9123-4762-9991-7efb56eb3f38",
+      "type": "custom",
+      "position": {
+        "x": 159,
+        "y": 1106
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "name": "block1_linear2",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 128,
+          "out_features": 128,
+          "bias": true,
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "join_8f095f4d-c3a4-4253-ad62-bfc2aff93b35",
+      "type": "join",
+      "position": {
+        "x": 100,
+        "y": 1302
+      },
+      "width": 164,
+      "height": 46,
+      "data": {
+        "package": {
+          "id": "core.add",
+          "version": "0.1.0",
+          "name": "Add"
+        },
+        "name": "residual1",
+        "color": "#4779c4",
+        "params": {},
+        "inputsCount": 2
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "6898cb2b-93b1-4102-a6cb-4f6c79869312",
+      "type": "custom",
+      "position": {
+        "x": 92,
+        "y": 1444
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0",
+          "name": "ReLU"
+        },
+        "name": "block1_out_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "c2fa5de5-d08b-4ee9-9e4d-99643ed58632",
+      "type": "custom",
+      "position": {
+        "x": 159,
+        "y": 1640
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "name": "block2_linear1",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 128,
+          "out_features": 128,
+          "bias": true,
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "a7b8b773-1824-4ad7-b501-04ee00c9f78b",
+      "type": "custom",
+      "position": {
+        "x": 159,
+        "y": 1836
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0",
+          "name": "ReLU"
+        },
+        "name": "block2_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "16bf7623-f7c0-4891-ab59-e7fb17fb26e3",
+      "type": "custom",
+      "position": {
+        "x": 159,
+        "y": 2032
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "name": "block2_linear2",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 128,
+          "out_features": 128,
+          "bias": true,
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "join_53ee43af-0200-4e1e-b646-1aee22d13159",
+      "type": "join",
+      "position": {
+        "x": 100,
+        "y": 2228
+      },
+      "width": 164,
+      "height": 46,
+      "data": {
+        "package": {
+          "id": "core.add",
+          "version": "0.1.0",
+          "name": "Add"
+        },
+        "name": "residual2",
+        "color": "#4779c4",
+        "params": {},
+        "inputsCount": 2
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "a114130f-27e6-4da0-83a9-11a829b7bb43",
+      "type": "custom",
+      "position": {
+        "x": 92,
+        "y": 2370
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.relu",
+          "version": "0.1.0",
+          "name": "ReLU"
+        },
+        "name": "block2_out_relu",
+        "color": "#f4a460",
+        "params": {
+          "inplace": false
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "d29b33ed-f170-4601-bc8c-c81406e8d037",
+      "type": "custom",
+      "position": {
+        "x": 92,
+        "y": 2566
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.linear",
+          "version": "0.1.0",
+          "name": "Linear"
+        },
+        "name": "classifier",
+        "color": "#4779c4",
+        "params": {
+          "in_features": 128,
+          "out_features": 10,
+          "bias": true,
+          "dtype": "float32"
+        }
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    },
+    {
+      "id": "b1cb1277-dbfc-4b44-9f42-e09e3ac1162e",
+      "type": "custom",
+      "position": {
+        "x": 0,
+        "y": 2772
+      },
+      "width": 140,
+      "height": 80,
+      "data": {
+        "package": {
+          "id": "core.output",
+          "version": "0.1.0",
+          "name": "Output"
+        },
+        "name": "prediction_output",
+        "color": "#4d9b72",
+        "params": {}
+      },
+      "measured": {
+        "width": 140,
+        "height": 80
+      },
+      "selected": false
+    },
+    {
+      "id": "96eee10c-4528-4440-b1b6-1dd41bf97216",
+      "type": "custom",
+      "position": {
+        "x": 204,
+        "y": 2762
+      },
+      "width": 180,
+      "height": 100,
+      "data": {
+        "package": {
+          "id": "core.cross-entropy",
+          "version": "0.1.0",
+          "name": "Cross Entropy"
+        },
+        "name": "classification_loss",
+        "color": "#b85c5c",
+        "params": {}
+      },
+      "measured": {
+        "width": 180,
+        "height": 100
+      },
+      "selected": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_e3b4828b-1553-481d-b32d-f03b9461ae59",
+      "source": "53361dca-e0f0-4d23-9625-9b54976b0719",
+      "target": "3109b515-c5d4-43b5-b703-632dc05bd274",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_f7735c51-cc3c-4ce9-aac2-2fc1ab480fb5",
+      "source": "3109b515-c5d4-43b5-b703-632dc05bd274",
+      "target": "a393e778-0cf6-4dcf-aca2-5a0adbcfdf4b",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_b6b4b7cc-ba49-4cb5-8fe7-5fd823c3633d",
+      "source": "a393e778-0cf6-4dcf-aca2-5a0adbcfdf4b",
+      "target": "f9f0014a-f72f-4be2-a262-0814562c0ce5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_76f48fe7-bc1b-4119-bc87-8768b1720ab2",
+      "source": "f9f0014a-f72f-4be2-a262-0814562c0ce5",
+      "target": "7c55464f-2d0f-4e75-9ce5-37d262fa51b8",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_4ac40296-448a-468a-94de-89c53ebf2169",
+      "source": "7c55464f-2d0f-4e75-9ce5-37d262fa51b8",
+      "target": "7c57594b-0655-498e-a533-a8162f33bc12",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_f8d0fba1-9ceb-4272-99f2-e0ec618e71a3",
+      "source": "7c57594b-0655-498e-a533-a8162f33bc12",
+      "target": "451aa4f4-9123-4762-9991-7efb56eb3f38",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_8fa5cbf8-a7d0-4935-87ae-e7014fe493db",
+      "source": "451aa4f4-9123-4762-9991-7efb56eb3f38",
+      "target": "join_8f095f4d-c3a4-4253-ad62-bfc2aff93b35",
+      "sourceHandle": "out",
+      "targetHandle": "in-0",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_390e1c47-a102-41fc-a4b8-c67601fda918",
+      "source": "f9f0014a-f72f-4be2-a262-0814562c0ce5",
+      "target": "join_8f095f4d-c3a4-4253-ad62-bfc2aff93b35",
+      "sourceHandle": "out",
+      "targetHandle": "in-1",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_04299c17-215e-484c-9e79-bba1fdd9a045",
+      "source": "join_8f095f4d-c3a4-4253-ad62-bfc2aff93b35",
+      "target": "6898cb2b-93b1-4102-a6cb-4f6c79869312",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_e65cfea8-25b0-41a8-a0ab-b07d50d0559c",
+      "source": "6898cb2b-93b1-4102-a6cb-4f6c79869312",
+      "target": "c2fa5de5-d08b-4ee9-9e4d-99643ed58632",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_d5f74a03-1c41-4ca3-9263-8da05b2d403b",
+      "source": "c2fa5de5-d08b-4ee9-9e4d-99643ed58632",
+      "target": "a7b8b773-1824-4ad7-b501-04ee00c9f78b",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_89d5d1fc-4954-430f-b8ef-fc68688cbd55",
+      "source": "a7b8b773-1824-4ad7-b501-04ee00c9f78b",
+      "target": "16bf7623-f7c0-4891-ab59-e7fb17fb26e3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_189b4a09-3920-4e6e-a4f8-5eebd8d39903",
+      "source": "16bf7623-f7c0-4891-ab59-e7fb17fb26e3",
+      "target": "join_53ee43af-0200-4e1e-b646-1aee22d13159",
+      "sourceHandle": "out",
+      "targetHandle": "in-0",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_52a2c8e0-f0bb-4cf9-91c4-1d197337334a",
+      "source": "6898cb2b-93b1-4102-a6cb-4f6c79869312",
+      "target": "join_53ee43af-0200-4e1e-b646-1aee22d13159",
+      "sourceHandle": "out",
+      "targetHandle": "in-1",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_cd86b959-db38-4460-a396-58d13f6a0b07",
+      "source": "join_53ee43af-0200-4e1e-b646-1aee22d13159",
+      "target": "a114130f-27e6-4da0-83a9-11a829b7bb43",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_b4bbd4b5-0365-4ba1-a7f8-02683354f356",
+      "source": "a114130f-27e6-4da0-83a9-11a829b7bb43",
+      "target": "d29b33ed-f170-4601-bc8c-c81406e8d037",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_1fa6a39c-4ccf-4529-b190-af7305afbe66",
+      "source": "d29b33ed-f170-4601-bc8c-c81406e8d037",
+      "target": "b1cb1277-dbfc-4b44-9f42-e09e3ac1162e",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    },
+    {
+      "id": "edge_3a38a466-063b-48e2-abb3-5d6694a62ed8",
+      "source": "d29b33ed-f170-4601-bc8c-c81406e8d037",
+      "target": "96eee10c-4528-4440-b1b6-1dd41bf97216",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      },
+      "selected": false
+    }
+  ],
+  "layoutDirection": "vertical",
+  "manifest": {
+    "schemaVersion": 2,
+    "id": "feedforward-residual-mnist",
+    "version": "0.1.0",
+    "name": "FeedForward Residual MNIST",
+    "description": "Residual feed-forward classifier for MNIST",
+    "customPackages": [],
+    "customDatasets": []
+  }
+}

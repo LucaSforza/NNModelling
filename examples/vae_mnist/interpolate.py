@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from nnm_vae_mnist_qa import Model
+from nnm_vae_export import Model
 
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
@@ -18,13 +18,22 @@ MNIST_MEAN = 0.1307
 MNIST_STD = 0.3081
 
 
-def _encoder_tensor(model: Model, path: Path) -> torch.Tensor:
-    """Use the wheel's image adapter and flatten its normalized batch."""
+def _image_tensor(path: Path) -> torch.Tensor:
+    """Load one fixture using the model's documented MNIST tensor contract."""
 
-    tensor = model.input_adapter.to_tensor(path)
+    with Image.open(path) as opened:
+        image = opened.convert("L").resize((28, 28), Image.Resampling.BILINEAR)
+        pixels = torch.tensor(list(image.getdata()), dtype=torch.float32)
+    tensor = pixels.reshape(1, 1, 28, 28).div_(255).sub_(MNIST_MEAN).div_(MNIST_STD)
     if tensor.shape != (1, 1, 28, 28):
-        raise ValueError(f"image adapter returned {tuple(tensor.shape)}; expected (1, 1, 28, 28)")
-    return tensor.flatten(1)
+        raise ValueError(f"image preprocessing returned {tuple(tensor.shape)}; expected (1, 1, 28, 28)")
+    return tensor
+
+
+def _encoder_tensor(path: Path) -> torch.Tensor:
+    """Flatten one model-ready image for the public encoder adapter."""
+
+    return _image_tensor(path).flatten(1)
 
 
 def _prediction_image(tensor: torch.Tensor) -> Image.Image:
@@ -57,10 +66,12 @@ def interpolate(steps: int = 9, output_path: Path = OUTPUT_PATH) -> Path:
     seven_path = FIXTURE_DIR / "seven.png"
     model = Model()
 
-    one = _encoder_tensor(model, one_path)
-    seven = _encoder_tensor(model, seven_path)
-    for fixture in (one_path, seven_path):
-        prediction = model.predict(fixture)
+    one_image = _image_tensor(one_path)
+    seven_image = _image_tensor(seven_path)
+    one = one_image.flatten(1)
+    seven = seven_image.flatten(1)
+    for image in (one_image, seven_image):
+        prediction = model.predict_tensor(image)
         if prediction.shape != (1, 784):
             raise ValueError(f"prediction adapter returned {tuple(prediction.shape)}; expected (1, 784)")
 

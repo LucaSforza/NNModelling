@@ -3,31 +3,25 @@
   import type { Diagram } from "../Diagram.svelte";
   import {
     BackendApiError,
+    isWandbRun,
     TrainingApiClient,
-    canonicalDatasetParameters,
     canCancelTrainingJob,
     type DatasetInfo,
-    type DatasetParameter,
     type PairingGrant,
-    type SessionInfo,
     type TrainingJobLogs,
-    type TrainingJobRequest,
     type TrainingJobStatus,
+    type WandbCapabilities,
+    type WandbMode,
+    type WandbRun,
   } from "../training/api";
-  import {
-    forgetBackendConnection,
-    loadBackendConnection,
-    normalizeBackendUrl,
-    saveBackendConnection,
-    type SavedBackendConnection,
-  } from "../training/connection";
+  import { TrainingController, type TrainingControllerSnapshot } from "../training/controller";
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
-  import { buildPackageBundle } from "../training/package-bundle";
-  import { bundledCorePackageExports } from "../type-system/bundled/catalog";
+  import { coerceTrainingValue } from "../training/coerce";
 
   interface Props {
     diagram: Diagram;
+    controller: TrainingController;
     onClose: () => void;
   }
 
@@ -40,7 +34,7 @@
     | "rejected"
     | "error";
 
-  let { diagram, onClose }: Props = $props();
+  let { diagram, controller, onClose }: Props = $props();
 
   let datasets = $state.raw<DatasetInfo[]>([]);
   let jobs = $state.raw<TrainingJobStatus[]>([]);
@@ -50,7 +44,7 @@
   );
   let deviceName = $state("");
   let connectionState = $state<ConnectionState>("disconnected");
-  let session = $state.raw<SessionInfo | null>(null);
+  let session = $state.raw<{ expires_at: string | null; device_name: string | null } | null>(null);
   let pairing = $state.raw<PairingGrant | null>(null);
   let selectedDataset = $state("");
   let datasetParams = $state<Record<string, string>>({});
@@ -62,7 +56,8 @@
   let minDelta = $state("0");
   let seed = $state("42");
   let wandbProject = $state("NeuralNetworks");
-  let wandbMode = $state<"disabled" | "offline" | "online">("disabled");
+  let wandbMode = $state<WandbMode>("disabled");
+  let wandbCapabilities = $state.raw<WandbCapabilities | null>(null);
   let cpu = $state("4");
   let memoryGb = $state("8");
   let gpu = $state("0");
@@ -70,7 +65,6 @@
   let gpuType = $state("");
   let node = $state("");
   let priority = $state("0");
-  let packageSuffix = $state("");
   let selectedJobId = $state<string | null>(null);
   let loading = $state(false);
   let loadingJobs = $state(false);
@@ -78,75 +72,70 @@
   let errorMessage = $state("");
   let successMessage = $state("");
   let api: TrainingApiClient | null = null;
-  let savedConnection: SavedBackendConnection | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
-  let pairingTimer: ReturnType<typeof setInterval> | undefined;
   let eventAbort: AbortController | null = null;
   let refreshGate = new RefreshGate();
 
   let selectedDatasetInfo = $derived(
-    datasets.find((dataset) => dataset.target === selectedDataset) ?? null,
+    datasets.find((dataset) => dataset.reference.ref === selectedDataset) ?? null,
   );
 
   onMount(() => {
-    void restoreConnection();
-    return cleanup;
+    const unsubscribe = controller.subscribe(applyControllerSnapshot);
+    void controller.restore();
+    return () => {
+      unsubscribe();
+      eventAbort?.abort();
+      eventAbort = null;
+    };
   });
 
   function cleanup() {
     refreshGate.invalidate();
     if (refreshTimer) clearInterval(refreshTimer);
-    if (pairingTimer) clearInterval(pairingTimer);
     refreshTimer = undefined;
-    pairingTimer = undefined;
     eventAbort?.abort();
     eventAbort = null;
   }
 
-  async function restoreConnection() {
-    const restored = loadBackendConnection();
-    if (!restored) return;
-    savedConnection = restored;
-    backendUrl = restored.baseUrl;
-    deviceName = restored.deviceName ?? "";
-    api = new TrainingApiClient(restored.baseUrl, restored.token);
-    connectionState = "checking";
-    try {
-      if (restored.requestId) {
-        pairing = {
-          request_id: restored.requestId,
-          connection_id: restored.connectionId,
-          token: restored.token,
-          verification_code: restored.verificationCode ?? "",
-          expires_at: "",
-        };
-        const restoredState = await checkPairing();
-        if (restoredState === "pending") startPairingTimer();
-      } else {
-        await activate(await api.getSession());
-      }
-    } catch (error) {
-      handleConnectionError(error);
+  function applyControllerSnapshot(snapshot: TrainingControllerSnapshot): void {
+    const wasActive = connectionState === "active";
+    const view = snapshot.connection;
+    wandbCapabilities = snapshot.wandbCapabilities;
+    connectionState = view.status;
+    backendUrl = view.baseUrl ?? backendUrl;
+    deviceName = view.deviceName ?? "";
+    session = view.sessionExpiresAt ? { device_name: view.deviceName, expires_at: view.sessionExpiresAt } : null;
+    pairing = view.requestId && view.verificationCode ? {
+      request_id: view.requestId, connection_id: view.connectionId ?? "", token: "", verification_code: view.verificationCode, expires_at: view.expiresAt ?? "",
+    } : null;
+    datasets = snapshot.datasets;
+    api = view.status === "active" ? controller.getApi() : null;
+    errorMessage = view.error ?? "";
+    const config = snapshot.config;
+    selectedDataset = config.selectedDataset;
+    datasetParams = Object.fromEntries(Object.entries(config.datasetParams).map(([key, value]) => [key, String(value ?? "")]));
+    seed = String(config.seed); optimizerTarget = config.optimizerTarget; learningRate = String(config.learningRate);
+    maxEpochs = String(config.maxEpochs); accelerator = config.accelerator; patience = String(config.patience); minDelta = String(config.minDelta);
+    wandbProject = config.wandbProject; wandbMode = config.wandbMode; cpu = String(config.cpu); memoryGb = String(config.memoryGb); gpu = String(config.gpu);
+    gpuMemoryGb = config.gpuMemoryGb === undefined ? "" : String(config.gpuMemoryGb); gpuType = config.gpuType ?? ""; node = config.node ?? "";
+    priority = String(config.priority);
+    if (view.status === "active" && !wasActive) {
+      void loadDatasets();
+      void refreshJobs();
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = setInterval(() => void refreshJobs(), 3000);
+    } else if (view.status !== "active" && wasActive) {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = undefined;
     }
   }
 
   async function connect() {
-    cleanup();
     errorMessage = "";
     successMessage = "";
-    connectionState = "checking";
     try {
-      const normalized = normalizeBackendUrl(backendUrl);
-      const publicApi = new TrainingApiClient(normalized);
-      await publicApi.health();
-      const grant = await publicApi.createPairing(deviceName.trim() || null);
-      backendUrl = normalized;
-      pairing = grant;
-      savedConnection = connectionFromGrant(grant);
-      saveBackendConnection(savedConnection);
-      api = new TrainingApiClient(normalized, grant.token);
-      connectionState = "pending";
-      startPairingTimer();
+      await controller.connect(backendUrl, deviceName);
     } catch (error) {
       connectionState = "error";
       errorMessage = errorText(error);
@@ -154,92 +143,30 @@
   }
 
   async function renew() {
-    if (!api || !savedConnection) return;
     errorMessage = "";
-    connectionState = "checking";
     try {
-      const grant = await api.createRenewal();
-      pairing = grant;
-      savedConnection = connectionFromGrant(grant);
-      saveBackendConnection(savedConnection);
-      connectionState = "pending";
-      startPairingTimer();
+      await controller.renew();
     } catch (error) {
       handleConnectionError(error);
     }
-  }
-
-  function startPairingTimer() {
-    if (pairingTimer) clearInterval(pairingTimer);
-    pairingTimer = setInterval(() => void checkPairing(), 1500);
-  }
-
-  async function checkPairing(): Promise<ConnectionState> {
-    if (!api || !pairing || !savedConnection) return connectionState;
-    try {
-      const status = await api.getPairingStatus(pairing.request_id);
-      if (status.status === "approved") {
-        if (pairingTimer) clearInterval(pairingTimer);
-        pairingTimer = undefined;
-        savedConnection = { ...savedConnection, requestId: null, verificationCode: null };
-        saveBackendConnection(savedConnection);
-        pairing = null;
-        await activate(await api.getSession());
-      } else if (status.status === "rejected" || status.status === "expired") {
-        if (pairingTimer) clearInterval(pairingTimer);
-        pairingTimer = undefined;
-        connectionState = status.status === "rejected" ? "rejected" : "expired";
-      } else {
-        connectionState = "pending";
-      }
-    } catch (error) {
-      handleConnectionError(error);
-    }
-    return connectionState;
-  }
-
-  async function activate(currentSession: SessionInfo) {
-    refreshGate.invalidate();
-    connectionState = "active";
-    session = currentSession;
-    errorMessage = "";
-    await Promise.all([loadDatasets(), refreshJobs()]);
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(() => void refreshJobs(), 3000);
   }
 
   function forget() {
-    cleanup();
-    if (savedConnection) forgetBackendConnection(savedConnection.baseUrl);
-    api = null;
-    savedConnection = null;
-    pairing = null;
-    session = null;
-    datasets = [];
-    jobs = [];
-    connectionState = "disconnected";
-    errorMessage = "";
-    successMessage = "";
+    void controller.disconnect(false);
   }
 
   async function revokeAndForget() {
     if (!api || !confirm("Revocare questa connessione sul backend?")) return;
     try {
-      await api.revokeSession();
+      await controller.disconnect(true);
     } catch (error) {
       errorMessage = errorText(error);
-    } finally {
-      forget();
     }
   }
 
   async function loadDatasets() {
-    try {
-      datasets = await requireApi().listDatasets();
-      if (!selectedDataset && datasets.length > 0) selectDataset(datasets[0]);
-    } catch (error) {
-      handleConnectionError(error);
-    }
+    datasets = controller.getDatasets();
+    if (!selectedDataset && datasets.length > 0) selectDataset(datasets[0]);
   }
 
   async function refreshJobs() {
@@ -257,62 +184,46 @@
   }
 
   function selectDataset(dataset: DatasetInfo) {
-    selectedDataset = dataset.target;
-    datasetParams = Object.fromEntries(
-      dataset.parameters.map((parameter) => [parameter.name, String(parameter.default ?? "")]),
-    );
+    selectedDataset = dataset.reference.ref;
+    const defaults = Object.fromEntries(dataset.definition.parameters
+      .filter((parameter) => parameter.default !== undefined)
+      .map((parameter) => [parameter.name, parameter.default]));
+    datasetParams = Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, String(value ?? "")]));
+    try { controller.updateConfig({ selectedDataset, datasetParams: defaults }); } catch (error) { handleConnectionError(error); }
   }
 
-  function setDatasetParameter(parameter: DatasetParameter, event: Event) {
+  function setDatasetParameter(parameter: DatasetInfo["definition"]["parameters"][number], event: Event) {
     const value = (event.currentTarget as HTMLInputElement).value;
     datasetParams = { ...datasetParams, [parameter.name]: value };
+    syncConfigFromDraft();
   }
 
-  function coerce(value: string, type: "int"): number;
-  function coerce(value: string, type: "float"): number;
-  function coerce(value: string, type: "bool"): boolean;
-  function coerce(value: string, type: string): number | boolean | string {
-    if (type === "int") return Number.parseInt(value, 10);
-    if (type === "float") return Number.parseFloat(value);
-    if (type === "bool") return value === "true";
-    return value;
-  }
+  $effect(() => {
+    syncConfigFromDraft();
+  });
 
-  async function buildRequest(): Promise<TrainingJobRequest> {
-    if (!selectedDataset) throw new Error("Seleziona un dataset prima di accodare il training");
-    const bundle = await buildPackageBundle(diagram.nodes, diagram.edges, await bundledCorePackageExports(), diagram.typeResult);
-    const uploaded = await requireApi().uploadPackageBundle(bundle);
-    return {
-      schema_version: 1,
-      network: { format: "package", value: { bundle_ref: uploaded.bundle_ref, graph: bundle.graph } },
-      training: {
-        dataset: {
-          target: selectedDataset,
-          parameters: selectedDatasetInfo
-            ? canonicalDatasetParameters(selectedDatasetInfo, datasetParams)
-            : {},
-        },
-        seed: coerce(seed, "int"),
-        optimizer: { target: optimizerTarget, learning_rate: coerce(learningRate, "float") },
-        trainer: {
-          max_epochs: coerce(maxEpochs, "int"),
-          accelerator,
-          patience: coerce(patience, "int"),
-          min_delta: coerce(minDelta, "float"),
-        },
-        wandb: { project: wandbProject, mode: wandbMode },
-      },
-      resources: {
-        cpu: coerce(cpu, "int"),
-        memory_gb: coerce(memoryGb, "int"),
-        gpu: coerce(gpu, "int"),
-        ...(gpuMemoryGb ? { gpu_memory_gb: coerce(gpuMemoryGb, "int") } : {}),
-        ...(gpuType ? { gpu_type: gpuType } : {}),
-        ...(node ? { node } : {}),
-      },
-      priority: coerce(priority, "int") as number,
-      ...(packageSuffix ? { package_name: `nnm_${packageSuffix}` } : {}),
-    };
+  function syncConfigFromDraft(): void {
+    try {
+      const typedDatasetParams = Object.fromEntries(
+        Object.entries(datasetParams).map(([key, value]) => {
+          const parameter = selectedDatasetInfo?.definition.parameters.find((candidate) => candidate.name === key);
+          return [key, parameter ? coerceTrainingValue(value, parameter.type) : value];
+        }),
+      );
+      controller.updateConfig({ selectedDataset, datasetParams: typedDatasetParams, seed: coerceTrainingValue(seed, "integer") as number,
+        optimizerTarget, learningRate: coerceTrainingValue(learningRate, "number") as number,
+        maxEpochs: coerceTrainingValue(maxEpochs, "integer") as number, accelerator,
+        patience: coerceTrainingValue(patience, "integer") as number, minDelta: coerceTrainingValue(minDelta, "number") as number,
+        wandbProject, wandbMode, cpu: coerceTrainingValue(cpu, "integer") as number,
+        memoryGb: coerceTrainingValue(memoryGb, "number") as number, gpu: coerceTrainingValue(gpu, "integer") as number,
+        gpuMemoryGb: gpuMemoryGb ? coerceTrainingValue(gpuMemoryGb, "number") as number : undefined,
+        gpuType: gpuType || undefined, node: node || undefined,
+        priority: coerceTrainingValue(priority, "integer") as number });
+    } catch (error) {
+      // Keep the last accepted controller snapshot, but make an invalid draft
+      // visible instead of silently pretending it was submitted.
+      errorMessage = errorText(error);
+    }
   }
 
   async function submit() {
@@ -324,11 +235,12 @@
       ? openWaitingWindow("In attesa che W&B inizializzi la run…")
       : null;
     try {
-      const job = await requireApi().submitTrainingJob(await buildRequest());
+      const submission = await controller.submitTraining(diagram);
+      const job = submission.job;
       successMessage = `Job ${job.id} accodato.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);
-      startEvents(job.id, (wandbUrl) => openWandbWindow(wandbWindow, wandbUrl));
+      startEvents(job.id, (wandbRun) => openWandbWindow(wandbWindow, wandbRun));
       await loadJobLogs(job.id);
       await refreshJobs();
     } catch (error) {
@@ -340,14 +252,14 @@
     }
   }
 
-  function startEvents(jobId: string, onWandbReady?: (url: string) => void) {
+  function startEvents(jobId: string, onWandbReady?: (run: WandbRun) => void) {
     eventAbort?.abort();
     eventAbort = new AbortController();
     void requireApi().subscribeTrainingEvents(
       jobId,
       (event) => {
-        if (event.type === "wandb_ready" && typeof event.wandb_url === "string") {
-          onWandbReady?.(event.wandb_url);
+        if (event.type === "wandb_ready" && isWandbRun(event.wandb_run)) {
+          onWandbReady?.(event.wandb_run);
         }
         void refreshJobs();
       },
@@ -385,7 +297,27 @@
   }
 
   function openWandb(job: TrainingJobStatus) {
-    if (job.wandb_url) window.open(job.wandb_url, "_blank", "noopener,noreferrer");
+    const run = job.wandb_run;
+    if (run && isWandbRun(run) && run.mode === "online" && run.url) {
+      window.open(run.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  async function downloadWandbOffline(job: TrainingJobStatus) {
+    if (job.wandb_run?.mode !== "offline") return;
+    try {
+      const blob = await requireApi().downloadWandbOffline(job.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `wandb-${job.id.replace(/[^A-Za-z0-9._-]/g, "_")}.zip`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      handleConnectionError(error);
+    }
   }
 
   function openWaitingWindow(message: string): Window | null {
@@ -402,22 +334,29 @@
     if (target) target.location.href = trainingLogWindowUrl(window.location.href, jobId);
   }
 
-  function openWandbWindow(popup: Window | null, wandbUrl: string) {
+  function openWandbWindow(popup: Window | null, run: WandbRun) {
+    if (!isWandbRun(run) || run.mode !== "online" || !run.url) return;
     if (popup && !popup.closed) {
-      popup.location.replace(wandbUrl);
+      popup.location.replace(run.url);
     } else {
-      window.open(wandbUrl, "_blank", "noopener,noreferrer");
+      window.open(run.url, "_blank", "noopener,noreferrer");
     }
   }
 
   async function downloadModelPackage(job: TrainingJobStatus) {
     if (!job.model_package) return;
+    const packageName = window.prompt(
+      "Nome del package Python da esportare (formato nnm_<nome>)",
+      job.model_package.package_name,
+    );
+    if (packageName === null) return;
     try {
-      const blob = await requireApi().downloadModelPackage(job.id, job.model_package.sha256);
+      const normalizedPackageName = packageName.trim();
+      const blob = await requireApi().downloadModelPackage(job.id, normalizedPackageName);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = job.model_package.wheel.split("/").at(-1) ?? "model.whl";
+      link.download = `${normalizedPackageName}-${job.model_package.version}-py3-none-any.whl`;
       document.body.append(link);
       link.click();
       link.remove();
@@ -430,18 +369,6 @@
   function requireApi(): TrainingApiClient {
     if (!api) throw new Error("Collega prima un backend");
     return api;
-  }
-
-  function connectionFromGrant(grant: PairingGrant): SavedBackendConnection {
-    return {
-      version: 1,
-      baseUrl: backendUrl,
-      token: grant.token,
-      connectionId: grant.connection_id,
-      requestId: grant.request_id,
-      verificationCode: grant.verification_code,
-      deviceName: deviceName.trim() || null,
-    };
   }
 
   function handleConnectionError(error: unknown) {
@@ -465,6 +392,7 @@
   function formatExpiry(value: string | null | undefined): string {
     return value ? new Date(value).toLocaleString() : "non disponibile";
   }
+
 </script>
 
 <aside class="training-sidebar">
@@ -518,31 +446,32 @@
     {/if}
   </section>
 
-  {#if connectionState === "active"}
-    <section>
-      <h3>Dataset</h3>
-      <label>Classe Python
-        <select value={selectedDataset} onchange={(event) => {
-          const target = datasets.find((item) => item.target === (event.currentTarget as HTMLSelectElement).value);
-          if (target) selectDataset(target);
-        }}>
-          {#each datasets as dataset (dataset.target)}
-            <option value={dataset.target}>{dataset.name}</option>
-          {/each}
-        </select>
-      </label>
-      {#if selectedDatasetInfo}
-        {#if selectedDatasetInfo.num_classes !== null}
-          <small>Classi rilevate dal dataset: {selectedDatasetInfo.num_classes}</small>
-        {/if}
-        {#each selectedDatasetInfo.parameters as parameter (parameter.name)}
-          <label>{parameter.name}
-            <input value={datasetParams[parameter.name] ?? ""} oninput={(event) => setDatasetParameter(parameter, event)} />
-          </label>
+  <section>
+    <h3>Dataset</h3>
+    <label>Dataset
+      <select value={selectedDataset} onchange={(event) => {
+        const target = datasets.find((item) => item.reference.ref === (event.currentTarget as HTMLSelectElement).value);
+        if (target) selectDataset(target);
+      }}>
+        {#each datasets as dataset (dataset.reference.ref)}
+          <option value={dataset.reference.ref}>{dataset.definition.name}</option>
         {/each}
+      </select>
+    </label>
+    {#if selectedDatasetInfo}
+      {#if selectedDatasetInfo.definition.classes}
+        <small>Classi rilevate dal dataset: {selectedDatasetInfo.definition.classes.count}</small>
       {/if}
-      <label>Seed<input type="number" bind:value={seed} /></label>
-    </section>
+      {#each selectedDatasetInfo.definition.parameters as parameter (parameter.name)}
+        <label>{parameter.name}
+          <input value={datasetParams[parameter.name] ?? ""} oninput={(event) => setDatasetParameter(parameter, event)} />
+        </label>
+      {/each}
+    {/if}
+    <label>Seed<input type="number" bind:value={seed} /></label>
+  </section>
+
+  {#if connectionState === "active"}
 
     <section>
       <h3>Ottimizzazione</h3>
@@ -558,10 +487,34 @@
 
     <section>
       <h3>W&B</h3>
+      {#if wandbCapabilities?.online}
+        <div class="wandb-capability" aria-live="polite">
+          {#if wandbCapabilities.online.configured}
+            <strong>Online configurato</strong>
+            <small>Entity: {wandbCapabilities.online.entity ?? "amministratore"}</small>
+            <small>Base URL: {wandbCapabilities.online.base_url ?? "non disponibile"}</small>
+          {:else}
+            <strong>Online non disponibile</strong>
+            <small>{wandbCapabilities.online.reason ?? "Configurazione W&B mancante"}</small>
+          {/if}
+        </div>
+      {/if}
       <div class="grid">
         <label>Project<input bind:value={wandbProject} /></label>
-        <label>Mode<input bind:value={wandbMode} /></label>
+        <label>Mode
+          <select value={wandbMode} onchange={(event) => {
+            wandbMode = (event.currentTarget as HTMLSelectElement).value as WandbMode;
+            syncConfigFromDraft();
+          }}>
+            <option value="disabled">Disabilitato</option>
+            <option value="offline">Offline</option>
+            <option value="online" disabled={!wandbCapabilities?.available_modes.includes("online")}>Online (consigliato)</option>
+          </select>
+        </label>
       </div>
+      {#if wandbMode === "online" && !wandbCapabilities?.available_modes.includes("online")}
+        <small class="wandb-warning">La modalità online resta selezionata ma non può essere inviata finché il backend non la abilita.</small>
+      {/if}
     </section>
 
     <section>
@@ -575,10 +528,6 @@
       <label>Tipo GPU<input bind:value={gpuType} placeholder="A100" /></label>
       <label>Nodo<input bind:value={node} placeholder="qualsiasi" /></label>
       <label>Priorità<input type="number" bind:value={priority} /></label>
-      <label>Nome pacchetto
-        <input bind:value={packageSuffix} placeholder="mnist_classifier" pattern="[A-Za-z][A-Za-z0-9_]*" />
-        <small>La wheel e l'import avranno il prefisso <code>nnm_</code>.</small>
-      </label>
       <button class="submit" onclick={submit} disabled={loading}>{loading ? "Invio..." : "Invia training"}</button>
     </section>
 
@@ -592,7 +541,8 @@
           <small>priorità {job.priority} · {job.executor ?? "in coda"}</small>
           {#if job.error}<pre>{job.error}</pre>{/if}
           {#if canCancelTrainingJob(job.status)}<button onclick={() => cancel(job.id)}>Annulla</button>{/if}
-          {#if job.wandb_url}<button onclick={() => openWandb(job)}>Apri W&B</button>{/if}
+          {#if job.wandb_run && isWandbRun(job.wandb_run) && job.wandb_run.mode === "online" && job.wandb_run.url}<button onclick={() => openWandb(job)}>Apri W&B</button>{/if}
+          {#if job.wandb_run?.mode === "offline"}<button onclick={() => void downloadWandbOffline(job)}>Scarica W&B offline</button>{/if}
           <button onclick={() => openLogWindow(job.id)}>Apri terminale</button>
           {#if job.model_package}
             <button onclick={() => void downloadModelPackage(job)}>Scarica wheel</button>

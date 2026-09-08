@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 
   // ── Create the MCP server with full tool/resource registration ──────
   const wsPort = parseWebSocketPort(process.env.NNM_WS_PORT);
-  const { server, browser } = await createServer({ wsPort });
+  const { server, browser } = await createServer({ wsPort, projectRoot: process.env.NNM_PROJECT_ROOT });
 
   // ── Connect stdio transport (MCP protocol) ─────────────────────────
   const transport = new StdioServerTransport();

@@ -48,6 +48,8 @@ export interface BrowserRPCClientConfig {
   port?: number;
   requestTimeout?: number;
 }
+export type BrowserNotification = (tabId: string, method: string, params: Record<string, unknown>) => void | Promise<void>;
+export type BrowserRequest = (tabId: string, method: string, params: Record<string, unknown>) => unknown | Promise<unknown>;
 
 /**
  * BrowserRPCClient — WebSocket server that accepts multiple browser
@@ -75,6 +77,8 @@ export class BrowserRPCClient {
   private host: string;
   private port: number;
   private requestTimeout: number;
+  private readonly notificationListeners = new Set<BrowserNotification>();
+  private readonly requestListeners = new Set<BrowserRequest>();
 
   constructor(config?: BrowserRPCClientConfig) {
     this.host = config?.host ?? "localhost";
@@ -215,6 +219,16 @@ export class BrowserRPCClient {
     return this.activeTab;
   }
 
+  onNotification(listener: BrowserNotification): () => void {
+    this.notificationListeners.add(listener);
+    return () => this.notificationListeners.delete(listener);
+  }
+
+  onRequest(listener: BrowserRequest): () => void {
+    this.requestListeners.add(listener);
+    return () => this.requestListeners.delete(listener);
+  }
+
   // ── Private ────────────────────────────────────────────────────────
 
   private handleConnection(ws: WebSocket): void {
@@ -297,14 +311,26 @@ export class BrowserRPCClient {
   }
 
   private onMessage(tabId: string, data: string): void {
-    let msg: { id?: string; result?: unknown; error?: { message: string } };
+    let msg: { id?: string; method?: unknown; params?: unknown; result?: unknown; error?: { message: string } };
     try {
       msg = JSON.parse(data);
     } catch {
       return; // Ignore non-JSON messages
     }
 
-    if (!msg.id) return;
+    if (!msg.id) {
+      const notification = msg;
+      if (typeof notification.method === "string" && notification.params && typeof notification.params === "object") {
+        for (const listener of this.notificationListeners) void listener(tabId, notification.method, notification.params as Record<string, unknown>);
+      }
+      return;
+    }
+
+    if (typeof msg.method === "string") {
+      const params = msg.params && typeof msg.params === "object" ? msg.params as Record<string, unknown> : {};
+      void this.handleRequest(tabId, msg.id, msg.method, params);
+      return;
+    }
 
     const entry = this.clients.get(tabId);
     if (!entry) return;
@@ -319,6 +345,18 @@ export class BrowserRPCClient {
       pending.reject(new Error(msg.error.message));
     } else {
       pending.resolve(msg.result);
+    }
+  }
+
+  private async handleRequest(tabId: string, id: string, method: string, params: Record<string, unknown>): Promise<void> {
+    const entry = this.clients.get(tabId);
+    if (!entry || entry.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      let result: unknown;
+      for (const listener of this.requestListeners) result = await listener(tabId, method, params);
+      entry.ws.send(JSON.stringify({ id, result }));
+    } catch (error) {
+      entry.ws.send(JSON.stringify({ id, error: { message: error instanceof Error ? error.message : String(error) } }));
     }
   }
 

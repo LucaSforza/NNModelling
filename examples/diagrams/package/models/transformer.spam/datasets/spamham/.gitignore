@@ -1,0 +1,8 @@
+# Downloaded source data remains local to the project and is not committed.
+data/*.jsonl
+data/*.csv
+data/*.parquet
+data/*.pt
+data/vocab.json
+__pycache__/
+*.pyc

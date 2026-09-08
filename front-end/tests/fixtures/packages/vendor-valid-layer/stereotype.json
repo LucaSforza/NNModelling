@@ -1,0 +1,6 @@
+{
+  "name": "Valid Vendor Layer",
+  "kind": "layer",
+  "view": { "color": "#2f855a", "width": 120, "height": 60 },
+  "parameters": {}
+}

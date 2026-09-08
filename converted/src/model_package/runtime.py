@@ -52,6 +52,13 @@ class Model:
         self._prediction = programs.prediction
         self._adapters = programs
         self.input_adapter = adapter_from_spec(architecture["input_adapter"])
+        contract = architecture.get("input_contract")
+        if not isinstance(contract, Mapping):
+            raise ValueError("model package input contract is missing")
+        inputs = contract.get("inputs")
+        if not isinstance(inputs, Mapping):
+            raise ValueError("model package input contract must contain named inputs")
+        self._input_contract = {str(name): dict(schema) for name, schema in inputs.items()}
         self.device = target_device
 
     def adapter(self, name: str) -> object:
@@ -60,17 +67,18 @@ class Model:
         return _WheelAdapterHandle(self._adapters.adapter(name), self.device)
 
     @torch.inference_mode()
-    def predict_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+    def predict_tensor(self, tensor: torch.Tensor | Mapping[str, torch.Tensor]) -> torch.Tensor:
         """Run the declared prediction program on a model-ready batch."""
 
-        if not isinstance(tensor, torch.Tensor):
-            raise TypeError("predict_tensor expects a torch.Tensor")
-        return self._prediction(tensor.to(self.device))
+        inputs = _validated_inputs(tensor, self._input_contract, self.device)
+        return self._prediction(inputs)
 
     @torch.inference_mode()
     def predict(self, value: object) -> torch.Tensor:
         """Adapt one user-facing value and run prediction."""
 
+        if self._input_contract and len(self._input_contract) != 1:
+            raise TypeError("predict requires exactly one named input; use predict_tensor with a tensor map")
         return self.predict_tensor(self.input_adapter.to_tensor(value))
 
 
@@ -104,7 +112,60 @@ def _load_architecture(path: object) -> dict[str, object]:
     input_adapter = architecture.get("input_adapter")
     if not isinstance(input_adapter, Mapping):
         raise ValueError("model package input adapter must be an object")
+    input_contract = architecture.get("input_contract")
+    if not isinstance(input_contract, Mapping) or not isinstance(input_contract.get("inputs"), Mapping):
+        raise ValueError("model package input contract is missing")
     return architecture
+
+
+def _validated_inputs(
+    value: torch.Tensor | Mapping[str, torch.Tensor],
+    contract: Mapping[str, Mapping[str, object]],
+    device: torch.device,
+) -> torch.Tensor | dict[str, torch.Tensor]:
+    """Validate named input tensors while keeping only the leading batch dynamic."""
+
+    if isinstance(value, torch.Tensor):
+        if not contract:
+            return value.to(device)
+        if len(contract) != 1:
+            raise TypeError("multiple named inputs require a tensor map")
+        name, schema = next(iter(contract.items()))
+        tensor = value.to(device)
+        _validate_tensor(tensor, schema, name)
+        return tensor
+    if not isinstance(value, Mapping):
+        raise TypeError("predict_tensor expects a torch.Tensor or named tensor map")
+    if set(value) != set(contract):
+        missing = sorted(set(contract) - set(value))
+        extra = sorted(set(value) - set(contract))
+        raise ValueError(f"named input map mismatch (missing={missing}, extra={extra})")
+    validated: dict[str, torch.Tensor] = {}
+    for name, schema in contract.items():
+        tensor = value[name]
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError(f"input {name!r} must be a torch.Tensor")
+        tensor = tensor.to(device)
+        _validate_tensor(tensor, schema, name)
+        validated[name] = tensor
+    return validated
+
+
+def _validate_tensor(tensor: torch.Tensor, schema: Mapping[str, object], name: str) -> None:
+    shape = schema.get("shape")
+    dtype_name = schema.get("dtype")
+    if not isinstance(shape, list) or not isinstance(dtype_name, str):
+        raise ValueError(f"input contract {name!r} is invalid")
+    expected_dtype = getattr(torch, dtype_name, None)
+    if tensor.dtype != expected_dtype:
+        raise TypeError(f"input {name!r} dtype {tensor.dtype} does not match {dtype_name}")
+    if tensor.ndim != len(shape):
+        raise ValueError(f"input {name!r} rank {tensor.ndim} does not match declared rank {len(shape)}")
+    for index, dimension in enumerate(shape):
+        if dimension == "B" and index == 0:
+            continue
+        if not isinstance(dimension, int) or tensor.shape[index] != dimension:
+            raise ValueError(f"input {name!r} dimension {index} does not match declared contract")
 
 
 def _architecture_fingerprint(architecture: Mapping[str, object]) -> str:

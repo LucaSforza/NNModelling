@@ -1,0 +1,22 @@
+{
+  "name": "Transpose",
+  "description": "Swaps two tensor dimensions, preserving all other dimensions.",
+  "kind": "layer",
+  "view": {
+    "color": "#8b6bb8",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "dim0": {
+      "type": "integer",
+      "default": -2,
+      "position": "top"
+    },
+    "dim1": {
+      "type": "integer",
+      "default": -1,
+      "position": "bottom"
+    }
+  }
+}

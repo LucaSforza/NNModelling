@@ -13,6 +13,8 @@ from typing import Any
 
 import torch
 
+from package_runtime.jcs import canonicalize
+
 
 class PackageValidationError(ValueError):
     """Raised when a package bundle cannot be safely compiled."""
@@ -70,7 +72,7 @@ def canonical_bundle(bundle: Mapping[str, Any]) -> bytes:
     """Return the stable bytes used for upload and persistence digests."""
 
     payload = {key: value for key, value in bundle.items() if key != "digest"}
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return canonicalize(payload)
 
 
 def bundle_digest(bundle: Mapping[str, Any]) -> str:

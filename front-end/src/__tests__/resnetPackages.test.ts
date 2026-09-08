@@ -55,7 +55,7 @@ describe("NNModelling ResNet product-mode packages", () => {
       "core.flatten",
       "core.max-pool2d",
       "core.relu",
-    ]) await host.activate(id)
+    ]) await host.activate(ref(id))
 
     const input = tensor(["B", 3, 224, 224])
     const conv1 = infer("core.conv2d", input, {
@@ -78,7 +78,7 @@ describe("NNModelling ResNet product-mode packages", () => {
       in_channels: 64, out_channels: 64, kernel_size: 3, padding: 1,
     })
     const blockNorm2 = infer("core.batch-norm2d", output(blockConv2), { num_features: 64 })
-    const residual = host.inferForEditor("core.add", {
+    const residual = host.inferForEditor(ref("core.add"), {
       kind: "join", inputs: [output(pooled), output(blockNorm2)],
     }, {})
     expect(residual).toEqual({ status: "success", output: tensor(["B", 64, 56, 56]) })
@@ -91,25 +91,25 @@ describe("NNModelling ResNet product-mode packages", () => {
   test("reports channel, rank, and spatial-shape contract mismatches", async () => {
     host = await TypeSystemHost.create(packages)
     for (const id of ["core.batch-norm2d", "core.conv2d", "core.flatten", "core.max-pool2d"]) {
-      await host.activate(id)
+      await host.activate(ref(id))
     }
 
-    expect(host.inferForEditor("core.conv2d", {
+    expect(host.inferForEditor(ref("core.conv2d"), {
       kind: "layer", inputs: [tensor(["B", 16, 32, 32])],
     }, { in_channels: 3, out_channels: 8, kernel_size: 3 })).toEqual({
       status: "error", message: "Conv2d expected 3 input channels, got 16",
     })
-    expect(host.inferForEditor("core.batch-norm2d", {
+    expect(host.inferForEditor(ref("core.batch-norm2d"), {
       kind: "layer", inputs: [tensor(["B", 8, 32])],
     }, { num_features: 8 })).toEqual({
       status: "error", message: "BatchNorm2d expects a rank-4 tensor",
     })
-    expect(host.inferForEditor("core.max-pool2d", {
+    expect(host.inferForEditor(ref("core.max-pool2d"), {
       kind: "layer", inputs: [tensor(["B", 8, "H", "W"])],
     }, { kernel_size: 3 })).toEqual({
       status: "error", message: "MaxPool2d requires numeric spatial dimensions",
     })
-    expect(host.inferForEditor("core.flatten", {
+    expect(host.inferForEditor(ref("core.flatten"), {
       kind: "layer", inputs: [tensor(["B", "C", 7, 7])],
     }, { start_dim: 1 })).toEqual({
       status: "error", message: "flatten requires numeric dimensions",
@@ -122,8 +122,10 @@ function infer(
   input: ReturnType<typeof tensor>,
   parameters: Readonly<Record<string, unknown>>,
 ) {
-  return host!.inferForEditor(packageId, { kind: "layer", inputs: [input] }, parameters)
+  return host!.inferForEditor(ref(packageId), { kind: "layer", inputs: [input] }, parameters)
 }
+
+function ref(id: string, version = "0.1.0") { return { id, version, name: id } }
 
 function output(result: ReturnType<TypeSystemHost["inferForEditor"]>) {
   if (result.status !== "success") throw new Error(`expected successful inference, got ${result.status}`)

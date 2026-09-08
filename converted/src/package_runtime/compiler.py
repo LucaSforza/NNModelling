@@ -66,11 +66,14 @@ def _compile_programs(graph: Mapping[str, Any], catalog: dict[tuple[str, str], V
     nodes = {node.get("id"): node for node in raw_nodes if isinstance(node, Mapping) and isinstance(node.get("id"), str)}
     if len(nodes) != len(raw_nodes):
         raise PackageValidationError(f"{scope} graph contains invalid or duplicate node ids")
+    if any(isinstance(node, Mapping) and "inputBinding" in node for node in raw_nodes):
+        raise PackageValidationError(f"{scope} graph nodes must not contain per-node inputBinding")
     edges = _validate_edges(raw_edges, nodes, scope)
     _ensure_acyclic(nodes, edges, scope)
     roots = [node_id for node_id, incoming in edges.items() if not incoming]
-    if len(roots) != 1 or nodes[roots[0]].get("type") != "input":
-        raise PackageValidationError(f"{scope} graph requires exactly one input root")
+    if not roots or any(nodes[node_id].get("type") != "input" for node_id in roots):
+        raise PackageValidationError(f"{scope} graph requires exactly one input root or multiple named input roots")
+    _validate_input_contracts(graph, nodes, roots, scope)
     modules: dict[str, torch.nn.Module] = {}
     kinds: dict[str, str | None] = {}
     for node_id, node in nodes.items():
@@ -101,7 +104,15 @@ def _compile_programs(graph: Mapping[str, Any], catalog: dict[tuple[str, str], V
         for node_id, node in nodes.items()
         if kinds.get(node_id) == "loss"
     }
-    graph_module = _GraphModule(nodes, edges, modules, kinds, roots[0], objective_bindings)
+    graph_module = _GraphModule(
+        nodes,
+        edges,
+        modules,
+        kinds,
+        tuple(roots),
+        objective_bindings,
+        _input_binding_map(graph, scope),
+    )
     programs = _make_programs(graph_module)
     if scope == "root":
         programs._set_adapters(_compile_adapters(graph, catalog, graph_module, programs._objective_nodes))
@@ -114,6 +125,71 @@ def _compile_graph(graph: Mapping[str, Any], catalog: dict[tuple[str, str], Vali
     """Compile a nested graph used by a subflow builder."""
 
     return _compile_programs(graph, catalog, scope).module
+
+
+def _validate_input_contracts(
+    graph: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+    roots: list[str],
+    scope: str,
+) -> None:
+    """Reject unresolved dataset contracts before any package builder runs."""
+
+    raw_contracts = graph.get("inputContracts")
+    raw_bindings = graph.get("inputBindings")
+    if raw_contracts is None and raw_bindings is None:
+        return
+    if not isinstance(raw_contracts, Mapping):
+        raise PackageValidationError(f"{scope} graph inputContracts must be a named object")
+    binding_by_node = _input_binding_map(graph, scope)
+    expected_names: set[str] = set()
+    for node_id in roots:
+        binding = binding_by_node.get(node_id)
+        if not isinstance(binding, str) or not binding:
+            raise PackageValidationError(f"{scope} input node {node_id} has no input binding")
+        if binding in expected_names:
+            raise PackageValidationError(f"{scope} graph has duplicate input binding {binding!r}")
+        expected_names.add(binding)
+        contract = raw_contracts.get(binding)
+        if not isinstance(contract, Mapping):
+            raise PackageValidationError(f"{scope} graph is missing resolved input contract for {binding!r}")
+        shape = contract.get("shape")
+        if not isinstance(shape, list) or any(
+            not ((item == "B" and index == 0) or (isinstance(item, int) and not isinstance(item, bool) and item > 0))
+            for index, item in enumerate(shape)
+        ):
+            raise PackageValidationError(f"{scope} input contract {binding!r} contains unresolved dimensions")
+        if contract.get("dtype") not in {"float16", "bfloat16", "float32", "float64", "int8", "uint8", "int16", "int32", "int64", "bool"}:
+            raise PackageValidationError(f"{scope} input contract {binding!r} has an unsupported dtype")
+    if set(raw_contracts) != expected_names:
+        raise PackageValidationError(f"{scope} graph inputContracts do not match input roots")
+    if raw_bindings is not None:
+        if not isinstance(raw_bindings, list):
+            raise PackageValidationError(f"{scope} graph inputBindings must be a list")
+        declared = {(item.get("nodeId"), item.get("name")) for item in raw_bindings if isinstance(item, Mapping)}
+        if declared != {(node_id, binding_by_node.get(node_id)) for node_id in roots}:
+            raise PackageValidationError(f"{scope} graph inputBindings do not match input roots")
+
+
+def _input_binding_map(graph: Mapping[str, Any], scope: str) -> dict[str, str]:
+    """Read the canonical graph-level input binding contract."""
+
+    raw_bindings = graph.get("inputBindings")
+    if raw_bindings is None:
+        return {}
+    if not isinstance(raw_bindings, list):
+        raise PackageValidationError(f"{scope} graph inputBindings must be a list")
+    result: dict[str, str] = {}
+    for item in raw_bindings:
+        if not isinstance(item, Mapping):
+            raise PackageValidationError(f"{scope} graph contains an invalid input binding")
+        node_id, name = item.get("nodeId"), item.get("name")
+        if not isinstance(node_id, str) or not node_id or not isinstance(name, str) or not name:
+            raise PackageValidationError(f"{scope} graph contains an invalid input binding")
+        if node_id in result:
+            raise PackageValidationError(f"{scope} graph has duplicate input binding for node {node_id}")
+        result[node_id] = name
+    return result
 
 
 def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[str, str], ValidatedPackage]) -> Mapping[str, Any]:
@@ -202,7 +278,13 @@ def _normalize_graph(graph: Mapping[str, Any], scope: str, catalog: dict[tuple[s
             ],
         }
 
-    return make_scope(None, scope)
+    normalized = make_scope(None, scope)
+    # Boundary metadata belongs to the root graph. Keep it alongside the
+    # normalized nodes so dataset-resolved contracts survive flat diagrams.
+    for key in ("inputBindings", "inputContracts"):
+        if key in graph:
+            normalized[key] = graph[key]
+    return normalized
 
 
 def _runtime_handle(handle: Any) -> str:
@@ -243,7 +325,7 @@ def _objective_bindings(catalog: dict[tuple[str, str], ValidatedPackage], node: 
         transform = binding.get("transform")
         if not isinstance(name, str) or not name or name in names:
             raise PackageValidationError(f"loss package {package.package_id} has duplicate or invalid binding name")
-        if source != "batch.targets":
+        if not isinstance(source, str) or not source.startswith("batch.targets.") or not source.removeprefix("batch.targets."):
             raise PackageValidationError(
                 f"loss package {package.package_id} has unsupported objective binding source"
             )
@@ -381,16 +463,26 @@ def _bind_adapter_declaration(
 ) -> dict[str, Any]:
     """Bind a concrete node schema to the stereotype's symbolic template."""
 
+    # Training inference resolves B to the selected dataset batch size. Keep
+    # that concrete value for module construction, but canonicalize adapter
+    # metadata back to the public dynamic batch protocol.
+    normalized_selection = {
+        **selection,
+        **{
+            field: _normalize_adapter_binding(selection[field], declaration[field])
+            for field in ("input", "output")
+        },
+    }
     for field in ("input", "output"):
-        concrete = selection.get(field)
+        concrete = normalized_selection.get(field)
         if not isinstance(concrete, Mapping) or concrete.get("type") != "tensor":
             raise PackageValidationError(
                 f"wheel adapter {declaration['name']!r} binding on {node_id} requires a concrete tensor {field}"
             )
         _validate_concrete_tensor_schema(concrete, declaration["name"], field)
 
-    input_shape = selection["input"]["shape"]
-    output_shape = selection["output"]["shape"]
+    input_shape = normalized_selection["input"]["shape"]
+    output_shape = normalized_selection["output"]["shape"]
     input_batch = bool(input_shape and input_shape[0] == "B")
     output_batch = bool(output_shape and output_shape[0] == "B")
     if input_batch != output_batch:
@@ -400,22 +492,34 @@ def _bind_adapter_declaration(
 
     bindings: dict[str, int] = {}
     _match_declared_shape(
-        declaration["input"]["shape"], selection["input"]["shape"], bindings,
+        declaration["input"]["shape"], normalized_selection["input"]["shape"], bindings,
         declaration["name"], "input",
     )
     _match_declared_shape(
-        declaration["output"]["shape"], selection["output"]["shape"], bindings,
+        declaration["output"]["shape"], normalized_selection["output"]["shape"], bindings,
         declaration["name"], "output",
     )
-    if selection["input"]["dtype"] != declaration["input"]["dtype"]:
+    if normalized_selection["input"]["dtype"] != declaration["input"]["dtype"]:
         raise PackageValidationError(f"wheel adapter {declaration['name']!r} input dtype binding is incompatible")
-    if selection["output"]["dtype"] != declaration["output"]["dtype"]:
+    if normalized_selection["output"]["dtype"] != declaration["output"]["dtype"]:
         raise PackageValidationError(f"wheel adapter {declaration['name']!r} output dtype binding is incompatible")
     return {
         **declaration,
-        "input": _concrete_schema(selection["input"]),
-        "output": _concrete_schema(selection["output"]),
+        "input": _concrete_schema(normalized_selection["input"]),
+        "output": _concrete_schema(normalized_selection["output"]),
     }
+
+
+def _normalize_adapter_binding(
+    selection: Mapping[str, Any], declaration: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Normalize a resolved training batch axis to the wheel's dynamic B."""
+
+    shape = selection.get("shape")
+    declared_shape = declaration.get("shape")
+    if isinstance(shape, list) and shape and isinstance(declared_shape, list) and declared_shape[0] == "B":
+        shape = ["B", *shape[1:]] if isinstance(shape[0], int) else list(shape)
+    return {**dict(selection), "shape": shape}
 
 
 def _validate_concrete_tensor_schema(schema: Mapping[str, Any], name: str, role: str) -> None:
@@ -547,15 +651,15 @@ class CompiledPrograms(torch.nn.Module):
     def modules_by_id(self) -> torch.nn.ModuleDict:
         return self.module.modules_by_id
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: Mapping[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         """Compatibility forwarding entrypoint for prediction only."""
 
         return self.prediction(inputs)
 
-    def prediction(self, inputs: torch.Tensor) -> torch.Tensor:
+    def prediction(self, inputs: Mapping[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         return self.prediction_program(inputs)
 
-    def objective(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def objective(self, inputs: Mapping[str, torch.Tensor] | torch.Tensor, targets: Mapping[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         return self.objective_program(inputs, targets)
 
 
@@ -563,7 +667,7 @@ class PredictionProgram:
     def __init__(self, module: "_GraphModule", output_node: str, objective_nodes: set[str]) -> None:
         self._module, self._output_node, self._objective_nodes = module, output_node, objective_nodes
 
-    def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
+    def __call__(self, inputs: Mapping[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         values = self._module.evaluate(inputs, None, self._output_node, self._objective_nodes)
         return values[self._output_node]
 
@@ -572,7 +676,7 @@ class ObjectiveProgram:
     def __init__(self, module: "_GraphModule", objective_node: str | None, objective_nodes: set[str]) -> None:
         self._module, self._objective_node, self._objective_nodes = module, objective_node, objective_nodes
 
-    def __call__(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def __call__(self, inputs: Mapping[str, torch.Tensor] | torch.Tensor, targets: Mapping[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         if self._objective_node is None:
             raise PackageValidationError("training requires an objective node")
         values = self._module.evaluate(inputs, targets, self._objective_node, set())
@@ -583,11 +687,21 @@ class ObjectiveProgram:
 
 
 class _GraphModule(torch.nn.Module):
-    def __init__(self, nodes: dict[str, Mapping[str, Any]], edges: dict[str, list[dict[str, Any]]], modules: dict[str, torch.nn.Module], kinds: dict[str, str | None], root: str, objective_bindings: dict[str, tuple[_ObjectiveBinding, ...]]) -> None:
+    def __init__(
+        self,
+        nodes: dict[str, Mapping[str, Any]],
+        edges: dict[str, list[dict[str, Any]]],
+        modules: dict[str, torch.nn.Module],
+        kinds: dict[str, str | None],
+        roots: tuple[str, ...],
+        objective_bindings: dict[str, tuple[_ObjectiveBinding, ...]],
+        input_bindings: dict[str, str],
+    ) -> None:
         super().__init__()
         self.modules_by_id = torch.nn.ModuleDict(modules)
-        self._nodes, self._edges, self._kinds, self._root = nodes, edges, kinds, root
+        self._nodes, self._edges, self._kinds, self._roots = nodes, edges, kinds, roots
         self._objective_bindings = objective_bindings
+        self._input_bindings = input_bindings
 
     def forward(self, value: torch.Tensor) -> torch.Tensor:
         """Execute a nested graph as a normal PyTorch submodule."""
@@ -597,10 +711,19 @@ class _GraphModule(torch.nn.Module):
             raise PackageValidationError("nested graph requires one terminal")
         return self.evaluate(value, None, terminals[0], set())[terminals[0]]
 
-    def evaluate(self, value: torch.Tensor, target: torch.Tensor | None, terminal: str, excluded: set[str]) -> dict[str, torch.Tensor]:
-        values: dict[str, torch.Tensor] = {self._root: value}
-        pending = [self._root]
-        queued = {self._root}
+    def evaluate(
+        self,
+        value: Mapping[str, torch.Tensor] | torch.Tensor,
+        target: Mapping[str, torch.Tensor] | torch.Tensor | None,
+        terminal: str,
+        excluded: set[str],
+    ) -> dict[str, torch.Tensor]:
+        values = {
+            root: _root_input(value, self._input_bindings.get(root), root, len(self._roots))
+            for root in self._roots
+        }
+        pending = list(self._roots)
+        queued = set(self._roots)
         while pending:
             ready_index = next(
                 (
@@ -615,7 +738,7 @@ class _GraphModule(torch.nn.Module):
             node_id = pending.pop(ready_index)
             node = self._nodes[node_id]
             inputs = [values[edge["source"]] for edge in self._edges[node_id]]
-            if node_id != self._root:
+            if node_id not in self._roots:
                 if node_id in excluded:
                     continue
                 module = self.modules_by_id[node_id]
@@ -623,7 +746,10 @@ class _GraphModule(torch.nn.Module):
                     bindings = self._objective_bindings[node_id]
                     if len(bindings) and target is None:
                         raise PackageValidationError(f"objective node {node_id} requires batch.targets")
-                    args = [*inputs, *(_adapt_objective_input(target, binding.transform) for binding in bindings if binding.source == "batch.targets")]
+                    args = [
+                        *inputs,
+                        *(_adapt_objective_input(target, binding.source, binding.transform) for binding in bindings),
+                    ]
                     output = module(*args)
                 else:
                     output = module(*inputs)
@@ -638,15 +764,46 @@ class _GraphModule(torch.nn.Module):
         raise PackageValidationError(f"graph cannot reach terminal node {terminal}")
 
 
-def _adapt_objective_input(target: torch.Tensor | None, transform: str | None) -> torch.Tensor:
+def _root_input(
+    value: Mapping[str, torch.Tensor] | torch.Tensor,
+    binding: str | None,
+    node_id: str,
+    root_count: int,
+) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        if root_count != 1:
+            raise PackageValidationError("multiple named inputs require a tensor map")
+        return value
+    if not isinstance(value, Mapping):
+        raise PackageValidationError(f"input binding for node {node_id} must be a tensor map")
+    if not isinstance(binding, str) or not binding:
+        raise PackageValidationError(f"input node {node_id} has no input binding")
+    tensor = value.get(binding)
+    if not isinstance(tensor, torch.Tensor):
+        raise PackageValidationError(f"batch.inputs is missing slot: {binding}")
+    return tensor
+
+
+def _adapt_objective_input(
+    target: Mapping[str, torch.Tensor] | torch.Tensor | None,
+    source: str,
+    transform: str | None,
+) -> torch.Tensor:
     """Apply the loss package's declared target adaptation, never an inferred one."""
 
     if target is None:
         raise PackageValidationError("objective binding requires batch.targets")
+    if isinstance(target, torch.Tensor):
+        tensor = target
+    else:
+        slot = source.removeprefix("batch.targets.")
+        tensor = target.get(slot)
+        if not isinstance(tensor, torch.Tensor):
+            raise PackageValidationError(f"batch.targets is missing slot: {slot}")
     if transform is None:
-        return target
+        return tensor
     if transform == "flatten_batch":
-        return target.flatten(start_dim=1)
+        return tensor.flatten(start_dim=1)
     raise PackageValidationError(f"unsupported objective input transform: {transform!r}")
 
 
@@ -670,6 +827,14 @@ class _Services:
 def _resolve_package(catalog: dict[tuple[str, str], ValidatedPackage], reference: Mapping[str, Any]) -> ValidatedPackage:
     key = (reference.get("id"), reference.get("version"))
     package = catalog.get(key)
+    if package is None and isinstance(key[0], str) and isinstance(key[1], str):
+        matches = [
+            candidate
+            for (package_id, version), candidate in catalog.items()
+            if package_id == key[0] and _version_matches(version, key[1])
+        ]
+        if len(matches) == 1:
+            package = matches[0]
     if package is None:
         raise PackageValidationError(f"package {key[0]}@{key[1]} is not in dependency closure")
     return package

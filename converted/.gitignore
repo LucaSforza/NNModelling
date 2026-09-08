@@ -1,6 +1,7 @@
 outputs
 jobs/
 valkey-data/
+dump.rdb
 *.pyc
 multirun
 data/
@@ -17,4 +18,5 @@ NeuralNetworks
 
 docker.sh
 api.key
+wandb-credentials.json
 MNIST-FD/

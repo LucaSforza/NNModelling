@@ -7,10 +7,13 @@ Licensed under the GNU General Public License v3 or later.
 
 <script lang="ts">
   import SDropdown from "./SDropdown.svelte";
+  import "../styles/sidebar.css";
   import type { Diagram } from "../Diagram.svelte";
   import type { Node } from "@xyflow/svelte";
   import type { ActivePackageMetadata, EditorInferenceState } from "../type-system/host";
+  import type { PackageRuntimeDiagnostic } from "../type-system/diagnostics";
   import type { ParameterDefinition } from "../type-system/packages/types";
+  import type { TrainingController, TrainingControllerSnapshot } from "../training/controller";
   import {
     formatEditorValue,
     initialPackageParameters,
@@ -29,9 +32,10 @@ Licensed under the GNU General Public License v3 or later.
     isOpen: boolean;
     onClose: () => void;
     getSpawnPosition: () => { x: number; y: number };
+    trainingController?: TrainingController;
   }
 
-  let { diagram, selectedNode, isOpen, onClose, getSpawnPosition }: Props = $props();
+  let { diagram, selectedNode, isOpen, onClose, getSpawnPosition, trainingController }: Props = $props();
 
   let form = $state({
     name: "",
@@ -49,6 +53,7 @@ Licensed under the GNU General Public License v3 or later.
   let sidebarWidth = $state(320);
   let isDragging = $state(false);
   let lastLoadedKey = $state<string | null>(null);
+  let wandbCapabilities = $state<TrainingControllerSnapshot["wandbCapabilities"]>(null);
 
   let isEditing = $derived(selectedNode !== null);
   let selectedPackageIdentity = $derived(selectedNode ? nodePackageIdentity(selectedNode) : undefined);
@@ -89,6 +94,13 @@ Licensed under the GNU General Public License v3 or later.
     lastLoadedKey = key;
     if (selectedNode) loadExistingNode(selectedNode);
     else resetForm();
+  });
+
+  $effect(() => {
+    if (!trainingController) return;
+    return trainingController.subscribe((snapshot) => {
+      wandbCapabilities = snapshot.wandbCapabilities;
+    });
   });
 
   function loadExistingNode(node: Node) {
@@ -139,11 +151,11 @@ Licensed under the GNU General Public License v3 or later.
     form.wheelAdapters = [];
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     const position = getSpawnPosition();
     if (packageSelection) {
       const definition = packageSelection.definition;
-      diagram.addPackageNode(packageIdentity(packageSelection), definition.kind, position.x, position.y, {
+      await diagram.addActivatedPackageNode(packageIdentity(packageSelection), definition.kind, position.x, position.y, {
         name: form.name,
         color: form.color,
         width: form.width,
@@ -155,8 +167,6 @@ Licensed under the GNU General Public License v3 or later.
       resetForm();
       return;
     }
-    return;
-    resetForm();
   }
 
   function handleManualUpdate() {
@@ -250,23 +260,40 @@ Licensed under the GNU General Public License v3 or later.
     for (const node of nodes) {
       const state = result.nodes.get(node.id);
       if (!state || state.status === "success") continue;
-      if (state.status === "fault") diagnostics.push({
-        nodeId: node.id, severity: "fault", title: "Runtime fault", message: state.fault.message,
-      });
-      else if (state.status === "error") diagnostics.push({
+      if (state.status === "error") diagnostics.push({
         nodeId: node.id, severity: "error", title: "Type error", message: state.message,
       });
-      else diagnostics.push({
+      else if (state.status === "unresolved") diagnostics.push({
         nodeId: node.id,
         severity: "unresolved",
         title: "Incomplete",
-        message: "reason" in state ? state.reason : `Missing: ${state.missingParameters.join(", ")}`,
+        message: "missingParameters" in state ? `Missing: ${state.missingParameters.join(", ")}` : state.reason,
       });
     }
     return diagnostics;
   });
 
   let diagnosticCount = $derived(packageDiagnostics.length);
+  let runtimeDiagnostics = $derived.by(() => {
+    const diagnostics: PackageRuntimeDiagnostic[] = [...diagram.packageRuntimeDiagnostics];
+    const online = wandbCapabilities?.online;
+    if (online && !online.configured) {
+      diagnostics.push({
+        occurrenceId: "runtime:wandb-online-capability",
+        severity: "fatal",
+        phase: "validation",
+        message: `W&B online non disponibile: ${online.reason ?? "configurazione incompleta"}`,
+      });
+    }
+    return diagnostics;
+  });
+
+  function runtimeDiagnosticIdentity(diagnostic: (typeof runtimeDiagnostics)[number]): string {
+    if (diagnostic.occurrenceId === "runtime:wandb-online-capability") return "W&B backend";
+    if (diagnostic.packageId && diagnostic.packageVersion) return `${diagnostic.packageId}@${diagnostic.packageVersion}`;
+    if (diagnostic.packageId) return diagnostic.packageId;
+    return "Type-system runtime";
+  }
 
   function packageStateMessage(state: EditorInferenceState | GraphNodeResult | undefined): string {
     if (!state) return "Package type-system is initializing.";
@@ -403,12 +430,41 @@ Licensed under the GNU General Public License v3 or later.
           {/each}
         {/if}
       </section>
+
+      <section class="runtime-diagnostic-panel" aria-labelledby="runtime-diagnostic-heading">
+        <div class="runtime-diagnostic-panel-header" id="runtime-diagnostic-heading">
+          <span>Package and runtime errors</span>
+          <span class:has-issues={runtimeDiagnostics.length > 0} class="diagnostic-count">{runtimeDiagnostics.length}</span>
+        </div>
+        {#if runtimeDiagnostics.length === 0}
+          <div class="runtime-diagnostics-empty">No package or runtime errors.</div>
+        {:else}
+          {#each runtimeDiagnostics as diagnostic (diagnostic.occurrenceId)}
+            <button
+              type="button"
+              class="runtime-diagnostic-item"
+              class:runtime-diagnostic-node={diagnostic.nodeId !== undefined}
+              disabled={diagnostic.nodeId === undefined}
+              onclick={() => diagnostic.nodeId && selectDiagnosticNode(diagnostic.nodeId)}
+            >
+              <span class="type-error-icon" aria-hidden="true">⚠</span>
+              <div class="type-error-text">
+                <div class="type-error-heading">
+                  <span class="type-error-node">{runtimeDiagnosticIdentity(diagnostic)}</span>
+                  <span class="type-error-kind">{diagnostic.phase}</span>
+                </div>
+                {#if diagnostic.nodeId}<span class="runtime-diagnostic-node-label">Node: {getNodeLabel(diagnostic.nodeId)}</span>{/if}
+                <span class="type-error-msg">{diagnostic.message}</span>
+              </div>
+            </button>
+          {/each}
+        {/if}
+      </section>
     </div>
   </aside>
 {/if}
 
 <style>
-  @import "../styles/sidebar.css";
   .type-error-panel { margin-top: 16px; border-top: 1px solid #e5e7eb; padding-top: 12px; }
   .type-error-panel-header { display: flex; justify-content: space-between; align-items: center; font-weight: 650; font-size: .85rem; margin-bottom: 8px; }
   .diagnostic-count { min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; background: #e5e7eb; color: #4b5563; font-size: .72rem; }

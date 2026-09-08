@@ -1,0 +1,6 @@
+{
+  "name": "Vendor Layer",
+  "kind": "layer",
+  "view": { "color": "#336699", "width": 120, "height": 60 },
+  "parameters": {}
+}

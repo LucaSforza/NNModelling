@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Standalone consumer for an NNModelling VAE wheel"
 requires-python = ">=3.12"
 dependencies = [
-  "nnm-vae-mnist-qa",
+  "nnm-vae-export",
   "Pillow>=10",
   "torch>=2.0",
   "torchvision>=0.15",
@@ -14,7 +14,7 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-nnm-vae-mnist-qa = { path = "nnm_vae_mnist_qa-0.1.0-py3-none-any.whl" }
+nnm-vae-export = { path = "nnm_vae_export-0.1.0-py3-none-any.whl" }
 
 [dependency-groups]
 dev = ["pytest>=8"]

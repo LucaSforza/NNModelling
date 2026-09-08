@@ -1,0 +1,11 @@
+{
+  "description": "Averages the token axis of a [B, T, D] sequence into one [B, D] representation.",
+  "kind": "layer",
+  "name": "TokenPool",
+  "parameters": {},
+  "view": {
+    "color": "#ab7c2b",
+    "height": 120,
+    "width": 240
+  }
+}

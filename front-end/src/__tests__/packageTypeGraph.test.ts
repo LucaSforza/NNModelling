@@ -24,18 +24,24 @@ function packageNode(id: string, identity: PackageIdentity, params: Record<strin
     id,
     type: "custom",
     position: { x: 0, y: 0 },
-    data: { package: identity, name: identity.name, params },
+    data: { package: identity, name: identity.name, params: identity.id === "core.input" ? { ...params, binding: "input" } : params },
   } as Node
+}
+
+const datasetContext = {
+  definition: { schemaVersion: 1 as const, id: "test.dataset", version: "0.1.0", name: "Test", parameters: [{ name: "B", type: "integer" as const, required: true }], batch: { inputs: { input: { shape: ["B", 32], dtype: "float32" as const } }, targets: { target: { shape: ["B", 32], dtype: "float32" as const } } } },
+  parameters: { B: 4 },
 }
 
 async function createScheduler(): Promise<PackageGraphScheduler> {
   const msePackage = { resources: { "manifest.json": mseManifest, "stereotype.json": mseDefinition, "inference.lua": mseInference } }
   const host = await TypeSystemHost.create([coreInputPackage, coreForkPackage, coreOutputPackage, msePackage])
   hosts.push(host)
-  await host.activate("core.input")
-  await host.activate("core.fork")
-  await host.activate("core.output")
-  await host.activate("core.mse-loss")
+  await host.activate(inputIdentity)
+  await host.activate(forkIdentity)
+  await host.activate({ id: "core.output", version: "0.1.0", name: "Output" })
+  await host.activate({ id: "core.mse-loss", version: "0.1.0", name: "MSE Loss" })
+  host.setDatasetCatalog([datasetContext.definition])
   return new PackageGraphScheduler(host)
 }
 
@@ -44,28 +50,28 @@ describe("versioned package graph inference", () => {
     const scheduler = await createScheduler()
     const result = scheduler.infer({
       nodes: [
-        packageNode("input", inputIdentity, { shape: ["B", 32], dtype: "float32" }),
+        packageNode("input", inputIdentity),
         packageNode("fork", forkIdentity),
       ],
       edges: [{ id: "e1", source: "input", target: "fork", sourceHandle: "out", targetHandle: "in" }],
-    })
+    }, datasetContext)
 
     expect(result.order).toEqual(["input", "fork"])
     expect(result.complete).toBe(true)
     expect(result.terminals).toEqual(["fork"])
-    expect(result.nodes.get("input")).toEqual({ status: "success", output: { shape: ["B", 32], dtype: "float32" } })
-    expect(result.nodes.get("fork")).toEqual({ status: "success", output: { shape: ["B", 32], dtype: "float32" } })
+    expect(result.nodes.get("input")).toEqual({ status: "success", output: { shape: [4, 32], dtype: "float32" } })
+    expect(result.nodes.get("fork")).toEqual({ status: "success", output: { shape: [4, 32], dtype: "float32" } })
   })
 
   test("keeps resolved upstream regions when a downstream region is disconnected", async () => {
     const scheduler = await createScheduler()
     const result = scheduler.infer({
       nodes: [
-        packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float16" }),
+        packageNode("input", inputIdentity),
         packageNode("fork", forkIdentity),
       ],
       edges: [],
-    })
+    }, datasetContext)
 
     expect(result.complete).toBe(false)
     expect(result.terminals).toEqual(["input", "fork"])
@@ -75,16 +81,16 @@ describe("versioned package graph inference", () => {
 
   test("classifies zero, one, and multiple terminal states", async () => {
     const scheduler = await createScheduler()
-    const input = packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float32" })
+    const input = packageNode("input", inputIdentity)
     const fork = packageNode("fork", forkIdentity)
-    expect(scheduler.infer({ nodes: [input], edges: [{ id: "cycle", source: "input", target: "input" }] }).complete).toBe(false)
-    expect(scheduler.infer({ nodes: [input], edges: [] }).terminals).toEqual(["input"])
-    expect(scheduler.infer({ nodes: [input, fork], edges: [] }).terminals).toEqual(["input", "fork"])
+    expect(scheduler.infer({ nodes: [input], edges: [{ id: "cycle", source: "input", target: "input" }] }, datasetContext).complete).toBe(false)
+    expect(scheduler.infer({ nodes: [input], edges: [] }, datasetContext).terminals).toEqual(["input"])
+    expect(scheduler.infer({ nodes: [input, fork], edges: [] }, datasetContext).terminals).toEqual(["input", "fork"])
   })
 
   test("accepts explicit prediction and objective terminals", async () => {
     const scheduler = await createScheduler()
-    const input = packageNode("input", inputIdentity, { shape: ["B", 8], dtype: "float32" })
+    const input = packageNode("input", inputIdentity)
     const fork = packageNode("fork", forkIdentity)
     const output = packageNode("output", { id: "core.output", version: "0.1.0", name: "Output" })
     const loss = packageNode("loss", { id: "core.mse-loss", version: "0.1.0", name: "MSE Loss" })
@@ -93,7 +99,7 @@ describe("versioned package graph inference", () => {
       { id: "fork-output", source: "fork", target: "output", sourceHandle: "out", targetHandle: "in" },
       { id: "fork-loss", source: "fork", target: "loss", sourceHandle: "out", targetHandle: "in" },
     ]
-    const result = scheduler.infer({ nodes: [input, fork, output, loss], edges })
+    const result = scheduler.infer({ nodes: [input, fork, output, loss], edges }, datasetContext)
     expect(result.predictionTerminals).toEqual(["output"])
     expect(result.objectiveTerminals).toEqual(["loss"])
     expect(result.trainingComplete).toBe(true)
@@ -123,7 +129,6 @@ describe("versioned package graph inference", () => {
     }
     const source = new MemoryDiagram()
     const created = source.addPackageModule(inputIdentity, "input", 10, 20, {
-      params: { shape: ["B", 4], dtype: "float32" },
     })
     const target = new MemoryDiagram()
     expect(target.importFromJson(source.exportToJson())).toBe(true)

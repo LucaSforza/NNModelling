@@ -1,0 +1,2 @@
+classify prompt:
+    @uv run spamham-classify {{quote(prompt)}}

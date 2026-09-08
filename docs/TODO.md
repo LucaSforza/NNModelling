@@ -26,6 +26,17 @@ bounded plan under `docs/plans/active/`.
 - Keep the current bundled package and lifecycle implementation while it
   remains sufficient; do not add machinery without a concrete use case.
 
+## Large project datasets
+
+- Project-dataset transport v1 intentionally uses one bounded, non-resumable
+  archive upload and is suitable only for small and medium datasets.
+- Design multipart/resumable transfer, object storage, partial retry, quotas,
+  retention and garbage collection before claiming support for datasets beyond
+  the backend-advertised v1 byte limit.
+- Preserve the project-owned manifest, named batch and worker-only execution
+  contracts when a scalable transport is introduced; transport scale must not
+  create external host paths or a second dataset semantics.
+
 ## Type-system evidence
 
 - Add richer deterministic package models. Current Transformer, VAE and ResNet

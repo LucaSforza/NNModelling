@@ -26,6 +26,7 @@ def test_build_command_is_explicit_and_mounts_input_read_only(
     dataset_dir.mkdir()
     monkeypatch.setenv("NNM_CONTAINER_DATA_ROOT", str(dataset_dir))
     executor = ContainerExecutor(engine="docker-podman", image=IMAGE, pid_limit=32)
+    assert executor.describe()["network"] == "mode-derived"
 
     command = executor.build_command({"id": "job-1", "resources": {"cpu": 2, "memory_gb": 3}}, artifact_dir, input_dir)
 

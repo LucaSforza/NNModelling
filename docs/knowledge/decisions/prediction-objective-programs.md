@@ -40,10 +40,10 @@ instantiate or train duplicate copies of model layers. During training the
 objective program may retain and reuse intermediate values required by loss
 branches. The portable wheel invokes only the prediction program.
 
-Targets remain owned by the selected, trusted dataset contract. A training
-batch has explicit `inputs` and `targets` fields at the worker boundary. A
-target is not represented by a normal graph edge or a second top-level model
-input.
+Targets remain owned by the selected, validated dataset contract. A normalized
+training batch has flat named `inputs` and `targets` tensor maps at the worker
+boundary. Targets are not represented by normal graph edges or top-level model
+inputs.
 
 ## Dataset-owned training settings
 
@@ -62,14 +62,14 @@ implicit behavior of prediction.
 ## Declarative objective bindings
 
 Every package with `kind: "loss"` declares its external objective inputs in
-`stereotype.json`. The v1 binding source is `batch.targets`:
+`stereotype.json`. A binding selects one declared target slot:
 
 ```json
 {
   "kind": "loss",
   "objective": {
     "externalInputs": [
-      { "name": "target", "source": "batch.targets" }
+      { "name": "target", "source": "batch.targets.target" }
     ]
   }
 }
@@ -92,8 +92,11 @@ produces exactly one positional module argument. Missing, unknown or duplicate
 bindings are validation errors before training starts. The runtime does not
 inspect Python signatures to discover this contract.
 
-Named or structured multi-target batches are deferred. Adding them requires a
-new versioned binding source; v1 does not interpret arbitrary object paths.
+Input and target slots are flat named tensor maps. Sources use one validated
+slot name after `batch.inputs.` or `batch.targets.`; v1 does not interpret
+arbitrary object paths or nested Python structures. The complete batch contract
+is defined by the
+[project-owned dataset decision](project-owned-datasets.md).
 
 An external input may also declare a versioned, data-independent adaptation
 before it is passed to the objective. The current v1 adaptation is
@@ -102,7 +105,7 @@ dimensions. This is useful when a reconstruction objective's model branch
 declares a flattened output while the dataset exposes image-shaped targets:
 
 ```json
-{ "name": "target", "source": "batch.targets", "transform": "flatten_batch" }
+{ "name": "target", "source": "batch.targets.target", "transform": "flatten_batch" }
 ```
 
 The adaptation belongs to the objective package declaration, not to a
@@ -120,7 +123,7 @@ reachable from a loss by following directed edges from `source` to `target`.
 This permits target-independent contributions and ordinary scalar joins, such
 as adding reconstruction and KL losses. A v1 trainable graph has:
 
-- exactly one top-level input;
+- one or more top-level inputs with distinct batch binding names;
 - exactly one prediction output outside the objective region;
 - exactly one terminal value in the objective region.
 
@@ -155,10 +158,11 @@ generalized.
 
 ## Dataset and type boundary
 
-Registered datasets declare the tensor contract for both `inputs` and
-`targets`. The worker normalizes a registered dataset batch to the versioned
-training-batch contract before invoking compiled programs. Package objective
-bindings may consume only sources allowed by that contract.
+Built-in and project-owned datasets declare the tensor contract for named
+`inputs` and `targets`. The worker normalizes each dataset item to the versioned
+training-batch contract before invoking compiled programs. Top-level Input
+nodes and package objective bindings may consume only names declared by that
+contract.
 
 The standalone diagram can validate model-side operands without selecting a
 dataset. Once a dataset is selected for training, its registered target spec

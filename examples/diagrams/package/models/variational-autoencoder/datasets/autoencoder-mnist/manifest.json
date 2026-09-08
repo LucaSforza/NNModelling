@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "example.vae-mnist",
+  "version": "0.1.0",
+  "entrypoints": {
+    "definition": "dataset.json",
+    "python": "dataset.py"
+  }
+}
