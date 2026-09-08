@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# The Enron files are intentionally local and are not committed.
+data/*.jsonl
+data/*.csv
+data/*.parquet
+data/*.pt
