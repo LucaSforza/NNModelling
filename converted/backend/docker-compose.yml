@@ -80,6 +80,8 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
+    security_opt:
+      - label=disable
     environment:
       UV_CACHE_DIR: /tmp/uv-cache
       NNM_CONTAINER_ENGINE: "${NNM_CONTAINER_ENGINE:-podman}"
