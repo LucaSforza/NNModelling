@@ -145,7 +145,7 @@ dependencies = [
     { name = "torch", version = "2.14.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
 wheels = [
-    { filename = "nnm_spamham-0.1.0-py3-none-any.whl", hash = "sha256:1ad0656eea60fbd17aa5cfbc8d786fed7f7d93c711cece7873dd6964a8727214" },
+    { filename = "nnm_spamham-0.1.0-py3-none-any.whl", hash = "sha256:81907bd622e5101e2bfba828e1373f798bf53f30efc1b357fe7413888b771dca" },
 ]
 
 [package.metadata]

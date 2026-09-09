@@ -71,11 +71,15 @@ def test_project_dataset_loader_supports_dataclass_module_definitions(tmp_path: 
     assert dataset.division() == {}
 
 
-def test_run_rejects_missing_package(tmp_path: Path) -> None:
+def test_run_reports_start_before_rejecting_missing_package(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     input_path = tmp_path / "job.json"
     input_path.write_text(json.dumps({"training": {}}), encoding="utf-8")
     with pytest.raises(ValueError, match="package is required"):
         run(input_path, tmp_path / "artifacts")
+    assert capsys.readouterr().out == "Training iniziato\n"
 
 
 def test_training_contract_requires_opaque_dataset_reference() -> None:

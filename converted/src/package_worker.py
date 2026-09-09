@@ -30,6 +30,7 @@ def run(
 ) -> dict[str, Any]:
     """Compile the submitted graph and execute its declared training task."""
 
+    print("Training iniziato", flush=True)
     request = json.loads(input_path.read_text(encoding="utf-8"))
     package = request.get("package")
     if not isinstance(package, dict):
