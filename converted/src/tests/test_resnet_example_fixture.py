@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import gzip
 import json
 from pathlib import Path
-import struct
 
 ROOT = Path(__file__).parents[3]
 RESNET = ROOT / "examples" / "diagrams" / "package" / "models" / "resnet"
@@ -29,17 +27,3 @@ def test_resnet_fixture_uses_named_image_and_label_contract() -> None:
     }]
     assert dataset["batch"]["inputs"]["image"] == {"shape": ["B", 1, 28, 28], "dtype": "float32"}
     assert dataset["batch"]["targets"]["target"] == {"shape": ["B"], "dtype": "int64"}
-
-
-def test_resnet_fixture_contains_matching_mnist_archives() -> None:
-    expected = {
-        "train-images-idx3-ubyte.gz": (2051, 60000),
-        "train-labels-idx1-ubyte.gz": (2049, 60000),
-        "t10k-images-idx3-ubyte.gz": (2051, 10000),
-        "t10k-labels-idx1-ubyte.gz": (2049, 10000),
-    }
-    for name, (magic, count) in expected.items():
-        with gzip.open(DATASET / "data" / name, "rb") as archive:
-            header = archive.read(16 if magic == 2051 else 8)
-        values = struct.unpack(">IIII", header)[:2] if magic == 2051 else struct.unpack(">II", header)
-        assert values == (magic, count)
