@@ -22,7 +22,7 @@ describe("MCP-selected project workspace", () => {
       modelJson: MODEL,
       resources: { "model.json": { encoding: "utf8", data: MODEL } },
     }
-    const session = createPathProjectSession(payload, async (operation) => { saved.push(operation) })
+    const session = await createPathProjectSession(payload, async (operation) => { saved.push(operation) })
     const changed = MODEL.replace('"name":"Demo"', '"name":"Changed"')
     await session.save(changed)
     expect(saved).toEqual([{ kind: "write", path: "model.json", encoding: "utf8", data: changed }])
@@ -32,7 +32,7 @@ describe("MCP-selected project workspace", () => {
   })
 
   test("creates missing directories only when requested", async () => {
-    const session = createPathProjectSession({
+    const session = await createPathProjectSession({
       projectPath: "/projects/demo",
       modelJson: MODEL,
       resources: { "model.json": { encoding: "utf8", data: MODEL } },
@@ -52,7 +52,7 @@ describe("MCP-selected project workspace", () => {
 
   test("persists binary writes and removes directories only after remote acknowledgement", async () => {
     const operations: unknown[] = []
-    const session = createPathProjectSession({
+    const session = await createPathProjectSession({
       projectPath: "/projects/demo",
       modelJson: MODEL,
       resources: { "model.json": { encoding: "utf8", data: MODEL } },
@@ -74,7 +74,7 @@ describe("MCP-selected project workspace", () => {
   })
 
   test("does not expose an unacknowledged write in the local directory", async () => {
-    const session = createPathProjectSession({
+    const session = await createPathProjectSession({
       projectPath: "/projects/demo",
       modelJson: MODEL,
       resources: { "model.json": { encoding: "utf8", data: MODEL } },
@@ -90,7 +90,7 @@ describe("MCP-selected project workspace", () => {
 
   test("keeps the dataset directory and manifest when remote removal is rejected", async () => {
     let rejectRemoval = false
-    const session = createPathProjectSession({
+    const session = await createPathProjectSession({
       projectPath: "/projects/demo",
       modelJson: MODEL,
       resources: { "model.json": { encoding: "utf8", data: MODEL } },

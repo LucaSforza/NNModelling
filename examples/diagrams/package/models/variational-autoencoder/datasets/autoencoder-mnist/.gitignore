@@ -1,0 +1,5 @@
+# MNIST source archives and generated JSONL remain local to the project.
+data/*.gz
+data/*.jsonl
+__pycache__/
+*.pyc

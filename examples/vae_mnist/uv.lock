@@ -215,7 +215,7 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-{ filename = "nnm_vae_export-0.1.0-py3-none-any.whl", hash = "sha256:2050550cca61c64cd3bf150652e56bcb1b6c8333e1fe9a286c69f9bf48a3ec5b" },
+  { filename = "nnm_vae_export-0.1.0-py3-none-any.whl", hash = "sha256:168bc8e99ae59026d63f77305c3da78fe4f7f237678465d22c616ab46ca400d8" },
 ]
 
 [package.metadata]

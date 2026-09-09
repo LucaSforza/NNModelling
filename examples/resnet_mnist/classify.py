@@ -7,14 +7,26 @@ import json
 from pathlib import Path
 
 import torch
+from PIL import Image
+from torchvision.transforms import functional as transform
 
 from nnm_resnet_mnist import Model
+
+
+def _image_tensor(path: Path) -> torch.Tensor:
+    """Prepare one image for the wheel's declared tensor input contract."""
+
+    with Image.open(path) as opened:
+        image = opened.convert("L")
+    tensor = transform.to_tensor(transform.resize(image, [28, 28]))
+    tensor = transform.normalize(tensor, mean=[0.1307], std=[0.3081])
+    return tensor.unsqueeze(0)
 
 
 def classify(model: Model, image: Path) -> dict[str, object]:
     """Return the top three classes for one image path."""
 
-    scores = model.predict(image)
+    scores = model.predict_tensor(_image_tensor(image))
     if not isinstance(scores, torch.Tensor):
         raise TypeError("Model.predict must return a torch.Tensor")
     if scores.ndim == 2 and scores.shape[0] == 1:

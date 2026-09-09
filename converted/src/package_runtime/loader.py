@@ -13,7 +13,7 @@ from typing import Any
 
 import torch
 
-from package_runtime.jcs import canonicalize
+from .jcs import canonicalize
 
 
 class PackageValidationError(ValueError):

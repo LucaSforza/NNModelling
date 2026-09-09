@@ -47,9 +47,16 @@ export interface BrowserRPCClientConfig {
   host?: string;
   port?: number;
   requestTimeout?: number;
+  /** Maximum WebSocket message size for project resources. */
+  maxPayload?: number;
 }
 export type BrowserNotification = (tabId: string, method: string, params: Record<string, unknown>) => void | Promise<void>;
 export type BrowserRequest = (tabId: string, method: string, params: Record<string, unknown>) => unknown | Promise<unknown>;
+
+const DEFAULT_MAX_PAYLOAD = 256 * 1024 * 1024;
+const PAYLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+const PAYLOAD_CHUNK_TIMEOUT = 10_000;
+const MAX_REQUEST_TIMEOUT = 180_000;
 
 /**
  * BrowserRPCClient — WebSocket server that accepts multiple browser
@@ -77,6 +84,7 @@ export class BrowserRPCClient {
   private host: string;
   private port: number;
   private requestTimeout: number;
+  private maxPayload: number;
   private readonly notificationListeners = new Set<BrowserNotification>();
   private readonly requestListeners = new Set<BrowserRequest>();
 
@@ -84,6 +92,7 @@ export class BrowserRPCClient {
     this.host = config?.host ?? "localhost";
     this.port = config?.port ?? 9339;
     this.requestTimeout = config?.requestTimeout ?? 30000;
+    this.maxPayload = config?.maxPayload ?? DEFAULT_MAX_PAYLOAD;
   }
 
   /**
@@ -96,7 +105,14 @@ export class BrowserRPCClient {
       return Promise.resolve(); // Already started
     }
 
-    this.wss = new WebSocketServer({ host: this.host, port: this.port });
+    this.wss = new WebSocketServer({
+      host: this.host,
+      port: this.port,
+      // A project open carries model resources in one RPC request. Keep the
+      // limit finite, but above the largest checked-in dataset bundle after
+      // base64 and JSON framing overhead.
+      maxPayload: this.maxPayload,
+    });
 
     return new Promise<void>((resolve, reject) => {
       this.wss!.on("listening", () => {
@@ -168,12 +184,14 @@ export class BrowserRPCClient {
     }
 
     const id = String(++entry.nextId);
+    const wireMessage = JSON.stringify({ id, method, params: params ?? {} });
+    const timeout = this.timeoutForPayload(wireMessage);
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         entry.pending.delete(id);
         reject(new Error(`RPC timeout: ${method}`));
-      }, this.requestTimeout);
+      }, timeout);
 
       entry.pending.set(id, {
         resolve: resolve as (v: unknown) => void,
@@ -181,7 +199,7 @@ export class BrowserRPCClient {
         timer,
       });
 
-      entry.ws.send(JSON.stringify({ id, method, params: params ?? {} }));
+      entry.ws.send(wireMessage);
     });
   }
 
@@ -366,5 +384,18 @@ export class BrowserRPCClient {
       p.reject(err);
     }
     entry.pending.clear();
+  }
+
+  /**
+   * Large project payloads can spend longer in browser JSON parsing and
+   * resource decoding than ordinary graph calls. Scale only their watchdog;
+   * a disconnected browser still fails immediately through the close event.
+   */
+  private timeoutForPayload(wireMessage: string): number {
+    const chunks = Math.ceil(Buffer.byteLength(wireMessage, "utf8") / PAYLOAD_CHUNK_BYTES);
+    return Math.min(
+      MAX_REQUEST_TIMEOUT,
+      Math.max(this.requestTimeout, this.requestTimeout + Math.max(0, chunks - 1) * PAYLOAD_CHUNK_TIMEOUT),
+    );
   }
 }
