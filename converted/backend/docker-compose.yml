@@ -39,6 +39,7 @@ services:
       - --unsafe-unlimited-dataset-size
     user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
     environment:
+      UV_CACHE_DIR: /tmp/uv-cache
       NNM_VALKEY_URL: valkey://valkey:6379/0
       NNM_BACKEND_ARTIFACT_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}
       NNM_BACKEND_PACKAGE_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}/packages
@@ -80,6 +81,7 @@ services:
       dockerfile: backend/Dockerfile
     user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
     environment:
+      UV_CACHE_DIR: /tmp/uv-cache
       NNM_CONTAINER_ENGINE: "${NNM_CONTAINER_ENGINE:-podman}"
       NNM_CONTAINER_DATA_ROOT: ${NNM_HOST_DATA:?set NNM_HOST_DATA to the absolute host data directory}
       NNM_WANDB_CREDENTIAL_FILE: /run/secrets/nnm-wandb-credentials
