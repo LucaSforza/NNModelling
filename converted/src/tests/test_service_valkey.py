@@ -494,7 +494,11 @@ def test_package_export_failure_on_real_valkey_fails_job_atomically(tmp_path, cl
                 assert logs.status_code == 200
                 assert logs.json()["stdout"] == "training ok\n"
 
-                package = await client.get(f"/jobs/{queued.id}/package", headers=headers)
+                package = await client.get(
+                    f"/jobs/{queued.id}/package",
+                    params={"packageName": "nnm_demo_model"},
+                    headers=headers,
+                )
                 assert package.status_code == 404
 
     asyncio.run(exercise_api())
