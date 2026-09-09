@@ -81,7 +81,7 @@ just --justfile converted/backend/justfile wandb-disconnect
 ```
 
 `wandb-connect` verifies the account before atomically writing
-`converted/valkey-data/wandb-credentials.json` with mode `0600`.
+`converted/backend-secrets/wandb-credentials.json` with mode `0600`.
 `wandb-status` prints only the schema version, entity and base URL. Override the
 machine-local path with `NNM_WANDB_CREDENTIAL_FILE` when required.
 

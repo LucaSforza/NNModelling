@@ -26,7 +26,7 @@ NNM_ALLOWED_ORIGINS=http://192.168.1.30:5174 \
 just --justfile converted/backend/justfile backend
 ```
 
-`backend` creates an untracked `valkey-data/admin.token` with mode `0600` when
+`backend` creates an untracked `backend-secrets/admin.token` with mode `0600` when
 needed. Approve the code displayed by the frontend:
 
 ```bash

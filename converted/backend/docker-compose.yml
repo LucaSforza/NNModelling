@@ -38,6 +38,9 @@ services:
       - "8000"
       - --unsafe-unlimited-dataset-size
     user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
+    # Preserve the invoking rootless user's numeric identity for owner-only
+    # host secrets and the shared controller socket volume.
+    userns_mode: "${NNM_CONTAINER_USERNS_MODE:-keep-id}"
     environment:
       UV_CACHE_DIR: /tmp/uv-cache
       NNM_VALKEY_URL: valkey://valkey:6379/0
@@ -80,9 +83,13 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     user: "${NNM_CONTAINER_UID:-1000}:${NNM_CONTAINER_GID:-1000}"
+    # The rootless Podman socket is owned by the invoking host user. Without
+    # keep-id, UID 1000 in the container is remapped to a subordinate host UID.
+    userns_mode: "${NNM_CONTAINER_USERNS_MODE:-keep-id}"
     security_opt:
       - label=disable
     environment:
+      HOME: /tmp
       UV_CACHE_DIR: /tmp/uv-cache
       NNM_CONTAINER_ENGINE: "${NNM_CONTAINER_ENGINE:-podman}"
       NNM_CONTAINER_DATA_ROOT: ${NNM_HOST_DATA:?set NNM_HOST_DATA to the absolute host data directory}
@@ -108,11 +115,11 @@ services:
       - ${NNM_HOST_DATA:?set NNM_HOST_DATA to the absolute host data directory}:${NNM_HOST_DATA}:ro
       - controller-socket:/run/nnm
       - ${NNM_HOST_CONTROLLER_TOKEN:?set NNM_HOST_CONTROLLER_TOKEN to the controller token path}:/run/secrets/nnm-controller-token:ro
-      - ${NNM_WANDB_CREDENTIAL_FILE:-../valkey-data/wandb-credentials.json}:/run/secrets/nnm-wandb-credentials:ro
+      - ${NNM_WANDB_CREDENTIAL_FILE:-../backend-secrets/wandb-credentials.json}:/run/secrets/nnm-wandb-credentials:ro
       # This is deliberately mounted only in the controller service.
       - ${NNM_CONTAINER_ENGINE_SOCKET:-/run/user/1000/podman/podman.sock}:/run/podman/podman.sock
     healthcheck:
-      test: ["CMD", "python", "-c", "import stat, os; assert stat.S_ISSOCK(os.stat('/run/nnm/controller.sock').st_mode)"]
+      test: ["CMD-SHELL", "test -S /run/nnm/controller.sock && podman info >/dev/null"]
       interval: 2s
       timeout: 3s
       retries: 15

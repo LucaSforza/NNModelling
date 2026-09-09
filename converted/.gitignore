@@ -1,6 +1,7 @@
 outputs
 jobs/
 valkey-data/
+backend-secrets/
 dump.rdb
 *.pyc
 multirun

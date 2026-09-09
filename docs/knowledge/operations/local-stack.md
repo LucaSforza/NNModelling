@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-09-08
+updated: 2026-09-09
 ---
 
 # Local development stack
@@ -48,11 +48,21 @@ apply. The controller is the only service mounted with the host Podman socket;
 FastAPI reaches it through the authenticated `controller-socket` volume.
 
 The Compose file deliberately binds the host job, dataset, data, Valkey and
-token paths because worker containers are created by host Podman and must see
-the same paths. `NNM_CONTAINER_IMAGE` is required and must be a digest-pinned
-worker image. The standard `just compose` recipe supplies the required
+secret paths because worker containers are created by host Podman and must see
+the same paths. Tokens and W&B credentials live under the owner-only
+`converted/backend-secrets/` directory, separate from `valkey-data/`; the
+Valkey image may change ownership of its data directory during startup.
+`NNM_CONTAINER_IMAGE` is required and must be a digest-pinned worker image. The
+standard `just compose` recipe supplies the required
 `NNM_HOST_VALKEY_DATA`, `NNM_HOST_JOBS`, `NNM_HOST_DATA`,
 `NNM_HOST_ADMIN_TOKEN`, and `NNM_HOST_CONTROLLER_TOKEN` values.
+
+The rootless Podman deployment uses `userns_mode: keep-id` so the non-root
+controller process retains access to the invoking user's socket and owner-only
+secret files. SELinux labeling is disabled only for the trusted controller
+container that holds the host-administrator socket capability. Its healthcheck
+requires both the authenticated controller socket and a successful Podman API
+request; a present controller socket alone is not considered healthy.
 
 For non-standard paths, dataset limits, Origins, engine settings, or W&B
 settings, the backend administrator should invoke `podman compose` directly
