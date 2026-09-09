@@ -104,6 +104,7 @@ def test_worker_accepts_frozen_wandb_modes_and_rejects_controller_fields() -> No
 def test_worker_reads_bounded_credentials_before_run_and_closes_stdin(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     payload = json.dumps(
         {
@@ -140,6 +141,9 @@ def test_worker_reads_bounded_credentials_before_run_and_closes_stdin(
 
     assert captured["credentials"].api_key == "test-secret"
     assert stdin.closed
+    assert capsys.readouterr().out == (
+        f"Training completed | result={tmp_path / 'package-worker-result.json'}\n"
+    )
 
 
 def test_training_passes_named_batch_to_objective(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,7 +170,11 @@ def test_training_passes_named_batch_to_objective(tmp_path: Path, monkeypatch: p
     assert torch.equal(model.targets[0], torch.tensor([1, 0], dtype=torch.long))
 
 
-def test_classification_worker_logs_metrics_and_final_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_classification_worker_logs_metrics_and_final_test(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     definition = DEFINITION.model_copy(update={"classes": DatasetClassMetadata(count=2, names=("ham", "spam"))})
     batches = [TrainingBatch({"image": torch.tensor([[1.0], [-1.0]])}, {"label": torch.tensor([1, 0])})]
 
@@ -201,12 +209,29 @@ def test_classification_worker_logs_metrics_and_final_test(tmp_path: Path, monke
     tracker = Tracker()
     monkeypatch.setattr("package_worker.resolve_dataset", lambda _training: (Dataset(), definition, REFERENCE, {}))
     monkeypatch.setattr("package_worker.create_tracker", lambda *args, **kwargs: tracker)
+    clock = iter((10.0, 11.0, 13.0, 15.0))
+    monkeypatch.setattr("package_worker.time.monotonic", lambda: next(clock))
     summary = train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1, "patience": 0}}, "package": training_package()}, tmp_path)
 
+    expected_epoch_metrics = {
+        "accuracy",
+        "precision",
+        "recall",
+        "f1",
+        "specificity",
+        "macro_precision",
+        "macro_recall",
+        "macro_f1",
+    }
+    assert set(tracker.epochs[0]["train_classification"]) == expected_epoch_metrics
+    assert set(tracker.epochs[0]["validation_classification"]) == expected_epoch_metrics
     assert tracker.epochs[0]["train_classification"]["accuracy"] == 1.0
     assert tracker.final["classification"]["labels"] == ["ham", "spam"]
     assert tracker.final["classification"]["confusion_matrix"] == [[1, 0], [0, 1]]
     assert summary["classification"]["training_seconds"] >= 0
+    assert capsys.readouterr().out == (
+        "Epoch 1/1 | duration=2.00s | train_loss=0.250000 | val_loss=0.250000\n"
+    )
 
 
 def test_classification_worker_rejects_invalid_prediction_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

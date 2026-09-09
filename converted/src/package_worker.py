@@ -19,7 +19,7 @@ from backend.wandb_credentials import WandbCredentials, read_credentials_stdin
 from package_runtime import CompiledPrograms, PackageValidationError, compile_package_graph
 from dataset.contracts import DatasetDefinition, TensorSlotContract, TrainingBatch, normalize_training_batch
 from training.datasets import resolve_dataset
-from training.wandb_tracking import create_tracker, normalize_wandb_config
+from training.wandb_tracking import CLASSIFICATION_METRICS, create_tracker, normalize_wandb_config
 
 
 def run(
@@ -102,6 +102,7 @@ def train(
 
     try:
         for epoch in range(max_epochs):
+            epoch_started = time.monotonic()
             total = 0.0
             batches = 0
             for raw_batch in train_loader:
@@ -120,17 +121,19 @@ def train(
                 model, validation_loader, device, classification
             )
             epoch_number = epoch + 1
+            epoch_seconds = max(0.0, time.monotonic() - epoch_started)
             history.append({"epoch": float(epoch_number), "train_loss": train_loss, "val_loss": validation_loss})
             tracker.log_epoch(
                 epoch_number,
                 train_loss,
                 validation_loss,
-                train_classification=train_metrics,
-                validation_classification=validation_metrics,
+                train_classification=_epoch_classification_metrics(train_metrics),
+                validation_classification=_epoch_classification_metrics(validation_metrics),
                 binary_classification=classification.binary if classification else True,
             )
             print(
-                json.dumps({"epoch": epoch_number, "train_loss": train_loss, "val_loss": validation_loss}),
+                f"Epoch {epoch_number}/{max_epochs} | duration={epoch_seconds:.2f}s | "
+                f"train_loss={train_loss:.6f} | val_loss={validation_loss:.6f}",
                 flush=True,
             )
             if validation_loss < best_validation - min_delta:
@@ -363,6 +366,12 @@ def _classification_pass(
         }
     )
     return metrics
+
+
+def _epoch_classification_metrics(values: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if values is None:
+        return None
+    return {name: values[name] for name in CLASSIFICATION_METRICS if name in values}
 
 
 class _ClassificationAccumulator:
@@ -700,7 +709,8 @@ def main() -> None:
             credentials = read_credentials_stdin(stream)
         finally:
             sys.stdin.close()
-    print(json.dumps(run(args.input, args.artifacts, wandb_credentials=credentials), sort_keys=True), flush=True)
+    run(args.input, args.artifacts, wandb_credentials=credentials)
+    print(f"Training completed | result={args.artifacts / 'package-worker-result.json'}", flush=True)
 
 
 if __name__ == "__main__":

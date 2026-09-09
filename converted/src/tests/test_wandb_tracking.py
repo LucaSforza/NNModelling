@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import wandb
+from PIL import Image
 
 from training.wandb_tracking import WandbTracker, create_tracker, normalize_wandb_config
 
@@ -19,15 +20,19 @@ class FakeRun:
     def __init__(self) -> None:
         self.summary: dict[str, object] = {}
         self.logs: list[tuple[dict[str, object], int]] = []
+        self.log_environments: list[dict[str, str | None]] = []
         self.finish_count = 0
         self.finish_exit_codes: list[int | None] = []
+        self.finish_environments: list[dict[str, str | None]] = []
 
     def log(self, values: dict[str, object], *, step: int) -> None:
         self.logs.append((values, step))
+        self.log_environments.append(_wandb_storage_environment())
 
     def finish(self, *, exit_code: int | None = None) -> None:
         self.finish_count += 1
         self.finish_exit_codes.append(exit_code)
+        self.finish_environments.append(_wandb_storage_environment())
 
 
 class FakeSettings:
@@ -42,18 +47,25 @@ class FakeSdk:
         self.kwargs: dict[str, object] | None = None
         self.init_environment: dict[str, str | None] | None = None
         self.run = FakeRun()
-        self.plot = self
-
-    def confusion_matrix(self, **kwargs: object) -> dict[str, object]:
-        return kwargs
+    @staticmethod
+    def Image(path: str, *, caption: str) -> dict[str, object]:
+        return {"path": path, "caption": caption}
 
     def init(self, **kwargs: object) -> FakeRun:
         self.kwargs = kwargs
         self.init_environment = {
             "WANDB_API_KEY": os.environ.get("WANDB_API_KEY"),
             "WANDB_BASE_URL": os.environ.get("WANDB_BASE_URL"),
+            **_wandb_storage_environment(),
         }
         return self.run
+
+
+def _wandb_storage_environment() -> dict[str, str | None]:
+    return {
+        "WANDB_CACHE_DIR": os.environ.get("WANDB_CACHE_DIR"),
+        "WANDB_DATA_DIR": os.environ.get("WANDB_DATA_DIR"),
+    }
 
 
 def test_normalize_wandb_config_is_closed_and_defaults_disabled() -> None:
@@ -97,6 +109,8 @@ def test_tracker_records_metrics_and_writes_structured_manifest(
     assert sdk.init_environment == {
         "WANDB_API_KEY": "test-secret",
         "WANDB_BASE_URL": "https://wandb.example.test",
+        "WANDB_CACHE_DIR": str(tmp_path / "wandb" / "cache"),
+        "WANDB_DATA_DIR": str(tmp_path / "wandb" / "data"),
     }
     assert "WANDB_API_KEY" not in os.environ
     assert "WANDB_BASE_URL" not in os.environ
@@ -116,6 +130,37 @@ def test_tracker_records_metrics_and_writes_structured_manifest(
     assert sdk.run.finish_count == 1
     assert sdk.run.finish_exit_codes == [None]
     assert "test-secret" not in (tmp_path / "wandb-run.json").read_text(encoding="utf-8")
+
+
+def test_tracker_confines_wandb_storage_environment_to_job_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WANDB_CACHE_DIR", "/outside/cache")
+    monkeypatch.setenv("WANDB_DATA_DIR", "/outside/data")
+    sdk = FakeSdk()
+    tracker = WandbTracker(
+        mode="offline",
+        project="offline-test",
+        run_name="nnm-job-offline",
+        artifacts_path=tmp_path,
+        config={},
+        sdk=sdk,
+    )
+    tracker.log_epoch(1, 1.0, 0.5)
+    tracker.finish(best_loss=0.5, completed_epochs=1, num_parameters=3)
+
+    expected = {
+        "WANDB_CACHE_DIR": str(tmp_path / "wandb" / "cache"),
+        "WANDB_DATA_DIR": str(tmp_path / "wandb" / "data"),
+    }
+    assert sdk.init_environment is not None
+    assert {name: sdk.init_environment[name] for name in expected} == expected
+    assert sdk.run.log_environments == [expected]
+    assert sdk.run.finish_environments == [expected]
+    assert _wandb_storage_environment() == {
+        "WANDB_CACHE_DIR": "/outside/cache",
+        "WANDB_DATA_DIR": "/outside/data",
+    }
 
 
 def test_disabled_tracker_does_not_import_or_initialize_sdk(tmp_path: Path) -> None:
@@ -161,6 +206,51 @@ def test_real_offline_tracker_writes_a_wandb_run_file_without_credentials(tmp_pa
     manifest = json.loads((tmp_path / "wandb-run.json").read_text(encoding="utf-8"))
     assert manifest["mode"] == "offline"
     assert manifest["url"] is None
+
+
+def test_real_offline_confusion_matrix_works_with_read_only_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read_only_parent = tmp_path / "read-only"
+    read_only_parent.mkdir(mode=0o500)
+    monkeypatch.setenv("HOME", str(read_only_parent / "home"))
+    artifacts_path = tmp_path / "artifacts"
+    metrics = {
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "specificity": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "macro_f1": 1.0,
+    }
+    try:
+        tracker = create_tracker(
+            {"wandb": {"mode": "offline", "project": "offline-test"}},
+            {"id": "job-offline-classification"},
+            artifacts_path,
+            sdk=wandb,
+        )
+        tracker.finish(
+            best_loss=0.1,
+            completed_epochs=1,
+            num_parameters=3,
+            classification={
+                "loss": 0.1,
+                **metrics,
+                "count": 2,
+                "labels": ["ham", "spam"],
+                "actual": [0, 1],
+                "predicted": [0, 1],
+                "confusion_matrix": [[1, 0], [0, 1]],
+                "binary": True,
+            },
+        )
+    finally:
+        read_only_parent.chmod(0o700)
+
+    assert list((artifacts_path / "wandb").rglob("*.wandb"))
 
 
 def test_abort_marks_failed_finish_when_sdk_supports_exit_code(tmp_path: Path) -> None:
@@ -221,12 +311,15 @@ def test_classification_metrics_and_confusion_matrix_are_logged(tmp_path: Path) 
     final_log = sdk.run.logs[1][0]
     assert final_log["test/examples"] == 4
     assert final_log["training/seconds"] == 12.5
-    assert final_log["test/confusion_matrix"] == {
-        "probs": None,
-        "y_true": [0, 1, 1, 0],
-        "preds": [0, 1, 0, 0],
-        "class_names": ["ham", "spam"],
+    confusion_image = final_log["test/confusion_matrix"]
+    assert confusion_image == {
+        "path": str(tmp_path / "wandb" / "confusion-matrix.png"),
+        "caption": "Confusion matrix — rows: actual, columns: predicted",
     }
+    with Image.open(confusion_image["path"]) as image:
+        assert image.format == "PNG"
+        assert image.width >= 640
+        assert image.height >= 640
     assert sdk.run.summary["test/confusion_matrix_values"] == [[2, 0], [1, 1]]
     assert sdk.run.summary["confusion_matrix_labels"] == ["ham", "spam"]
 

@@ -18,6 +18,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from PIL import Image, ImageDraw, ImageFont
+
 from backend.wandb_credentials import WandbCredentials
 
 
@@ -88,10 +90,19 @@ def _settings(
 
 
 @contextmanager
-def _temporary_wandb_environment(credentials: WandbCredentials) -> Iterator[None]:
-    """Expose selected W&B connection values only for the SDK init call."""
+def _temporary_wandb_environment(
+    artifacts_path: Path,
+    *,
+    credentials: WandbCredentials | None = None,
+) -> Iterator[None]:
+    """Confine writable SDK state and optionally expose init credentials."""
 
-    values = {"WANDB_API_KEY": credentials.api_key, "WANDB_BASE_URL": credentials.base_url}
+    values = {
+        "WANDB_CACHE_DIR": str(artifacts_path / "wandb" / "cache"),
+        "WANDB_DATA_DIR": str(artifacts_path / "wandb" / "data"),
+    }
+    if credentials is not None:
+        values.update({"WANDB_API_KEY": credentials.api_key, "WANDB_BASE_URL": credentials.base_url})
     previous = {name: os.environ.get(name) for name in values}
     try:
         os.environ.update(values)
@@ -175,6 +186,76 @@ def _classification_final(value: Mapping[str, Any]) -> tuple[dict[str, float], l
     return metrics, matrix, actual, predicted, labels, count, binary
 
 
+def _write_confusion_matrix_image(
+    path: Path,
+    matrix: list[list[int]],
+    labels: list[str],
+) -> None:
+    """Render a portable heatmap instead of relying on W&B's custom chart."""
+
+    classes = len(labels)
+    cell_size = max(1, min(160, 960 // classes))
+    left = 180
+    top = 120
+    grid_size = classes * cell_size
+    width = max(640, left + grid_size + 40)
+    height = max(640, top + grid_size + 40)
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    axis_font = ImageFont.load_default(size=18)
+    label_font = ImageFont.load_default(size=max(8, min(16, cell_size // 4)))
+    value_font = ImageFont.load_default(size=max(8, min(18, cell_size // 4)))
+    maximum = max((value for row in matrix for value in row), default=0)
+
+    draw.text((left + grid_size / 2, 24), "Confusion matrix", fill="#111827", font=axis_font, anchor="ma")
+    draw.text((left + grid_size / 2, 64), "Predicted", fill="#374151", font=axis_font, anchor="ma")
+    draw.text((60, top + grid_size / 2), "Actual", fill="#374151", font=axis_font, anchor="mm")
+    show_text = cell_size >= 18
+    for index, label in enumerate(labels):
+        if show_text:
+            display_label = label if len(label) <= 18 else f"{label[:15]}..."
+            center = index * cell_size + cell_size / 2
+            draw.text(
+                (left + center, top - 12),
+                display_label,
+                fill="#374151",
+                font=label_font,
+                anchor="ms",
+            )
+            draw.text(
+                (left - 12, top + center),
+                display_label,
+                fill="#374151",
+                font=label_font,
+                anchor="rm",
+            )
+        for column, value in enumerate(matrix[index]):
+            intensity = value / maximum if maximum else 0.0
+            color = (
+                round(239 - 202 * intensity),
+                round(246 - 147 * intensity),
+                round(255 - 20 * intensity),
+            )
+            x0 = left + column * cell_size
+            y0 = top + index * cell_size
+            draw.rectangle(
+                (x0, y0, x0 + cell_size, y0 + cell_size),
+                fill=color,
+                outline="#d1d5db" if show_text else None,
+            )
+            if show_text:
+                draw.text(
+                    (x0 + cell_size / 2, y0 + cell_size / 2),
+                    str(value),
+                    fill="white" if intensity > 0.55 else "#111827",
+                    font=value_font,
+                    anchor="mm",
+                )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, format="PNG")
+
+
 class WandbTracker:
     """Track one package-worker training run or act as a disabled no-op."""
 
@@ -243,9 +324,10 @@ class WandbTracker:
         if self.mode == "online":
             init_kwargs["force"] = True
             assert self._credentials is not None
-            with _temporary_wandb_environment(self._credentials):
-                self._run = sdk_module.init(**init_kwargs)
-        else:
+        with _temporary_wandb_environment(
+            self.artifacts_path,
+            credentials=self._credentials if self.mode == "online" else None,
+        ):
             self._run = sdk_module.init(**init_kwargs)
         if self._run is None:
             raise RuntimeError("W&B SDK did not return a run")
@@ -304,10 +386,11 @@ class WandbTracker:
             values.update({f"train/{key}": metric for key, metric in train_values.items()})
         if validation_values is not None:
             values.update({f"validation/{key}": metric for key, metric in validation_values.items()})
-        self._run.log(
-            values,
-            step=int(epoch),
-        )
+        with _temporary_wandb_environment(self.artifacts_path):
+            self._run.log(
+                values,
+                step=int(epoch),
+            )
 
     def finish(
         self,
@@ -341,17 +424,20 @@ class WandbTracker:
             _set_summary(self._run, "completed_epochs", int(completed_epochs))
             _set_summary(self._run, "num_parameters", int(num_parameters))
             if final_values is not None:
-                metrics, matrix, actual, predicted, labels, count, _binary = final_values
+                metrics, matrix, _actual, _predicted, labels, count, _binary = final_values
                 final_log = {f"test/{key}": value for key, value in metrics.items()}
                 final_log["test/loss"] = float(classification["loss"])
                 final_log["test/examples"] = count
                 if training_seconds is not None:
                     final_log["training/seconds"] = float(training_seconds)
-                plot = getattr(getattr(self._sdk, "plot", None), "confusion_matrix", None)
-                if plot is None:
-                    raise RuntimeError("W&B SDK does not provide confusion_matrix plotting")
-                final_log["test/confusion_matrix"] = plot(
-                    probs=None, y_true=actual, preds=predicted, class_names=labels
+                image_class = getattr(self._sdk, "Image", None)
+                if image_class is None:
+                    raise RuntimeError("W&B SDK does not provide image logging")
+                image_path = self.artifacts_path / "wandb" / "confusion-matrix.png"
+                _write_confusion_matrix_image(image_path, matrix, labels)
+                final_log["test/confusion_matrix"] = image_class(
+                    str(image_path),
+                    caption="Confusion matrix — rows: actual, columns: predicted",
                 )
                 for key, value in final_log.items():
                     if key != "test/confusion_matrix":
@@ -363,10 +449,14 @@ class WandbTracker:
                     f"rows=actual, columns=predicted; labels={labels}",
                 )
                 _set_summary(self._run, "confusion_matrix_labels", labels)
-                self._run.log(final_log, step=int(completed_epochs))
+                with _temporary_wandb_environment(self.artifacts_path):
+                    self._run.log(final_log, step=int(completed_epochs))
         finally:
-            self._run.finish()
-            self._finished = True
+            try:
+                with _temporary_wandb_environment(self.artifacts_path):
+                    self._run.finish()
+            finally:
+                self._finished = True
         self._write_manifest()
 
     def abort(self) -> None:
@@ -374,7 +464,8 @@ class WandbTracker:
 
         if self._run is not None and not self._finished:
             try:
-                self._run.finish(exit_code=1)
+                with _temporary_wandb_environment(self.artifacts_path):
+                    self._run.finish(exit_code=1)
             finally:
                 self._finished = True
 
