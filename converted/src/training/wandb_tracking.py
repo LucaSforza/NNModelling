@@ -355,6 +355,7 @@ class WandbTracker:
         train_loss: float,
         validation_loss: float,
         *,
+        epoch_seconds: float | None = None,
         train_classification: Mapping[str, Any] | None = None,
         validation_classification: Mapping[str, Any] | None = None,
         binary_classification: bool = True,
@@ -365,6 +366,13 @@ class WandbTracker:
             raise ValueError("train_loss must be a finite number")
         if isinstance(validation_loss, bool) or not isinstance(validation_loss, (int, float)) or not math.isfinite(validation_loss):
             raise ValueError("validation_loss must be a finite number")
+        if epoch_seconds is not None and (
+            isinstance(epoch_seconds, bool)
+            or not isinstance(epoch_seconds, (int, float))
+            or not math.isfinite(epoch_seconds)
+            or epoch_seconds < 0
+        ):
+            raise ValueError("epoch_seconds must be a non-negative finite number")
         train_values = (
             _classification_metrics(train_classification, binary=binary_classification)
             if train_classification is not None
@@ -382,14 +390,33 @@ class WandbTracker:
             "train/loss": float(train_loss),
             "validation/loss": float(validation_loss),
         }
+        if epoch_seconds is not None:
+            values["epoch/seconds"] = float(epoch_seconds)
+        values["epoch"] = int(epoch)
         if train_values is not None:
             values.update({f"train/{key}": metric for key, metric in train_values.items()})
         if validation_values is not None:
             values.update({f"validation/{key}": metric for key, metric in validation_values.items()})
         with _temporary_wandb_environment(self.artifacts_path):
+            self._run.log(values)
+
+    def log_step_loss(self, split: str, step: int, loss: float) -> None:
+        """Record one finite batch loss on a split-specific step axis."""
+
+        if split not in {"train", "validation"}:
+            raise ValueError("split must be train or validation")
+        if isinstance(step, bool) or not isinstance(step, int) or step < 1:
+            raise ValueError("step must be a positive integer")
+        if isinstance(loss, bool) or not isinstance(loss, (int, float)) or not math.isfinite(loss):
+            raise ValueError("loss must be a finite number")
+        if self._run is None:
+            return
+        with _temporary_wandb_environment(self.artifacts_path):
             self._run.log(
-                values,
-                step=int(epoch),
+                {
+                    f"{split}/step": step,
+                    f"{split}/step_loss": float(loss),
+                }
             )
 
     def finish(
@@ -450,7 +477,7 @@ class WandbTracker:
                 )
                 _set_summary(self._run, "confusion_matrix_labels", labels)
                 with _temporary_wandb_environment(self.artifacts_path):
-                    self._run.log(final_log, step=int(completed_epochs))
+                    self._run.log(final_log)
         finally:
             try:
                 with _temporary_wandb_environment(self.artifacts_path):

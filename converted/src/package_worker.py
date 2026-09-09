@@ -7,7 +7,7 @@ import json
 import random
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -88,6 +88,7 @@ def train(
     max_epochs = max(1, int(training.get("trainer", {}).get("max_epochs", 1)))
     patience = int(training["trainer"].get("patience", 3))
     min_delta = float(training["trainer"].get("min_delta", 0.0))
+    log_every_n_steps = int(training["trainer"]["log_every_n_steps"])
     history: list[dict[str, float]] = []
     best_validation = float("inf")
     stale_epochs = 0
@@ -99,6 +100,14 @@ def train(
     )
     started = time.monotonic()
     final_test: dict[str, Any] | None = None
+    train_step = 0
+    validation_step = 0
+
+    def log_validation_step(loss: float) -> None:
+        nonlocal validation_step
+        validation_step += 1
+        if validation_step % log_every_n_steps == 0:
+            tracker.log_step_loss("validation", validation_step, loss)
 
     try:
         for epoch in range(max_epochs):
@@ -113,12 +122,20 @@ def train(
                     raise RuntimeError("package training produced a non-finite loss")
                 loss.backward()
                 optimizer.step()
-                total += float(loss.detach())
+                batch_loss = float(loss.detach())
+                total += batch_loss
                 batches += 1
+                train_step += 1
+                if train_step % log_every_n_steps == 0:
+                    tracker.log_step_loss("train", train_step, batch_loss)
             train_loss = total / max(1, batches)
             train_metrics = _classification_pass(model, train_loader, device, classification) if classification else None
             validation_loss, validation_metrics = _evaluate(
-                model, validation_loader, device, classification
+                model,
+                validation_loader,
+                device,
+                classification,
+                on_batch_loss=log_validation_step,
             )
             epoch_number = epoch + 1
             epoch_seconds = max(0.0, time.monotonic() - epoch_started)
@@ -127,6 +144,7 @@ def train(
                 epoch_number,
                 train_loss,
                 validation_loss,
+                epoch_seconds=epoch_seconds,
                 train_classification=_epoch_classification_metrics(train_metrics),
                 validation_classification=_epoch_classification_metrics(validation_metrics),
                 binary_classification=classification.binary if classification else True,
@@ -226,6 +244,7 @@ def _normalized_training(raw: dict[str, Any]) -> dict[str, Any]:
     result["trainer"].setdefault("accelerator", "auto")
     result["trainer"].setdefault("patience", 3)
     result["trainer"].setdefault("min_delta", 0.0)
+    result["trainer"].setdefault("log_every_n_steps", 10)
     result.setdefault("seed", 0)
     result["wandb"] = normalize_wandb_config(raw.get("wandb"))
     if any(field in result for field in ("api_key", "credentials", "token", "password")):
@@ -247,6 +266,13 @@ def _validate_training_support(
         raise ValueError("W&B credentials are accepted only for online logging")
     _seed_from_training(training)
     trainer = training["trainer"]
+    log_every_n_steps = trainer.get("log_every_n_steps")
+    if (
+        isinstance(log_every_n_steps, bool)
+        or not isinstance(log_every_n_steps, int)
+        or log_every_n_steps < 1
+    ):
+        raise ValueError("trainer.log_every_n_steps must be a positive integer")
     accelerator = trainer.get("accelerator", "auto")
     if accelerator not in {"auto", "cpu", "cuda"}:
         raise ValueError(f"unsupported accelerator: {accelerator}")
@@ -424,14 +450,19 @@ def _evaluate(
     loader: Any,
     device: torch.device,
     classification: "ClassificationSpec | None" = None,
+    *,
+    on_batch_loss: Callable[[float], None] | None = None,
 ) -> tuple[float, dict[str, Any] | None]:
     model.eval()
     total = 0.0
     batches = 0
     for raw_batch in loader:
         batch = normalize_training_batch(raw_batch).to(device)
-        total += float(model.objective(batch.inputs, batch.targets))
+        batch_loss = float(model.objective(batch.inputs, batch.targets))
+        total += batch_loss
         batches += 1
+        if on_batch_loss is not None:
+            on_batch_loss(batch_loss)
     model.train()
     return total / max(1, batches), (_classification_pass(model, loader, device, classification) if classification else None)
 

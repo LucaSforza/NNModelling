@@ -198,9 +198,12 @@ def test_classification_worker_logs_metrics_and_final_test(
     class Tracker:
         def __init__(self):
             self.epochs = []
+            self.steps = []
             self.final = None
         def log_epoch(self, *args, **kwargs):
             self.epochs.append(kwargs)
+        def log_step_loss(self, split, step, loss):
+            self.steps.append((split, step, loss))
         def finish(self, **kwargs):
             self.final = kwargs
         def abort(self):
@@ -211,7 +214,7 @@ def test_classification_worker_logs_metrics_and_final_test(
     monkeypatch.setattr("package_worker.create_tracker", lambda *args, **kwargs: tracker)
     clock = iter((10.0, 11.0, 13.0, 15.0))
     monkeypatch.setattr("package_worker.time.monotonic", lambda: next(clock))
-    summary = train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1, "patience": 0}}, "package": training_package()}, tmp_path)
+    summary = train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1, "patience": 0, "log_every_n_steps": 1}}, "package": training_package()}, tmp_path)
 
     expected_epoch_metrics = {
         "accuracy",
@@ -226,6 +229,8 @@ def test_classification_worker_logs_metrics_and_final_test(
     assert set(tracker.epochs[0]["train_classification"]) == expected_epoch_metrics
     assert set(tracker.epochs[0]["validation_classification"]) == expected_epoch_metrics
     assert tracker.epochs[0]["train_classification"]["accuracy"] == 1.0
+    assert tracker.epochs[0]["epoch_seconds"] == 2.0
+    assert tracker.steps == [("train", 1, 0.25), ("validation", 1, 0.25)]
     assert tracker.final["classification"]["labels"] == ["ham", "spam"]
     assert tracker.final["classification"]["confusion_matrix"] == [[1, 0], [0, 1]]
     assert summary["classification"]["training_seconds"] >= 0
@@ -282,7 +287,13 @@ def test_loader_settings_stay_inside_dataset_parameters() -> None:
         _normalized_training({"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "batch_size": 7})
     normalized = _normalized_training({"dataset": {"reference": REFERENCE.model_dump(), "parameters": {"batch_size": 64}}, "trainer": {"max_epochs": 3, "patience": 2}})
     assert normalized["dataset"]["parameters"] == {"batch_size": 64}
-    assert normalized["trainer"] == {"max_epochs": 3, "patience": 2, "accelerator": "auto", "min_delta": 0.0}
+    assert normalized["trainer"] == {
+        "max_epochs": 3,
+        "patience": 2,
+        "accelerator": "auto",
+        "min_delta": 0.0,
+        "log_every_n_steps": 10,
+    }
 
 
 def test_dataset_loaders_reject_legacy_tuple_division() -> None:

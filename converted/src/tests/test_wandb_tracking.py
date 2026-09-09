@@ -25,7 +25,7 @@ class FakeRun:
         self.finish_exit_codes: list[int | None] = []
         self.finish_environments: list[dict[str, str | None]] = []
 
-    def log(self, values: dict[str, object], *, step: int) -> None:
+    def log(self, values: dict[str, object], *, step: int | None = None) -> None:
         self.logs.append((values, step))
         self.log_environments.append(_wandb_storage_environment())
 
@@ -122,10 +122,22 @@ def test_tracker_records_metrics_and_writes_structured_manifest(
         "project": "demo",
         "url": "https://wandb.example.test/runs/run-123",
     }
-    tracker.log_epoch(1, 1.5, 1.25)
+    tracker.log_step_loss("train", 10, 0.75)
+    tracker.log_epoch(1, 1.5, 1.25, epoch_seconds=3.5)
     tracker.finish(best_loss=1.25, completed_epochs=1, num_parameters=7)
 
-    assert sdk.run.logs == [({"train/loss": 1.5, "validation/loss": 1.25}, 1)]
+    assert sdk.run.logs == [
+        ({"train/step": 10, "train/step_loss": 0.75}, None),
+        (
+            {
+                "epoch": 1,
+                "train/loss": 1.5,
+                "validation/loss": 1.25,
+                "epoch/seconds": 3.5,
+            },
+            None,
+        ),
+    ]
     assert sdk.run.summary == {"best_loss": 1.25, "completed_epochs": 1, "num_parameters": 7}
     assert sdk.run.finish_count == 1
     assert sdk.run.finish_exit_codes == [None]
@@ -288,7 +300,12 @@ def test_classification_metrics_and_confusion_matrix_are_logged(tmp_path: Path) 
         "macro_f1": 0.8333,
     }
     tracker.log_epoch(
-        1, 0.5, 0.4, train_classification=metrics, validation_classification=metrics
+        1,
+        0.5,
+        0.4,
+        epoch_seconds=0.75,
+        train_classification=metrics,
+        validation_classification=metrics,
     )
     tracker.finish(
         best_loss=0.4,
@@ -308,6 +325,7 @@ def test_classification_metrics_and_confusion_matrix_are_logged(tmp_path: Path) 
     )
     epoch_log = sdk.run.logs[0][0]
     assert epoch_log["train/accuracy"] == 0.8
+    assert epoch_log["epoch/seconds"] == 0.75
     final_log = sdk.run.logs[1][0]
     assert final_log["test/examples"] == 4
     assert final_log["training/seconds"] == 12.5
@@ -377,6 +395,7 @@ def test_multiclass_logs_only_macro_metrics(tmp_path: Path) -> None:
         binary_classification=False,
     )
     assert set(sdk.run.logs[0][0]) == {
+        "epoch",
         "train/loss",
         "validation/loss",
         "train/accuracy",

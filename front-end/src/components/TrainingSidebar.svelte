@@ -54,6 +54,7 @@
   let accelerator = $state<"auto" | "cpu" | "cuda">("auto");
   let patience = $state("3");
   let minDelta = $state("0");
+  let logEveryNSteps = $state("10");
   let seed = $state("42");
   let wandbProject = $state("NeuralNetworks");
   let wandbMode = $state<WandbMode>("disabled");
@@ -117,6 +118,7 @@
     datasetParams = Object.fromEntries(Object.entries(config.datasetParams).map(([key, value]) => [key, String(value ?? "")]));
     seed = String(config.seed); optimizerTarget = config.optimizerTarget; learningRate = String(config.learningRate);
     maxEpochs = String(config.maxEpochs); accelerator = config.accelerator; patience = String(config.patience); minDelta = String(config.minDelta);
+    logEveryNSteps = String(config.logEveryNSteps);
     wandbProject = config.wandbProject; wandbMode = config.wandbMode; cpu = String(config.cpu); memoryGb = String(config.memoryGb); gpu = String(config.gpu);
     gpuMemoryGb = config.gpuMemoryGb === undefined ? "" : String(config.gpuMemoryGb); gpuType = config.gpuType ?? ""; node = config.node ?? "";
     priority = String(config.priority);
@@ -214,6 +216,7 @@
         optimizerTarget, learningRate: coerceTrainingValue(learningRate, "number") as number,
         maxEpochs: coerceTrainingValue(maxEpochs, "integer") as number, accelerator,
         patience: coerceTrainingValue(patience, "integer") as number, minDelta: coerceTrainingValue(minDelta, "number") as number,
+        logEveryNSteps: coerceTrainingValue(logEveryNSteps, "integer") as number,
         wandbProject, wandbMode, cpu: coerceTrainingValue(cpu, "integer") as number,
         memoryGb: coerceTrainingValue(memoryGb, "number") as number, gpu: coerceTrainingValue(gpu, "integer") as number,
         gpuMemoryGb: gpuMemoryGb ? coerceTrainingValue(gpuMemoryGb, "number") as number : undefined,
@@ -510,6 +513,9 @@
             <option value="offline">Offline</option>
             <option value="online" disabled={!wandbCapabilities?.available_modes.includes("online")}>Online (consigliato)</option>
           </select>
+        </label>
+        <label>Log loss ogni N batch
+          <input type="number" min="1" step="1" bind:value={logEveryNSteps} />
         </label>
       </div>
       {#if wandbMode === "online" && !wandbCapabilities?.available_modes.includes("online")}

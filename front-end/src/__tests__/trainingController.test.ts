@@ -35,6 +35,10 @@ describe("TrainingController", () => {
     expect(() => controller.updateConfig({ datasetParams: { batch_size: "64" } })).toThrow(TrainingConfigurationError);
     expect(controller.getConfig().datasetParams.batch_size).toBe(64);
     expect(() => controller.updateConfig({ accelerator: "tpu" as never })).toThrow(TrainingConfigurationError);
+    expect(controller.getConfig().logEveryNSteps).toBe(10);
+    controller.updateConfig({ logEveryNSteps: 7 });
+    expect(controller.getConfig().logEveryNSteps).toBe(7);
+    expect(() => controller.updateConfig({ logEveryNSteps: 0 })).toThrow(TrainingConfigurationError);
   });
 
   it("publishes pairing status without exposing the token", async () => {

@@ -152,7 +152,7 @@ export interface TrainingRequest {
   dataset: OpaqueDatasetRequest;
   seed: number;
   optimizer: { target: string; learning_rate: number };
-  trainer: { max_epochs: number; accelerator: "auto" | "cpu" | "cuda"; patience: number; min_delta: number };
+  trainer: { max_epochs: number; accelerator: "auto" | "cpu" | "cuda"; patience: number; min_delta: number; log_every_n_steps: number };
   wandb: { project: string; mode: WandbMode };
 }
 export interface ResourceRequest {

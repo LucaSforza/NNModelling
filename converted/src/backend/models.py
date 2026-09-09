@@ -170,6 +170,7 @@ class TrainerRequest(BaseModel):
     accelerator: Literal["auto", "cpu", "cuda"] = "auto"
     patience: int = Field(default=3, ge=0, le=100_000)
     min_delta: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    log_every_n_steps: int = Field(default=10, ge=1, le=1_000_000)
 
 
 class WandbRequest(BaseModel):
