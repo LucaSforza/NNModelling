@@ -1,19 +1,20 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-09-10
 ---
 
 # Pairing and job ownership
 
-Remote-training identity is an administrator-approved browser connection, not a
-user account. The contract is intended for a trusted LAN and is not sufficient
+Remote-training identity is an administrator-approved frontend connection, not
+a user account. The frontend may run in a web browser or the supported Electron
+desktop host. The contract is intended for a trusted LAN and is not sufficient
 for direct Internet exposure.
 
 ## Trust model
 
-- A new browser requests pairing and receives a high-entropy opaque token plus
-  a short verification code.
+- A new frontend host requests pairing and receives a high-entropy opaque token
+  plus a short verification code.
 - An administrator approves or rejects the request through protected backend
   commands/API.
 - Valkey stores a token digest, not the plaintext token.
@@ -41,6 +42,9 @@ the configured admin token and are hidden from the public API schema.
 
 The frontend persists its backend URL and token locally, verifies the session
 on reuse, and distinguishes local forgetting from server-side revocation.
+Backend CORS configuration must allow each deployed web origin explicitly. The
+Electron distribution uses the exact `app://nnmodelling` origin. Wildcard
+origins are not authorized by the desktop contract.
 
 ## Security boundary
 

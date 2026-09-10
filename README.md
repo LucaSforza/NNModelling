@@ -11,6 +11,12 @@ A visual editor and DSL for designing neural networks. Create diagrams in the br
 
 The GitHub Pages demo contains the visual editor and runs entirely in the browser. Remote training, conversion, and MCP/browser integration require a local or separately deployed backend.
 
+Linux users can also run the same editor as an Electron Flatpak. The Flatpak
+contains the desktop shell and shared frontend; FastAPI, Valkey, Podman/Docker
+and worker images remain in the separately managed backend. See the
+[Linux desktop documentation](docs2/source/desktop.rst) for source builds,
+installation and the exact `app://nnmodelling` backend origin.
+
 ```
 Stereotypes/ (JSON) → Svelte Flow Editor → NNTree (JSON) → convert.py → Hydra YAML → main.py → Training
                                                                                        → infer.py  → Inference

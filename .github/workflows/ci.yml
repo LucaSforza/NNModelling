@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.11.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.11.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -129,7 +129,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.11.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -137,3 +137,56 @@ jobs:
       - run: pnpm install
       - run: pnpm --filter @nnmodelling/mcp-server run build
       - run: pnpm --filter @nnmodelling/mcp-server run test
+
+  flatpak-ci:
+    name: Flatpak build and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test Electron host
+        run: pnpm --dir desktop test
+      - name: Install Flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes dbus-daemon dbus-x11 flatpak flatpak-builder xauth xvfb
+          flatpak remote-add --if-not-exists --user flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Build and install Flatpak
+        run: |
+          flatpak-builder --force-clean --user \
+            --install-deps-from=flathub \
+            --repo=repo --install builddir \
+            io.github.LucaSforza.NNModelling.yml
+      - name: Validate installed Flatpak
+        run: |
+          flatpak info --user io.github.LucaSforza.NNModelling
+          test -x "$(flatpak info --user --show-location \
+            io.github.LucaSforza.NNModelling)/files/bin/run.sh"
+      - name: Smoke test Flatpak launch
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=5s 20s \
+            dbus-run-session -- xvfb-run -a -s "-screen 0 1280x1024x24" \
+            flatpak run --user io.github.LucaSforza.NNModelling --disable-gpu
+          status=$?
+          if [ "$status" -ne 124 ]; then
+            echo "Flatpak exited before the smoke-test timeout (status $status)"
+            exit "$status"
+          fi
+      - name: Build Flatpak bundle
+        run: |
+          flatpak build-bundle repo NNModelling.flatpak \
+            io.github.LucaSforza.NNModelling \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nnmodelling-flatpak
+          path: NNModelling.flatpak

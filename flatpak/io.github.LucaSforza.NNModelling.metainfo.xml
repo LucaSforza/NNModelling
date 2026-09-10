@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.LucaSforza.NNModelling</id>
+  <name>NNModelling</name>
+  <summary>Visual editor for designing neural networks</summary>
+  <developer id="io.github.lucasforza">
+    <name>Luca Sforza</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      NNModelling is a visual editor and domain-specific language for designing
+      neural networks and generating PyTorch and Lightning training pipelines.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.LucaSforza.NNModelling.desktop</launchable>
+  <url type="homepage">https://github.com/LucaSforza/NNModelling</url>
+  <url type="bugtracker">https://github.com/LucaSforza/NNModelling/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-09-10"/>
+  </releases>
+</component>

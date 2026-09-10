@@ -1,0 +1,96 @@
+app-id: io.github.LucaSforza.NNModelling
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: '25.08'
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.node24
+command: run.sh
+separate-locales: false
+
+finish-args:
+  # Electron's display and GPU integration.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # The renderer may connect to the existing remote backend or MCP bridge.
+  - --share=network
+  - --env=GTK_USE_PORTAL=1
+
+build-options:
+  append-path: /usr/lib/sdk/node24/bin
+  env:
+    NPM_CONFIG_LOGLEVEL: info
+
+modules:
+  - name: nnmodelling
+    buildsystem: simple
+    build-options:
+      prepend-path: /run/build/nnmodelling/pnpm-bin
+      env:
+        XDG_CACHE_HOME: /run/build/nnmodelling/flatpak-node/cache
+        npm_config_cache: /run/build/nnmodelling/flatpak-node/npm-cache
+        npm_config_offline: 'true'
+        ELECTRON_CACHE: /run/build/nnmodelling/flatpak-node/cache/electron
+    build-commands:
+      - chmod +x pnpm-bin/pnpm
+      - cd source && pnpm install --offline --frozen-lockfile --store-dir=/run/build/nnmodelling/flatpak-node/pnpm-store
+      - cd source && VITE_BASE_PATH=./ pnpm --dir desktop build
+      - install -d /app/main
+      - cp -a source/desktop/release/linux-unpacked/. /app/main/
+      - install -Dm755 source/flatpak/run.sh /app/bin/run.sh
+      - install -Dm644 source/flatpak/io.github.LucaSforza.NNModelling.desktop /app/share/applications/io.github.LucaSforza.NNModelling.desktop
+      - install -Dm644 source/flatpak/io.github.LucaSforza.NNModelling.metainfo.xml /app/share/metainfo/io.github.LucaSforza.NNModelling.metainfo.xml
+      - install -Dm644 source/flatpak/io.github.LucaSforza.NNModelling.svg /app/share/icons/hicolor/scalable/apps/io.github.LucaSforza.NNModelling.svg
+    sources:
+      # pnpm is not part of the Freedesktop Node SDK extension. Keep the
+      # executable pinned and provide one source for each supported arch.
+      - type: file
+        url: https://github.com/pnpm/pnpm/releases/download/v10.11.0/pnpm-linux-x64
+        sha256: fb28f89021562a8b251d8b34485a0b560683f096af17a0793139df6b4f3c4d5a
+        dest: pnpm-bin
+        dest-filename: pnpm
+        only-arches:
+          - x86_64
+      - type: file
+        url: https://github.com/pnpm/pnpm/releases/download/v10.11.0/pnpm-linux-arm64
+        sha256: fd030b0566a70862ae06102316ed16bde0a7f953130551923c8bc11bb2a8ed87
+        dest: pnpm-bin
+        dest-filename: pnpm
+        only-arches:
+          - aarch64
+      - type: file
+        path: package.json
+        dest: source
+      - type: file
+        path: pnpm-lock.yaml
+        dest: source
+      - type: file
+        path: pnpm-workspace.yaml
+        dest: source
+      - type: dir
+        path: front-end
+        dest: source/front-end
+        skip:
+          - node_modules
+          - dist
+      - type: dir
+        path: desktop
+        dest: source/desktop
+        skip:
+          - node_modules
+          - dist
+          - release
+          - renderer
+      - type: dir
+        path: stereotype-packages
+        dest: source/stereotype-packages
+      - type: dir
+        path: flatpak
+        dest: source/flatpak
+        skip:
+          - build
+          - repo
+      - flatpak/generated-sources.json

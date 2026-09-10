@@ -1,0 +1,50 @@
+{
+  "name": "@nnmodelling/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NNModelling Electron desktop host",
+  "author": "Luca Sforza",
+  "license": "GPL-3.0-or-later",
+  "desktopName": "io.github.LucaSforza.NNModelling.desktop",
+  "main": "dist/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "build:renderer": "VITE_DESKTOP=1 pnpm --dir ../front-end build && rm -rf renderer && cp -a ../front-end/dist renderer",
+    "build:host": "rm -rf dist && tsc -p tsconfig.json",
+    "build": "pnpm run build:renderer && pnpm run build:host && electron-builder --linux dir",
+    "start": "electron .",
+    "package:dir": "electron-builder --linux dir",
+    "test": "vitest run src"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.7"
+  },
+  "build": {
+    "appId": "io.github.LucaSforza.NNModelling",
+    "productName": "NNModelling",
+    "files": [
+      "dist/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "electronDownload": {
+      "unsafelyDisableChecksums": false,
+      "checksums": {
+        "electron-v38.8.6-linux-x64.zip": "41a8f2bc7c0be836b4dc8de19550a65947cffa58433753032af36ee3b849e8be",
+        "electron-v38.8.6-linux-arm64.zip": "add5aaa35ed57e60f84b780f6461064b912de55effd27ec11e338462243867a5"
+      }
+    },
+    "linux": {
+      "target": ["dir"],
+      "executableName": "nnmodelling",
+      "category": "Education"
+    }
+  }
+}

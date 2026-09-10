@@ -26,6 +26,20 @@ NNM_ALLOWED_ORIGINS=http://192.168.1.30:5174 \
 just --justfile converted/backend/justfile backend
 ```
 
+The Linux Flatpak uses the same remote backend as the web editor. Its renderer
+origin is exactly `app://nnmodelling`; include that origin when the backend
+is used by the packaged application, while retaining the origins for any web
+frontends that should remain connected:
+
+```bash
+NNM_ALLOWED_ORIGINS=http://127.0.0.1:5174,http://localhost:5174,app://nnmodelling \
+just --justfile converted/backend/justfile backend
+```
+
+The Flatpak does not bundle FastAPI, Valkey, Podman/Docker, worker images or
+training jobs. Pairing and bearer-token ownership are unchanged across the web
+and desktop renderers. Do not replace the explicit origin list with `*`.
+
 `backend` creates an untracked `backend-secrets/admin.token` with mode `0600` when
 needed. Approve the code displayed by the frontend:
 

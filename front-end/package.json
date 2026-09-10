@@ -33,10 +33,5 @@
     "html-to-image": "^1.11.13",
     "wasmoon": "1.16.0"
   },
-  "packageManager": "pnpm@10.11.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  }
+  "packageManager": "pnpm@10.11.0"
 }

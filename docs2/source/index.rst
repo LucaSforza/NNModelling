@@ -22,9 +22,10 @@ formats or execute Python on the host.
    training_user_guide
    training_admin_guide
    architecture
+   desktop
    stereotypes
    python_api
    typescript_api
    type_system
    examples
-license
+   license

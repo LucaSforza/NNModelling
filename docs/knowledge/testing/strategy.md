@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-28
+updated: 2026-09-10
 ---
 
 # Testing strategy
@@ -53,6 +53,24 @@ check for the downloadable artifact.
 MCP Vitest suites cover tool schemas, thin-proxy behavior, multi-tab routing,
 errors and authenticated parity with browser-owned operations. An RPC contract
 change requires matching frontend handler and MCP proxy coverage.
+
+## Linux desktop distribution
+
+Desktop host tests cover only the platform boundary: context isolation,
+sandbox and navigation policy; preload operation allowlists and validation;
+directory selection; recursive reads and writes; collisions; cancellation; and
+error mapping. They reuse the frontend suites for diagram, package, type,
+persistence and training semantics.
+
+An implementation handoff may use minimal installed-artifact QA when explicitly
+requested: build and install the Flatpak, inspect its effective permissions,
+launch to the project chooser, and retain the web production build and focused
+host-adapter tests. This does not prove the complete project lifecycle.
+
+Before public release, manual QA must additionally exercise create, edit,
+automatic save, close and reopen using the installed application. A successful
+Electron development launch or an uninstalled `flatpak-builder` build is
+insufficient release evidence.
 
 ## Cross-boundary rule
 

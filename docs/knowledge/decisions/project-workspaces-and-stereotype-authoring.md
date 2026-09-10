@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-08-29
+updated: 2026-09-10
 ---
 
 # Writable project workspaces and model-owned stereotype authoring
@@ -29,9 +29,11 @@ the user can edit the Lua and PyTorch implementations outside NNModelling.
 - New-project creation first asks for a parent directory. After the model form
   is accepted, NNModelling creates one child directory named by the validated
   model ID. An existing child is rejected; it is never merged or overwritten.
-- Opening a project selects its directory through the same writable filesystem
-  capability. NNModelling reads `model.json` and all declared model resources,
-  then retains the directory handle only for the current browser session.
+- Opening a project selects its directory through the host's writable
+  filesystem capability. NNModelling reads `model.json` and all declared model
+  resources, then retains the directory capability only for the current
+  renderer session. The web host uses the File System Access API; the Electron
+  host uses its typed preload bridge and native portal-visible selection.
 - Filesystem handles and absolute paths never enter `model.json`, package
   manifests, backend payloads, or browser RPC state.
 - The model form owns `id`, `version`, `name`, and optional `description`.
@@ -75,8 +77,10 @@ the user can edit the Lua and PyTorch implementations outside NNModelling.
 
 ## Consequences
 
-- The browser File System Access API is a required capability for editable
-  projects. Unsupported or denied access produces a clear startup error; a
+- A writable host filesystem capability is required for editable projects.
+  The web distribution requires the browser File System Access API; the Linux
+  desktop distribution provides an equivalent typed Electron adapter.
+  Unsupported, cancelled, or denied access produces a clear startup result; a
   read-only file-input fallback would not satisfy stereotype creation or
   automatic saving.
 - Project creation, opening, graph editing, package authoring, and backend

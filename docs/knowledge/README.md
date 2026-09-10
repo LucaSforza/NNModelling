@@ -13,6 +13,7 @@ behavior as a second supported contract or append narrative history.
 
 ## Contracts
 
+- [Electron desktop host](contracts/desktop-host.md)
 - [Frontend package type system](contracts/package-type-system.md)
 - [Pairing and ownership](contracts/pairing.md)
 - [Portable model packages](contracts/model-package.md)
@@ -32,6 +33,7 @@ UML:
 
 Current decisions:
 
+- [Shared web and Flatpak desktop distribution](decisions/web-and-flatpak-desktop-distribution.md)
 - [Package type-system cutover](decisions/stereotype-type-system-migration.md)
 - [Upstream Cordis package runtime](decisions/local-package-runtime.md)
 - [Model-scoped custom stereotype packages](decisions/model-scoped-stereotype-packages.md)
