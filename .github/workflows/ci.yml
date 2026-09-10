@@ -156,7 +156,7 @@ jobs:
       - name: Install Flatpak tooling
         run: |
           sudo apt-get update
-          sudo apt-get install --yes flatpak flatpak-builder xauth xvfb
+          sudo apt-get install --yes dbus-daemon dbus-x11 flatpak flatpak-builder xauth xvfb
           flatpak remote-add --if-not-exists --user flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
       - name: Build and install Flatpak
@@ -174,7 +174,7 @@ jobs:
         run: |
           set +e
           timeout --signal=TERM --kill-after=5s 20s \
-            xvfb-run -a -s "-screen 0 1280x1024x24" \
+            dbus-run-session -- xvfb-run -a -s "-screen 0 1280x1024x24" \
             flatpak run --user io.github.LucaSforza.NNModelling --disable-gpu
           status=$?
           if [ "$status" -ne 124 ]; then
