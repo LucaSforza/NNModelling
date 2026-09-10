@@ -81,7 +81,7 @@ export class ProjectWorkspaceError extends Error {
 }
 
 export class UnsupportedProjectFilesystemError extends ProjectWorkspaceError {
-  constructor() { super("The browser does not support writable project directories", "unsupported") }
+  constructor() { super("This runtime does not support writable project directories", "unsupported") }
 }
 
 export class ProjectSelectionCancelledError extends ProjectWorkspaceError {

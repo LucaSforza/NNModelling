@@ -62,11 +62,15 @@ directory selection; recursive reads and writes; collisions; cancellation; and
 error mapping. They reuse the frontend suites for diagram, package, type,
 persistence and training semantics.
 
-A release proof must build and install the Flatpak, inspect its effective
-permissions, and exercise create, edit, automatic save, close and reopen using
-the installed application. A successful Electron development launch or an
-uninstalled `flatpak-builder` build is insufficient. The web production build
-and browser project workflow remain part of the same release gate.
+An implementation handoff may use minimal installed-artifact QA when explicitly
+requested: build and install the Flatpak, inspect its effective permissions,
+launch to the project chooser, and retain the web production build and focused
+host-adapter tests. This does not prove the complete project lifecycle.
+
+Before public release, manual QA must additionally exercise create, edit,
+automatic save, close and reopen using the installed application. A successful
+Electron development launch or an uninstalled `flatpak-builder` build is
+insufficient release evidence.
 
 ## Cross-boundary rule
 

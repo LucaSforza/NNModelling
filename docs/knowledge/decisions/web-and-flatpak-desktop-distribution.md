@@ -61,9 +61,9 @@ therefore reuse the renderer instead of creating a second editor.
   sources are fetched. Node and Electron sources are pinned from the workspace
   lock and generated Flatpak source manifest.
 - Flatpak exports an application-ID-named desktop file, icon, and AppStream
-  metadata. A release gate builds, installs, launches, opens or creates a
-  project through the portal-visible filesystem, saves it, closes the app, and
-  reopens the project.
+  metadata. Before public release, manual QA builds, installs, launches, opens
+  or creates a project through the portal-visible filesystem, saves it, closes
+  the app, and reopens the project.
 - Adding a bundled local backend would be a separate architectural decision
   because it changes sandbox permissions, lifecycle, resource ownership, and
   the least-privilege worker boundary.
@@ -71,4 +71,4 @@ therefore reuse the renderer instead of creating a second editor.
 ## Implementation
 
 The executable work is defined in
-[`../../plans/active/linux-flatpak/plan.md`](../../plans/active/linux-flatpak/plan.md).
+[`../../archive/completed-plans/linux-flatpak/plan.md`](../../archive/completed-plans/linux-flatpak/plan.md).

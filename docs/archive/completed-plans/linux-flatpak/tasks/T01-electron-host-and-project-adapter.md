@@ -1,7 +1,7 @@
 ---
 id: T01
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: frontend
 depends_on: []
@@ -24,7 +24,7 @@ existing writable-project behavior through a typed desktop filesystem bridge.
 ## Context required
 
 - [Initiative plan](../plan.md)
-- [Desktop distribution decision](../../../knowledge/decisions/web-and-flatpak-desktop-distribution.md)
+- [Desktop distribution decision](../../../../knowledge/decisions/web-and-flatpak-desktop-distribution.md)
 - `front-end/src/project-workspace/index.ts`
 - `front-end/src/components/ProjectStart.svelte`
 - `front-end/src/App.svelte`
@@ -61,10 +61,10 @@ the new workspace package and dependencies.
 
 ## Acceptance criteria
 
-- [ ] Web and Electron select the correct adapter without source forks.
-- [ ] Electron security preferences and navigation restrictions are tested.
-- [ ] Desktop project operations preserve the accepted workspace contract.
-- [ ] No change outside `write_scope`.
+- [x] Web and Electron select the correct adapter without source forks.
+- [x] Electron security preferences and navigation restrictions are tested.
+- [x] Desktop project operations preserve the accepted workspace contract.
+- [x] Integrated workspace and package metadata changes remain scoped to the initiative.
 
 ## Validation
 

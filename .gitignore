@@ -13,6 +13,12 @@ __pycache__/
 dist/
 front-end/dist/
 mcp-server/dist/
+desktop/release/
+desktop/renderer/
+.flatpak-builder/
+builddir/
+repo/
+NNModelling.flatpak
 
 
 docs2/build/

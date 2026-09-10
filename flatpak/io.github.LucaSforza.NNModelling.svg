@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">NNModelling</title>
+  <desc id="desc">A neural-network graph with three connected nodes</desc>
+  <rect width="256" height="256" rx="48" fill="#20242b"/>
+  <path d="M78 128h100M96 86l64 84M96 170l64-84" fill="none" stroke="#77c9d4" stroke-linecap="round" stroke-width="14"/>
+  <circle cx="70" cy="128" r="27" fill="#f4b942" stroke="#fff" stroke-width="7"/>
+  <circle cx="186" cy="78" r="27" fill="#ee6c4d" stroke="#fff" stroke-width="7"/>
+  <circle cx="186" cy="178" r="27" fill="#79c267" stroke="#fff" stroke-width="7"/>
+</svg>

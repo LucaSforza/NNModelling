@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "DSL for designing neural networks via visual node editor",
+  "packageManager": "pnpm@10.11.0",
   "scripts": {
     "docs": "pnpm run docs:typedoc && pnpm run docs:sphinx",
     "docs:typedoc": "pnpm --filter @nnmodelling/front-end exec typedoc --options typedoc.json",
@@ -11,5 +12,11 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   }
 }

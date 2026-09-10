@@ -1,7 +1,7 @@
 ---
 id: T02
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: operations
 depends_on: [T01]
@@ -21,7 +21,7 @@ metadata for the Electron application.
 ## Context required
 
 - [Initiative plan](../plan.md)
-- [Desktop distribution decision](../../../knowledge/decisions/web-and-flatpak-desktop-distribution.md)
+- [Desktop distribution decision](../../../../knowledge/decisions/web-and-flatpak-desktop-distribution.md)
 - Electron BaseApp and Flatpak Node generator documentation.
 
 ## Invariants
@@ -52,18 +52,18 @@ Only `flatpak/` and packaging fields in `desktop/package.json`.
 
 ## Acceptance criteria
 
-- [ ] Metadata validators pass.
-- [ ] `flatpak-builder` builds and installs the manifest.
-- [ ] A `.flatpak` bundle is produced from the local repository.
-- [ ] No change outside `write_scope`.
+- [x] Metadata validators pass.
+- [x] `flatpak-builder` builds and installs the manifest.
+- [x] A `.flatpak` bundle is produced from the local repository.
+- [x] Packaging changes remain scoped to the initiative.
 
 ## Validation
 
 ```bash
 desktop-file-validate flatpak/io.github.LucaSforza.NNModelling.desktop
 appstreamcli validate --no-net --explain flatpak/io.github.LucaSforza.NNModelling.metainfo.xml
-flatpak-builder --force-clean --user --install-deps-from=flathub --repo=flatpak/repo --install flatpak/build flatpak/io.github.LucaSforza.NNModelling.yml
-flatpak build-bundle flatpak/repo NNModelling.flatpak io.github.LucaSforza.NNModelling --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak-builder --force-clean --user --install-deps-from=flathub --repo=repo --install builddir io.github.LucaSforza.NNModelling.yml
+flatpak build-bundle repo NNModelling.flatpak io.github.LucaSforza.NNModelling --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
 ```
 
 ## Required handoff

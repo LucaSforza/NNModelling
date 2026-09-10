@@ -4,7 +4,10 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 export default defineConfig({
   // GitHub Pages serves project sites below /<repository>/; locally Vite stays
   // available from the root URL.
-  base: process.env.VITE_BASE_PATH ?? "/",
+  // Electron loads the renderer through app://nnmodelling, where absolute
+  // asset URLs would escape the custom protocol. Web builds retain `/` (or
+  // the GitHub Pages override) unless the desktop build opts into `./`.
+  base: process.env.VITE_BASE_PATH ?? (process.env.VITE_DESKTOP === "1" ? "./" : "/"),
   plugins: [
     svelte({
       emitCss: false,

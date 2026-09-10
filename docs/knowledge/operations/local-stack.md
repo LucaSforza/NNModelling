@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-09-09
+updated: 2026-09-10
 ---
 
 # Local development stack
@@ -21,6 +21,39 @@ Browser-backed MCP additionally needs Chromium with remote debugging and the
 WebSocket listener, normally on port 9339. Follow
 `.agents/skills/nnmodelling-mcp/SKILL.md` and its `scripts/nnm-stack.sh`
 helper. Direct browser work follows `.agents/skills/chrome-direct/SKILL.md`.
+
+## Electron and Flatpak editor
+
+The Linux Flatpak is a desktop shell around the same production frontend. It
+does not bundle FastAPI, Valkey, Podman/Docker, worker images or training jobs;
+training remains an authenticated connection to an operator-managed backend.
+The desktop renderer has the exact origin `app://nnmodelling`. Keep that origin
+in `NNM_ALLOWED_ORIGINS` together with the origins used by web editors:
+
+```bash
+NNM_ALLOWED_ORIGINS=http://127.0.0.1:5174,http://localhost:5174,app://nnmodelling \
+just --justfile converted/backend/justfile backend
+```
+
+From a source checkout, build the frontend and desktop host, then use the
+Flatpak manifest to install a local build:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --dir front-end build
+pnpm --dir desktop build
+flatpak-builder --force-clean --user --install-deps-from=flathub \
+  --repo=repo --install builddir \
+  io.github.LucaSforza.NNModelling.yml
+flatpak run io.github.LucaSforza.NNModelling
+flatpak build-bundle repo NNModelling.flatpak \
+  io.github.LucaSforza.NNModelling \
+  --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+```
+
+Project directories are selected through the desktop portal bridge; the
+Flatpak must not be granted blanket home-directory access. Browser users keep
+using the File System Access API and the existing Pages/development commands.
 
 ## Remote-training backend
 

@@ -1,7 +1,7 @@
 ---
 id: T03
 kind: task
-status: ready
+status: done
 plan: ../plan.md
 role: testing
 depends_on: [T01]
@@ -24,8 +24,8 @@ project access, remote backend use, and source-build verification.
 ## Context required
 
 - [Initiative plan](../plan.md)
-- [Testing strategy](../../../knowledge/testing/strategy.md)
-- [Local operations](../../../knowledge/operations/local-stack.md)
+- [Testing strategy](../../../../knowledge/testing/strategy.md)
+- [Local operations](../../../../knowledge/operations/local-stack.md)
 
 ## Invariants
 
@@ -53,10 +53,10 @@ Only the paths in `write_scope`.
 
 ## Acceptance criteria
 
-- [ ] Desktop tests fail on an unsafe or incompatible bridge.
-- [ ] User and operator documentation matches the built artifact.
-- [ ] Existing web documentation remains correct.
-- [ ] No change outside `write_scope`.
+- [x] Desktop tests fail on an unsafe or incompatible bridge.
+- [x] User and operator documentation matches the built artifact.
+- [x] Existing web documentation remains correct.
+- [x] Testing and documentation changes remain scoped to the initiative.
 
 ## Validation
 

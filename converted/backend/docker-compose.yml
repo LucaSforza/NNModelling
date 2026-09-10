@@ -48,7 +48,7 @@ services:
       NNM_BACKEND_PACKAGE_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}/packages
       NNM_BACKEND_DATASET_ROOT: ${NNM_HOST_JOBS:?set NNM_HOST_JOBS to the absolute host jobs directory}/datasets
       NNM_ADMIN_TOKEN_FILE: /run/secrets/nnm-admin-token
-      NNM_ALLOWED_ORIGINS: ${NNM_ALLOWED_ORIGINS:-http://127.0.0.1:5174,http://localhost:5174,http://127.0.0.1:5173,http://localhost:5173}
+      NNM_ALLOWED_ORIGINS: ${NNM_ALLOWED_ORIGINS:-http://127.0.0.1:5174,http://localhost:5174,http://127.0.0.1:5173,http://localhost:5173,app://nnmodelling}
       NNM_SESSION_TTL: ${NNM_SESSION_TTL:-24h}
       NNM_CONTAINER_ENGINE: "${NNM_CONTAINER_ENGINE:-podman}"
       NNM_CONTAINER_IMAGE: ${NNM_CONTAINER_IMAGE:?set NNM_CONTAINER_IMAGE to a digest-pinned worker image}

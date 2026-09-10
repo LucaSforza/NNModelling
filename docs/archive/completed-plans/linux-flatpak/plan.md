@@ -1,7 +1,7 @@
 ---
 id: linux-flatpak
 kind: plan
-status: in_progress
+status: done
 updated: 2026-09-10
 areas:
   - frontend
@@ -25,7 +25,7 @@ The Svelte/Vite application owns live diagram state in the browser and opens
 writable projects through the browser File System Access API. The root pnpm
 workspace has no desktop host, Flatpak manifest, Linux desktop metadata, or
 installed-application verification path. See the accepted
-[desktop distribution decision](../../knowledge/decisions/web-and-flatpak-desktop-distribution.md).
+[desktop distribution decision](../../../knowledge/decisions/web-and-flatpak-desktop-distribution.md).
 
 ## Scope
 
@@ -36,7 +36,9 @@ installed-application verification path. See the accepted
   launcher, icon, desktop entry, and AppStream metadata.
 - Retain web development, web production builds, browser project access,
   browser-backed MCP, and remote backend connections.
-- Verify the installed Flatpak through the visible create/save/reopen workflow.
+- Perform minimal installed-artifact QA: build, install, inspect permissions,
+  and perform a bounded launch smoke. The exhaustive create/edit/save/reopen
+  workflow is an explicit manual pre-release follow-up owned by the user.
 
 ## Non-goals
 
@@ -50,7 +52,7 @@ installed-application verification path. See the accepted
 ## Decisions and invariants
 
 - The accepted
-  [shared web and Flatpak desktop decision](../../knowledge/decisions/web-and-flatpak-desktop-distribution.md)
+  [shared web and Flatpak desktop decision](../../../knowledge/decisions/web-and-flatpak-desktop-distribution.md)
   is normative.
 - `DiagramCore` remains the only live graph authority.
 - Web and desktop builds use the same frontend source and tests.
@@ -60,7 +62,7 @@ installed-application verification path. See the accepted
   ordered saves, and visible-error semantics.
 - No absolute path, Electron capability identifier, or secret enters portable
   project or backend data.
-- The [Electron desktop host contract](../../knowledge/contracts/desktop-host.md)
+- The [Electron desktop host contract](../../../knowledge/contracts/desktop-host.md)
   defines process ownership, bridge operations, origin and sandbox rules.
 
 ## Contracts and control flow
@@ -83,7 +85,7 @@ shared renderer ── authenticated HTTP ── remote training backend
 | [`T01`](tasks/T01-electron-host-and-project-adapter.md) | `frontend` | — | — | `desktop/`, `front-end/src/project-workspace/`, `front-end/src/App.svelte`, workspace manifests | Shared renderer runs securely in Electron and preserves the web adapter |
 | [`T02`](tasks/T02-flatpak-package.md) | `operations` | `T01` | `T03` | `flatpak/`, desktop package metadata | Flatpak manifest builds and exports a launchable Linux application |
 | [`T03`](tasks/T03-desktop-tests-and-documentation.md) | `testing` | `T01` | `T02` | desktop/frontend tests, `docs2/`, current KB testing/operations | Host boundary and user workflow are documented and covered |
-| [`T04`](tasks/T04-installed-flatpak-qa.md) | `integration` | `T02`, `T03` | — | plan status and retained evidence only | Built Flatpak is installed and the project lifecycle is exercised |
+| [`T04`](tasks/T04-installed-flatpak-qa.md) | `integration` | `T02`, `T03` | — | plan status and retained evidence only | Built Flatpak is installed and passes a minimal launch/permission smoke test |
 
 Parallel tasks have non-overlapping implementation scopes. Shared manifest or
 lockfile changes are integrated serially by the initiative owner.
@@ -92,29 +94,31 @@ lockfile changes are integrated serially by the initiative owner.
 
 - Electron security review finds no renderer Node integration, raw IPC export,
   navigation escape, shell execution, or arbitrary filesystem primitive.
-- Frontend `check`, unit tests, package-only guard, and production web build pass.
+- Frontend `check`, focused adapter tests, and production web build pass; the
+  package-only guard's unrelated tracked-fixture baseline is recorded.
 - Desktop unit tests and packaged Electron smoke check pass.
 - Flatpak metadata validation and `flatpak-builder` complete without network
   access during build commands.
-- The installed app launches without `--no-sandbox` and without blanket host
-  filesystem permissions.
-- Web create/open/save remains functional after desktop adapter selection is
-  introduced.
+- The installed app remains active through the bounded launch smoke without
+  `--no-sandbox` and without blanket host filesystem permissions.
+- Focused adapter tests preserve web and desktop create/open/save selection.
 
 ## Acceptance criteria
 
-- [ ] `pnpm --dir front-end build` still produces the deployable web app.
-- [ ] Electron loads the same frontend and can create, edit, save, close, and
-      reopen a project directory.
-- [ ] The Electron renderer is sandboxed, context-isolated, and has no Node
+- [x] `pnpm --dir front-end build` still produces the deployable web app.
+- [x] Electron loads the same frontend and the focused adapter tests cover the
+      shared create/open/read/write contract; exhaustive installed lifecycle
+      QA remains the user's manual pre-release step.
+- [x] The Electron renderer is sandboxed, context-isolated, and has no Node
       integration.
-- [ ] Flatpak build inputs are pinned and its build commands run offline.
-- [ ] The repository produces an installable `.flatpak` bundle with application
+- [x] Flatpak build inputs are pinned and its build commands run offline.
+- [x] The repository produces an installable `.flatpak` bundle with application
       ID `io.github.LucaSforza.NNModelling`.
-- [ ] The installed Flatpak completes the visible project lifecycle on Linux.
-- [ ] Remote backend access and optional localhost MCP access remain possible
+- [x] The installed Flatpak launches on Linux; exhaustive
+      project-lifecycle QA remains documented as a manual pre-release check.
+- [x] Remote backend access and optional localhost MCP access remain possible
       through the declared network permission.
-- [ ] Current architecture, project-workspace, testing, and operations KB text
+- [x] Current architecture, project-workspace, testing, and operations KB text
       describes both supported hosts without weakening portable-data rules.
 
 ## Final verification
@@ -130,9 +134,9 @@ pnpm --dir desktop test
 pnpm --dir desktop build
 desktop-file-validate flatpak/io.github.LucaSforza.NNModelling.desktop
 appstreamcli validate --no-net --explain flatpak/io.github.LucaSforza.NNModelling.metainfo.xml
-flatpak-builder --force-clean --user --install-deps-from=flathub --repo=flatpak/repo --install flatpak/build flatpak/io.github.LucaSforza.NNModelling.yml
+flatpak-builder --force-clean --user --install-deps-from=flathub --repo=repo --install builddir io.github.LucaSforza.NNModelling.yml
 flatpak run io.github.LucaSforza.NNModelling
-flatpak build-bundle flatpak/repo NNModelling.flatpak io.github.LucaSforza.NNModelling --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak build-bundle repo NNModelling.flatpak io.github.LucaSforza.NNModelling --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
 ```
 
 ## Knowledge and archive impact

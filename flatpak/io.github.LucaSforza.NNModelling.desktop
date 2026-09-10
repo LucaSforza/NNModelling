@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=NNModelling
+Comment=Visual editor for designing neural networks
+Exec=run.sh %U
+Icon=io.github.LucaSforza.NNModelling
+Terminal=false
+Type=Application
+Categories=Science;
+StartupNotify=true
+StartupWMClass=NNModelling

@@ -17,6 +17,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import ProjectStart from "./components/ProjectStart.svelte";
   import TrainingLogWindow from "./components/TrainingLogWindow.svelte";
   import type { ProjectWorkspaceSession } from "./project-workspace";
+  import { projectWorkspaceForHost } from "./project-workspace/desktop";
   import { createPathProjectSession, type ProjectPathPayload } from "./project-workspace/path";
   import { BrowserRPCHandler, type ProjectRPCBridge } from "./sync/BrowserRPCHandler";
   import { TrainingController } from "./training/controller";
@@ -26,6 +27,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let workspaceSession = $state<ProjectWorkspaceSession | null>(null);
   let workspaceError = $state<string | null>(null);
   let readyWaiter: { resolve: () => void; reject: (error: Error) => void; previous: ProjectWorkspaceSession | null } | undefined;
+  const hostWorkspace = projectWorkspaceForHost();
 
   const projectBridge: ProjectRPCBridge = {
     create: (payload) => activatePathProject(payload),
@@ -33,7 +35,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   };
   const trainingController = new TrainingController();
   const rpcHandler = new BrowserRPCHandler(undefined, undefined, undefined, trainingController, projectBridge);
-  rpcHandler.connect();
+  // Electron does not ship the browser-backed MCP WebSocket listener. The
+  // desktop host remains a local editor; web keeps the existing MCP behavior.
+  if (!hostWorkspace.desktop) rpcHandler.connect();
 
   function handleWorkspaceOpen(session: ProjectWorkspaceSession): void {
     workspaceError = null;
@@ -92,6 +96,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       </div>
     {/key}
   {:else}
-    <ProjectStart onOpen={handleWorkspaceOpen} initialError={workspaceError} />
+    <ProjectStart workspaceAdapter={hostWorkspace.adapter} onOpen={handleWorkspaceOpen} initialError={workspaceError} />
   {/if}
 {/if}
