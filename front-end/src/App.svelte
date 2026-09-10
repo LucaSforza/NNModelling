@@ -35,9 +35,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   };
   const trainingController = new TrainingController();
   const rpcHandler = new BrowserRPCHandler(undefined, undefined, undefined, trainingController, projectBridge);
-  // Electron does not ship the browser-backed MCP WebSocket listener. The
-  // desktop host remains a local editor; web keeps the existing MCP behavior.
-  if (!hostWorkspace.desktop) rpcHandler.connect();
+  // Both web and desktop renderers connect to the external MCP WebSocket
+  // server; the renderer remains the sole owner of live diagram state.
+  rpcHandler.connect();
 
   function handleWorkspaceOpen(session: ProjectWorkspaceSession): void {
     workspaceError = null;
