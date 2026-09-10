@@ -3,24 +3,31 @@ set shell := ["bash", "-cu"]
 backend_dir := justfile_directory()
 converted_dir := backend_dir / ".."
 valkey_data_dir := converted_dir / "valkey-data"
+backend_secrets_dir := converted_dir / "backend-secrets"
 valkey_port := env_var_or_default("NNM_VALKEY_PORT", "6379")
 api_host := env_var_or_default("NNM_BACKEND_HOST", "127.0.0.1")
 api_port := env_var_or_default("NNM_BACKEND_PORT", "8000")
 valkey_url := "valkey://127.0.0.1:" + valkey_port + "/0"
 uv_cache_dir := env_var_or_default("UV_CACHE_DIR", "/tmp/nnmodelling-uv-cache")
-admin_token_file := env_var_or_default("NNM_ADMIN_TOKEN_FILE", valkey_data_dir / "admin.token")
+admin_token_file := env_var_or_default("NNM_ADMIN_TOKEN_FILE", backend_secrets_dir / "admin.token")
 admin_url := env_var_or_default("NNM_ADMIN_URL", "http://127.0.0.1:" + api_port)
 container_engine := env_var_or_default("NNM_CONTAINER_ENGINE", "podman")
 container_image := env_var_or_default("NNM_CONTAINER_IMAGE", "")
 controller_socket := env_var_or_default("NNM_CONTAINER_CONTROLLER_SOCKET", "/tmp/nnm-controller/controller.sock")
-controller_token_file := env_var_or_default("NNM_CONTAINER_CONTROLLER_TOKEN_FILE", valkey_data_dir / "controller.token")
+controller_token_file := env_var_or_default("NNM_CONTAINER_CONTROLLER_TOKEN_FILE", backend_secrets_dir / "controller.token")
 container_data_root := env_var_or_default("NNM_CONTAINER_DATA_ROOT", converted_dir / "data")
-wandb_credentials_file := env_var_or_default("NNM_WANDB_CREDENTIAL_FILE", valkey_data_dir / "wandb-credentials.json")
+wandb_credentials_file := env_var_or_default("NNM_WANDB_CREDENTIAL_FILE", backend_secrets_dir / "wandb-credentials.json")
 wandb_network := env_var_or_default("NNM_WANDB_NETWORK", "")
 wandb_proxy_url := env_var_or_default("NNM_WANDB_PROXY_URL", "")
 
 default:
     @just --list
+
+# Build the package worker from this checkout and print its immutable reference.
+# The printed digest, not the mutable local tag, is the value for NNM_CONTAINER_IMAGE.
+worker-build tag="local":
+    podman build --file "{{backend_dir}}/Dockerfile" --tag "localhost/nnm-worker:{{tag}}" "{{converted_dir}}"
+    @podman image inspect --format '{{ "{{" }}.Digest{{ "}}" }}' "localhost/nnm-worker:{{tag}}" | sed 's#^#NNM_CONTAINER_IMAGE=localhost/nnm-worker@#'
 
 # Start Valkey in the foreground with persistent local data.
 valkey:
@@ -43,7 +50,7 @@ backend-unsafe-unlimited-dataset-size: admin-init
 # Start the trusted container controller separately. Only this process needs
 # access to the local Podman/Docker socket; FastAPI connects through its RPC.
 controller: admin-init
-    mkdir -p "$(dirname '{{controller_socket}}')" "{{valkey_data_dir}}"; if [[ ! -s "{{controller_token_file}}" ]]; then (umask 077; python -c 'import secrets; print(secrets.token_hex(32))' > "{{controller_token_file}}"); fi; cd "{{converted_dir}}"; UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" NNM_WANDB_NETWORK="{{wandb_network}}" NNM_WANDB_PROXY_URL="{{wandb_proxy_url}}" uv run python -m backend.container_controller serve "{{controller_socket}}" @"{{controller_token_file}}" "{{converted_dir}}/jobs" "{{converted_dir}}/jobs" "{{container_engine}}"
+    mkdir -p "$(dirname '{{controller_socket}}')" "{{backend_secrets_dir}}"; if [[ ! -s "{{controller_token_file}}" ]]; then (umask 077; python -c 'import secrets; print(secrets.token_hex(32))' > "{{controller_token_file}}"); fi; cd "{{converted_dir}}"; UV_CACHE_DIR="{{uv_cache_dir}}" PYTHONPATH=src NNM_CONTAINER_DATA_ROOT="{{container_data_root}}" NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" NNM_WANDB_NETWORK="{{wandb_network}}" NNM_WANDB_PROXY_URL="{{wandb_proxy_url}}" uv run python -m backend.container_controller serve "{{controller_socket}}" @"{{controller_token_file}}" "{{converted_dir}}/jobs" "{{converted_dir}}/jobs" "{{container_engine}}"
 
 # Configure the shared administrator-owned W&B account. The command prompts
 # for the key and never accepts it as an argument.
@@ -107,6 +114,13 @@ test:
 # Build and start the persistent Docker deployment.
 docker-up: admin-init
     NNM_CONTAINER_ENGINE="{{container_engine}}" NNM_CONTAINER_IMAGE="{{container_image}}" docker compose -f "{{backend_dir}}/docker-compose.yml" up --build
+
+# Start the standard local Podman Compose deployment. This builds the worker
+# first and passes its immutable digest to the backend services.
+# For non-standard user requirements, the backend administrator should invoke
+# `podman compose` directly instead of using this standard `just compose` path.
+compose: worker-build admin-init
+    mkdir -p "$(dirname '{{controller_socket}}')" "{{backend_secrets_dir}}" "{{converted_dir}}/jobs" "{{container_data_root}}"; if [[ ! -s "{{controller_token_file}}" ]]; then (umask 077; python -c 'import secrets; print(secrets.token_hex(32))' > "{{controller_token_file}}"); fi; systemctl --user start podman.socket; NNM_CONTAINER_IMAGE="$(podman image inspect --format '{{ "{{" }}.Digest{{ "}}" }}' localhost/nnm-worker:local | sed 's#^#localhost/nnm-worker@#')" NNM_HOST_VALKEY_DATA="{{valkey_data_dir}}" NNM_HOST_JOBS="{{converted_dir}}/jobs" NNM_HOST_DATA="{{container_data_root}}" NNM_HOST_ADMIN_TOKEN="{{admin_token_file}}" NNM_HOST_CONTROLLER_TOKEN="{{controller_token_file}}" NNM_WANDB_CREDENTIAL_FILE="{{wandb_credentials_file}}" podman compose --project-name nnm-backend -f "{{backend_dir}}/docker-compose.yml" up --build -d
 
 # Stop the Docker deployment without deleting its volumes.
 docker-down:

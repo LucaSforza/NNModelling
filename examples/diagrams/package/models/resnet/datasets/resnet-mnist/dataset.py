@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import gzip
+import json
 from pathlib import Path
-import struct
 from typing import Any
 
 import torch
@@ -34,33 +33,38 @@ def _validate_parameters(parameters: Mapping[str, object]) -> dict[str, object]:
     return values
 
 
-def _read_idx_images(path: Path) -> torch.Tensor:
-    with gzip.open(path, "rb") as archive:
-        payload = archive.read()
-    if len(payload) < 16:
-        raise ValueError(f"invalid IDX image archive: {path.name}")
-    magic, count, rows, columns = struct.unpack(">IIII", payload[:16])
-    if magic != 2051 or rows != 28 or columns != 28:
-        raise ValueError(f"unsupported IDX image archive: {path.name}")
-    expected = count * rows * columns
-    if len(payload) != 16 + expected:
-        raise ValueError(f"truncated IDX image archive: {path.name}")
-    raw = bytearray(payload[16:])
-    images = torch.frombuffer(raw, dtype=torch.uint8).clone().reshape(count, rows, columns)
-    return images.to(dtype=torch.float32).div_(255.0).sub_(MEAN).div_(STD).unsqueeze(1)
+def _read_jsonl(path: Path) -> tuple[torch.Tensor, torch.Tensor]:
+    image_bytes = bytearray()
+    labels: list[int] = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSON in {path.name} at line {line_number}") from exc
+            if not isinstance(record, Mapping):
+                raise TypeError(f"record in {path.name} at line {line_number} must be an object")
 
+            image = record.get("image")
+            if (
+                not isinstance(image, list)
+                or len(image) != 28 * 28
+                or any(isinstance(pixel, bool) or not isinstance(pixel, int) or not 0 <= pixel <= 255 for pixel in image)
+            ):
+                raise ValueError(f"record in {path.name} at line {line_number} has an invalid 28x28 image")
+            label = record.get("label")
+            if isinstance(label, bool) or not isinstance(label, int) or not 0 <= label <= 9:
+                raise ValueError(f"record in {path.name} at line {line_number} has an invalid label")
+            image_bytes.extend(image)
+            labels.append(label)
 
-def _read_idx_labels(path: Path) -> torch.Tensor:
-    with gzip.open(path, "rb") as archive:
-        payload = archive.read()
-    if len(payload) < 8:
-        raise ValueError(f"invalid IDX label archive: {path.name}")
-    magic, count = struct.unpack(">II", payload[:8])
-    if magic != 2049:
-        raise ValueError(f"unsupported IDX label archive: {path.name}")
-    if len(payload) != 8 + count:
-        raise ValueError(f"truncated IDX label archive: {path.name}")
-    return torch.frombuffer(bytearray(payload[8:]), dtype=torch.uint8).clone().to(dtype=torch.int64)
+    if not image_bytes:
+        raise ValueError(f"MNIST JSONL is empty: {path.name}")
+    image_tensor = torch.frombuffer(image_bytes, dtype=torch.uint8).clone().reshape(-1, 28, 28)
+    normalized = image_tensor.to(dtype=torch.float32).div_(255.0).sub_(MEAN).div_(STD).unsqueeze(1)
+    return normalized, torch.tensor(labels, dtype=torch.int64)
 
 
 class _ClassificationDataset(Dataset[dict[str, dict[str, torch.Tensor]]]):
@@ -85,10 +89,8 @@ class ResNetMNIST:
 
     def __init__(self, resource_root: Path, batch_size: int, num_workers: int, train_size: float) -> None:
         data_root = Path(resource_root) / "data"
-        train_images = _read_idx_images(data_root / "train-images-idx3-ubyte.gz")
-        train_labels = _read_idx_labels(data_root / "train-labels-idx1-ubyte.gz")
-        test_images = _read_idx_images(data_root / "t10k-images-idx3-ubyte.gz")
-        test_labels = _read_idx_labels(data_root / "t10k-labels-idx1-ubyte.gz")
+        train_images, train_labels = _read_jsonl(data_root / "train.jsonl")
+        test_images, test_labels = _read_jsonl(data_root / "test.jsonl")
         self.train_dataset = _ClassificationDataset(train_images, train_labels)
         self.test_dataset = _ClassificationDataset(test_images, test_labels)
         self.batch_size = batch_size

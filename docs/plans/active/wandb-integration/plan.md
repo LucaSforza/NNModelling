@@ -2,7 +2,7 @@
 id: wandb-integration
 kind: plan
 status: in_progress
-updated: 2026-09-07
+updated: 2026-09-08
 areas:
   - architecture
   - backend
@@ -47,6 +47,9 @@ historical evidence rather than an executable implementation.
   offline-run downloads;
 - removal of the worker rejection, log-scraping URL discovery, and any reachable
   W&B/Hydra/Lightning compatibility branch found during implementation.
+- classification-only W&B observability that matches the standalone
+  `examples/pytorch/transformer.spam.py` metrics, test report, confusion matrix,
+  and elapsed training time while retaining loss-only logging for every dataset.
 
 ## Non-goals
 
@@ -57,6 +60,7 @@ historical evidence rather than an executable implementation.
   the model wheel as a W&B Artifact;
 - retaining a second Lightning, Hydra, or NNTree logging implementation;
 - deleting archived documentation merely because it describes historical code.
+- classification telemetry for a dataset that does not declare `classes`.
 
 ## Decisions and invariants
 
@@ -82,6 +86,23 @@ historical evidence rather than an executable implementation.
   configuration and per-epoch `train/loss` and `validation/loss`, plus final
   best loss, completed epochs, and parameter count. W&B failures propagate and
   fail an explicitly online job.
+- A dataset with `classes` is a classification dataset.  The worker derives one
+  classification target only when the declared batch has exactly one target
+  slot and it is either integral `[B]` class indices or numeric `[B, C]`
+  class scores, where `C == classes.count`; the latter is reduced with
+  `argmax`.  Other class metadata/target combinations fail before the epoch
+  loop rather than guessing a target.  Prediction logits must be `[B, C]` and
+  are reduced with `argmax`; this is validation of the existing package
+  prediction program, not loss or package-ID inference.
+- Every training mode keeps the current epoch loss curves.  For a classification
+  dataset, W&B additionally receives per-epoch train/validation accuracy,
+  precision, recall, F1, specificity (binary only), macro precision, macro
+  recall and macro F1.  It receives final test values for the same applicable
+  metrics, test example count, `training/seconds`, and a labelled W&B confusion
+  matrix.  The raw integer matrix and its rows=actual/columns=predicted
+  convention are retained in the run summary.  Binary precision/recall/F1 use
+  class index 1, matching the transformer example; multiclass runs expose the
+  macro metrics and matrix without inventing a positive class.
 - The worker atomically writes `wandb-run.json`. Backend status and SSE consume
   that structured manifest; stdout/stderr URL scraping is removed.
 - Offline W&B files live below the existing per-job artifact directory. Their
@@ -143,11 +164,13 @@ and log-regex discovery are removed rather than retained as a second variant.
 | [T01](tasks/T01-worker-and-credentials.md) | backend | — | T02, T03 | worker, credential module, dependency and focused tests | One worker tracker and safe administrator credential lifecycle |
 | [T02](tasks/T02-controller-and-api.md) | operations | — | T01, T03 | controller, executor, backend API/manager and focused tests | Controlled online capability and structured backend lifecycle |
 | [T03](tasks/T03-frontend.md) | frontend | — | T01, T02 | training frontend and focused tests | Typed connection-aware W&B UI and downloads |
-| [T04](tasks/T04-integration-and-verification.md) | integration | T01, T02, T03 | — | knowledge, operations docs, plan state | Integrated real-path proof and durable documentation |
+| [T05](tasks/T05-classification-tracker.md) | backend | T01 | — | W&B tracker and focused tests | Classification-aware tracker API with no effect on loss-only runs |
+| [T06](tasks/T06-classification-worker.md) | backend | T05 | — | package worker and focused tests | Data-driven classification metrics, test evaluation, and timing |
+| [T04](tasks/T04-integration-and-verification.md) | integration | T01, T02, T03, T05, T06 | — | knowledge, operations docs, plan state | Integrated real-path proof and durable documentation |
 
-The three implementation tasks may run concurrently because this plan freezes
-their shared JSON, CLI, worker-stdin, status, event, and download contracts and
-their write scopes do not overlap.
+T05 and T06 are intentionally sequential: the worker consumes the narrow
+classification-tracking API established by T05.  They do not alter the already
+completed controller or frontend write scopes.
 
 ## Integration and review gates
 
@@ -161,6 +184,11 @@ their write scopes do not overlap.
   digest-verified by the browser.
 - Dependency and content searches must find no reachable W&B logger other than
   the package-native tracker and no remaining `wandb_url` log-scraping path.
+- A dataset without `classes` must retain exactly its present loss logging and
+  must neither execute a prediction pass nor emit classification keys.
+- Classification derives only from dataset metadata, target tensor contracts and
+  the explicit prediction program; it must not inspect objective Python,
+  output-shape heuristics for loss selection, or package identifiers.
 
 ## Acceptance criteria
 
@@ -179,6 +207,9 @@ their write scopes do not overlap.
 - [ ] No wheel or dataset is uploaded as a W&B Artifact.
 - [ ] The regex URL detector and every reachable deprecated W&B implementation
       are removed.
+- [ ] A classified run shows transformer-parity epoch metrics, a final test
+      report, labelled confusion matrix and elapsed seconds; a non-classified
+      run still shows its loss curves only.
 - [ ] Existing backend fast tests, frontend checks, package-only guard, and real
       user-facing offline path pass.
 
@@ -193,11 +224,14 @@ pnpm --dir front-end guard:package-only
 git diff --check
 ```
 
-Exercise one offline training job through the live editor/backend/controller,
-download the resulting archive through the UI, verify its response digest, and
-confirm it contains a W&B `.wandb` run file. Exercise online capability rejection
-without credentials. A real Cloud/self-hosted online smoke test is conditional
-on an administrator-provided test credential and configured egress; never add a
+Exercise one offline classification training job through the live
+editor/backend/controller, download the resulting archive through the UI,
+verify its response digest, and confirm it contains a W&B `.wandb` run file,
+the loss curves, classification metrics, test report, confusion matrix and
+elapsed seconds. Exercise an offline non-classification job to prove that it
+emits loss only. Exercise online capability rejection without credentials. A
+real Cloud/self-hosted online smoke test is conditional on an
+administrator-provided test credential and configured egress; never add a
 credential to repository fixtures.
 
 ## Knowledge and archive impact

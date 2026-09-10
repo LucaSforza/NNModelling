@@ -12,7 +12,7 @@ import {
 export type ProjectPathPayload = {
   readonly projectPath: string
   readonly modelJson: string
-  readonly resources: Record<string, { readonly encoding: "utf8" | "base64"; readonly data: string }>
+  readonly resources: Record<string, { readonly encoding: "utf8" | "base64" | "base64+gzip"; readonly data: string }>
 }
 type RemoteResource = ProjectPathPayload["resources"][string]
 
@@ -23,12 +23,12 @@ export type ProjectPathOperation =
 type PersistProjectPathOperation = (operation: ProjectPathOperation) => Promise<void>
 
 /** Browser-local session for an MCP-selected path; persistence is notified to the MCP owner. */
-export function createPathProjectSession(
+export async function createPathProjectSession(
   payload: ProjectPathPayload,
   persistRemote: PersistProjectPathOperation,
-): ProjectWorkspaceSession {
+): Promise<ProjectWorkspaceSession> {
   const files = new Map<string, string | Uint8Array>()
-  for (const [name, resource] of Object.entries(payload.resources)) files.set(name, decode(resource))
+  await Promise.all(Object.entries(payload.resources).map(async ([name, resource]) => files.set(name, await decode(resource))))
   const directories = new Set<string>([""])
   for (const name of files.keys()) {
     const parts = name.split("/")
@@ -50,9 +50,13 @@ export function createPathProjectSession(
   }
 }
 
-function decode(resource: RemoteResource): string | Uint8Array {
+async function decode(resource: RemoteResource): Promise<string | Uint8Array> {
   if (resource.encoding === "utf8") return resource.data
   const bytes = Uint8Array.from(atob(resource.data), (value) => value.charCodeAt(0))
+  if (resource.encoding === "base64+gzip") {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))
+    return new Uint8Array(await new Response(stream).arrayBuffer())
+  }
   return bytes
 }
 

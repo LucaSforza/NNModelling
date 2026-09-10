@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # Remote-training architecture
@@ -115,6 +115,19 @@ worker's stdin and closes the pipe before training starts. The key is absent
 from the engine command, RPC request, job document, mounts, logs, artifacts,
 events and HTTP responses. An online SDK failure fails the job; it never falls
 back to offline or disabled.
+
+The proxy allowlist is destination-based and is not limited to the configured
+W&B API host. In the currently verified W&B Cloud flow, API traffic uses
+`api.wandb.ai` while run-file upload may use `storage.googleapis.com`.
+Operators must derive any additional destination from sanitized proxy or SDK
+logs, add only the required host, and retain default-deny behavior for all
+other egress. These observed Cloud endpoints are operational evidence, not a
+permanent exhaustive vendor contract.
+
+A fresh worker heartbeat plus repeated upload messages means finalization may
+still be active. Optional SDK telemetry timeouts do not by themselves make a
+run unsuccessful; the terminal backend state and the structured W&B and model
+package manifests remain the acceptance boundary.
 
 The worker records `train/loss` and `validation/loss` per epoch and final best
 loss, completed epochs and parameter count. It derives a new run name from the

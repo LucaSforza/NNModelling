@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-12
+updated: 2026-09-09
 ---
 
 # Local development stack
@@ -26,8 +26,62 @@ helper. Direct browser work follows `.agents/skills/chrome-direct/SKILL.md`.
 
 From `converted/`, run persistent Valkey and FastAPI with `PYTHONPATH=src` and
 `NNM_VALKEY_URL` pointing to the selected local Valkey database. Deployment
-configuration is under `converted/backend/`; Docker Compose is the supported
-container path.
+configuration is under `converted/backend/`; the persistent container path is
+`converted/backend/docker-compose.yml`. Rootless Podman is the standard local
+engine, so use `podman compose` on this host. Docker Compose remains a
+compatible alternative only when the selected engine and socket configuration
+are explicitly adjusted.
+
+### Persistent backend Compose
+
+The standard repository-root entrypoint is:
+
+```bash
+just --justfile converted/backend/justfile compose
+```
+
+It builds the worker first, derives an immutable digest reference, starts the
+rootless Podman socket, and starts the `valkey`, `controller`, and `backend`
+services in the `nnm-backend` Compose project. The backend service uses
+`--unsafe-unlimited-dataset-size`; file-count and archive-safety checks still
+apply. The controller is the only service mounted with the host Podman socket;
+FastAPI reaches it through the authenticated `controller-socket` volume.
+
+The Compose file deliberately binds the host job, dataset, data, Valkey and
+secret paths because worker containers are created by host Podman and must see
+the same paths. Tokens and W&B credentials live under the owner-only
+`converted/backend-secrets/` directory, separate from `valkey-data/`; the
+Valkey image may change ownership of its data directory during startup.
+`NNM_CONTAINER_IMAGE` is required and must be a digest-pinned worker image. The
+standard `just compose` recipe supplies the required
+`NNM_HOST_VALKEY_DATA`, `NNM_HOST_JOBS`, `NNM_HOST_DATA`,
+`NNM_HOST_ADMIN_TOKEN`, and `NNM_HOST_CONTROLLER_TOKEN` values.
+
+The rootless Podman deployment uses `userns_mode: keep-id` so the non-root
+controller process retains access to the invoking user's socket and owner-only
+secret files. SELinux labeling is disabled only for the trusted controller
+container that holds the host-administrator socket capability. Its healthcheck
+requires both the authenticated controller socket and a successful Podman API
+request; a present controller socket alone is not considered healthy.
+
+For non-standard paths, dataset limits, Origins, engine settings, or W&B
+settings, the backend administrator should invoke `podman compose` directly
+with explicit `NNM_*` variables rather than using the standard `just compose`
+wrapper. Validate expansion before a start:
+
+```bash
+podman compose --project-name nnm-backend \
+  -f converted/backend/docker-compose.yml config
+podman compose --project-name nnm-backend \
+  -f converted/backend/docker-compose.yml up --build -d
+```
+
+The W&B network and allowlisting proxy are operator-managed external
+dependencies; Compose only passes their configured name and URL to the
+controller. The W&B credential file is mounted read-only into the controller
+and must remain owner-only. Never put tokens or API keys in the Compose file,
+command line, or logs. Stop the deployment with `podman compose ... down`
+without `--volumes`, because persistent Valkey and job state are host-mounted.
 
 Important configuration boundaries include:
 

@@ -12,6 +12,7 @@ dependencies = [
   "uvicorn[standard]>=0.30.0",
   "valkey>=6.0.0",
   "numpy>=1.24.0",
+  "pillow>=11.0.0",
   "safetensors>=0.7.0",
   "wandb>=0.22.3",
 ]

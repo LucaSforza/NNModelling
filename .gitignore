@@ -1,5 +1,4 @@
 *.bak_*
-.agents/
 .claude/
 .qwen/
 skills-lock.json

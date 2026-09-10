@@ -58,6 +58,7 @@ export interface TrainingConfig {
   accelerator: "auto" | "cpu" | "cuda";
   patience: number;
   minDelta: number;
+  logEveryNSteps: number;
   wandbProject: string;
   wandbMode: WandbMode;
   cpu: number;
@@ -149,6 +150,7 @@ const DEFAULT_CONFIG: TrainingConfig = {
   accelerator: "auto",
   patience: 3,
   minDelta: 0,
+  logEveryNSteps: 10,
   wandbProject: "NeuralNetworks",
   wandbMode: "disabled",
   cpu: 4,
@@ -494,7 +496,13 @@ export class TrainingController {
         dataset: { reference: datasetReference, parameters: datasetParameters(dataset, config.datasetParams) },
         seed: config.seed,
         optimizer: { target: config.optimizerTarget, learning_rate: config.learningRate },
-        trainer: { max_epochs: config.maxEpochs, accelerator: config.accelerator, patience: config.patience, min_delta: config.minDelta },
+        trainer: {
+          max_epochs: config.maxEpochs,
+          accelerator: config.accelerator,
+          patience: config.patience,
+          min_delta: config.minDelta,
+          log_every_n_steps: config.logEveryNSteps,
+        },
         wandb: { project: config.wandbProject, mode: config.wandbMode },
       },
       resources: {
@@ -701,6 +709,7 @@ function validateConfig(
   if (!["auto", "cpu", "cuda"].includes(config.accelerator)) throw invalid("accelerator", "valore non supportato");
   integerAtLeast(config.patience, "patience", 0);
   nonNegative(config.minDelta, "minDelta");
+  integerAtLeast(config.logEveryNSteps, "logEveryNSteps", 1);
   if (!["disabled", "offline", "online"].includes(config.wandbMode)) throw invalid("wandbMode", "valore non supportato");
   integerAtLeast(config.cpu, "cpu", 0);
   positive(config.memoryGb, "memoryGb");

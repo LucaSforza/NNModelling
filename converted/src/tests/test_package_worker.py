@@ -11,10 +11,11 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from dataset.contracts import DatasetBatchContract, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
+from dataset.contracts import DatasetBatchContract, DatasetClassMetadata, DatasetDefinition, DatasetReference, TensorSlotContract, TrainingBatch
 from package_runtime import PackageValidationError
 from package_worker import (
     _dataset_loaders,
+    _ClassificationAccumulator,
     _materialize_dataset_inputs,
     _normalized_training,
     _validate_graph_bindings,
@@ -70,11 +71,15 @@ def test_project_dataset_loader_supports_dataclass_module_definitions(tmp_path: 
     assert dataset.division() == {}
 
 
-def test_run_rejects_missing_package(tmp_path: Path) -> None:
+def test_run_reports_start_before_rejecting_missing_package(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     input_path = tmp_path / "job.json"
     input_path.write_text(json.dumps({"training": {}}), encoding="utf-8")
     with pytest.raises(ValueError, match="package is required"):
         run(input_path, tmp_path / "artifacts")
+    assert capsys.readouterr().out == "Training iniziato\n"
 
 
 def test_training_contract_requires_opaque_dataset_reference() -> None:
@@ -103,6 +108,7 @@ def test_worker_accepts_frozen_wandb_modes_and_rejects_controller_fields() -> No
 def test_worker_reads_bounded_credentials_before_run_and_closes_stdin(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     payload = json.dumps(
         {
@@ -139,6 +145,9 @@ def test_worker_reads_bounded_credentials_before_run_and_closes_stdin(
 
     assert captured["credentials"].api_key == "test-secret"
     assert stdin.closed
+    assert capsys.readouterr().out == (
+        f"Training completed | result={tmp_path / 'package-worker-result.json'}\n"
+    )
 
 
 def test_training_passes_named_batch_to_objective(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,6 +174,99 @@ def test_training_passes_named_batch_to_objective(tmp_path: Path, monkeypatch: p
     assert torch.equal(model.targets[0], torch.tensor([1, 0], dtype=torch.long))
 
 
+def test_classification_worker_logs_metrics_and_final_test(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    definition = DEFINITION.model_copy(update={"classes": DatasetClassMetadata(count=2, names=("ham", "spam"))})
+    batches = [TrainingBatch({"image": torch.tensor([[1.0], [-1.0]])}, {"label": torch.tensor([1, 0])})]
+
+    class Dataset:
+        def division(self):
+            loader = DataLoader(batches, batch_size=None)
+            return {"train": loader, "validation": loader, "test": loader}
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(()))
+
+        def objective(self, inputs, targets):
+            return (inputs["image"].mean() * self.weight - targets["label"].float().mean()).square()
+
+        def prediction(self, inputs):
+            value = inputs["image"][:, 0] * self.weight
+            return torch.stack((-value, value), dim=1)
+
+    class Tracker:
+        def __init__(self):
+            self.epochs = []
+            self.steps = []
+            self.final = None
+        def log_epoch(self, *args, **kwargs):
+            self.epochs.append(kwargs)
+        def log_step_loss(self, split, step, loss):
+            self.steps.append((split, step, loss))
+        def finish(self, **kwargs):
+            self.final = kwargs
+        def abort(self):
+            raise AssertionError("unexpected tracker abort")
+
+    tracker = Tracker()
+    monkeypatch.setattr("package_worker.resolve_dataset", lambda _training: (Dataset(), definition, REFERENCE, {}))
+    monkeypatch.setattr("package_worker.create_tracker", lambda *args, **kwargs: tracker)
+    clock = iter((10.0, 11.0, 13.0, 15.0))
+    monkeypatch.setattr("package_worker.time.monotonic", lambda: next(clock))
+    summary = train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1, "patience": 0, "log_every_n_steps": 1}}, "package": training_package()}, tmp_path)
+
+    expected_epoch_metrics = {
+        "accuracy",
+        "precision",
+        "recall",
+        "f1",
+        "specificity",
+        "macro_precision",
+        "macro_recall",
+        "macro_f1",
+    }
+    assert set(tracker.epochs[0]["train_classification"]) == expected_epoch_metrics
+    assert set(tracker.epochs[0]["validation_classification"]) == expected_epoch_metrics
+    assert tracker.epochs[0]["train_classification"]["accuracy"] == 1.0
+    assert tracker.epochs[0]["epoch_seconds"] == 2.0
+    assert tracker.steps == [("train", 1, 0.25), ("validation", 1, 0.25)]
+    assert tracker.final["classification"]["labels"] == ["ham", "spam"]
+    assert tracker.final["classification"]["confusion_matrix"] == [[1, 0], [0, 1]]
+    assert summary["classification"]["training_seconds"] >= 0
+    assert capsys.readouterr().out == (
+        "Epoch 1/1 | duration=2.00s | train_loss=0.250000 | val_loss=0.250000\n"
+    )
+
+
+def test_classification_worker_rejects_invalid_prediction_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    definition = DEFINITION.model_copy(update={"classes": DatasetClassMetadata(count=2)})
+    batch = TrainingBatch({"image": torch.ones(1, 1)}, {"label": torch.zeros(1, dtype=torch.long)})
+    class Dataset:
+        def division(self):
+            loader = DataLoader([batch], batch_size=None)
+            return {"train": loader, "validation": loader, "test": loader}
+    class Model(torch.nn.Module):
+        def objective(self, *_args):
+            return torch.ones((), requires_grad=True)
+        def prediction(self, _inputs):
+            return torch.ones(1)
+    monkeypatch.setattr("package_worker.resolve_dataset", lambda _training: (Dataset(), definition, REFERENCE, {}))
+    with pytest.raises(ValueError, match="prediction must return logits"):
+        train(Model(), {"training": {"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "trainer": {"max_epochs": 1}}, "package": training_package()}, tmp_path)
+
+
+def test_multiclass_metrics_expose_only_macro_variants() -> None:
+    accumulator = _ClassificationAccumulator(3)
+    accumulator.add(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 1]))
+    metrics = accumulator.metrics(binary=False)
+    assert set(metrics) == {"accuracy", "macro_precision", "macro_recall", "macro_f1"}
+
+
 def test_training_propagates_typed_missing_objective_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class RegisteredDataset:
         def division(self):
@@ -189,7 +291,13 @@ def test_loader_settings_stay_inside_dataset_parameters() -> None:
         _normalized_training({"dataset": {"reference": REFERENCE.model_dump(), "parameters": {}}, "batch_size": 7})
     normalized = _normalized_training({"dataset": {"reference": REFERENCE.model_dump(), "parameters": {"batch_size": 64}}, "trainer": {"max_epochs": 3, "patience": 2}})
     assert normalized["dataset"]["parameters"] == {"batch_size": 64}
-    assert normalized["trainer"] == {"max_epochs": 3, "patience": 2, "accelerator": "auto", "min_delta": 0.0}
+    assert normalized["trainer"] == {
+        "max_epochs": 3,
+        "patience": 2,
+        "accelerator": "auto",
+        "min_delta": 0.0,
+        "log_every_n_steps": 10,
+    }
 
 
 def test_dataset_loaders_reject_legacy_tuple_division() -> None:

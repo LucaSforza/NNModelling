@@ -6,7 +6,9 @@ import argparse
 import json
 import random
 import sys
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +19,7 @@ from backend.wandb_credentials import WandbCredentials, read_credentials_stdin
 from package_runtime import CompiledPrograms, PackageValidationError, compile_package_graph
 from dataset.contracts import DatasetDefinition, TensorSlotContract, TrainingBatch, normalize_training_batch
 from training.datasets import resolve_dataset
-from training.wandb_tracking import create_tracker, normalize_wandb_config
+from training.wandb_tracking import CLASSIFICATION_METRICS, create_tracker, normalize_wandb_config
 
 
 def run(
@@ -28,6 +30,7 @@ def run(
 ) -> dict[str, Any]:
     """Compile the submitted graph and execute its declared training task."""
 
+    print("Training iniziato", flush=True)
     request = json.loads(input_path.read_text(encoding="utf-8"))
     package = request.get("package")
     if not isinstance(package, dict):
@@ -77,12 +80,16 @@ def train(
 
     device = _training_device(training["trainer"]["accelerator"])
     model.to(device)
+    classification = _classification_spec(model, definition, train_loader, device)
     _preflight_training_batch(model, request.get("package", {}), definition, train_loader, device)
+    if classification is not None:
+        _preflight_prediction(model, train_loader, device, classification)
     model.train()
     optimizer = _optimizer(model, training.get("optimizer", {}))
     max_epochs = max(1, int(training.get("trainer", {}).get("max_epochs", 1)))
     patience = int(training["trainer"].get("patience", 3))
     min_delta = float(training["trainer"].get("min_delta", 0.0))
+    log_every_n_steps = int(training["trainer"]["log_every_n_steps"])
     history: list[dict[str, float]] = []
     best_validation = float("inf")
     stale_epochs = 0
@@ -92,9 +99,20 @@ def train(
         artifacts_path,
         credentials=wandb_credentials,
     )
+    started = time.monotonic()
+    final_test: dict[str, Any] | None = None
+    train_step = 0
+    validation_step = 0
+
+    def log_validation_step(loss: float) -> None:
+        nonlocal validation_step
+        validation_step += 1
+        if validation_step % log_every_n_steps == 0:
+            tracker.log_step_loss("validation", validation_step, loss)
 
     try:
         for epoch in range(max_epochs):
+            epoch_started = time.monotonic()
             total = 0.0
             batches = 0
             for raw_batch in train_loader:
@@ -105,15 +123,36 @@ def train(
                     raise RuntimeError("package training produced a non-finite loss")
                 loss.backward()
                 optimizer.step()
-                total += float(loss.detach())
+                batch_loss = float(loss.detach())
+                total += batch_loss
                 batches += 1
+                train_step += 1
+                if train_step % log_every_n_steps == 0:
+                    tracker.log_step_loss("train", train_step, batch_loss)
             train_loss = total / max(1, batches)
-            validation_loss = _evaluate(model, validation_loader, device)
+            train_metrics = _classification_pass(model, train_loader, device, classification) if classification else None
+            validation_loss, validation_metrics = _evaluate(
+                model,
+                validation_loader,
+                device,
+                classification,
+                on_batch_loss=log_validation_step,
+            )
             epoch_number = epoch + 1
+            epoch_seconds = max(0.0, time.monotonic() - epoch_started)
             history.append({"epoch": float(epoch_number), "train_loss": train_loss, "val_loss": validation_loss})
-            tracker.log_epoch(epoch_number, train_loss, validation_loss)
+            tracker.log_epoch(
+                epoch_number,
+                train_loss,
+                validation_loss,
+                epoch_seconds=epoch_seconds,
+                train_classification=_epoch_classification_metrics(train_metrics),
+                validation_classification=_epoch_classification_metrics(validation_metrics),
+                binary_classification=classification.binary if classification else True,
+            )
             print(
-                json.dumps({"epoch": epoch_number, "train_loss": train_loss, "val_loss": validation_loss}),
+                f"Epoch {epoch_number}/{max_epochs} | duration={epoch_seconds:.2f}s | "
+                f"train_loss={train_loss:.6f} | val_loss={validation_loss:.6f}",
                 flush=True,
             )
             if validation_loss < best_validation - min_delta:
@@ -140,6 +179,10 @@ def train(
             "config": training,
             "num_parameters": sum(parameter.numel() for parameter in model.parameters()),
         }
+        if classification is not None:
+            final_test = _classification_pass(model, _dataset_test_loader(dataset), device, classification)
+            elapsed = max(0.0, time.monotonic() - started)
+            summary["classification"] = {"test": final_test, "training_seconds": elapsed}
         (artifacts_path / "training-summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True),
             encoding="utf-8",
@@ -148,6 +191,8 @@ def train(
             best_loss=best_validation,
             completed_epochs=len(history),
             num_parameters=summary["num_parameters"],
+            classification=final_test,
+            training_seconds=(summary.get("classification") or {}).get("training_seconds"),
         )
         return summary
     except Exception:
@@ -200,6 +245,7 @@ def _normalized_training(raw: dict[str, Any]) -> dict[str, Any]:
     result["trainer"].setdefault("accelerator", "auto")
     result["trainer"].setdefault("patience", 3)
     result["trainer"].setdefault("min_delta", 0.0)
+    result["trainer"].setdefault("log_every_n_steps", 10)
     result.setdefault("seed", 0)
     result["wandb"] = normalize_wandb_config(raw.get("wandb"))
     if any(field in result for field in ("api_key", "credentials", "token", "password")):
@@ -221,6 +267,13 @@ def _validate_training_support(
         raise ValueError("W&B credentials are accepted only for online logging")
     _seed_from_training(training)
     trainer = training["trainer"]
+    log_every_n_steps = trainer.get("log_every_n_steps")
+    if (
+        isinstance(log_every_n_steps, bool)
+        or not isinstance(log_every_n_steps, int)
+        or log_every_n_steps < 1
+    ):
+        raise ValueError("trainer.log_every_n_steps must be a positive integer")
     accelerator = trainer.get("accelerator", "auto")
     if accelerator not in {"auto", "cpu", "cuda"}:
         raise ValueError(f"unsupported accelerator: {accelerator}")
@@ -242,17 +295,177 @@ def _optimizer(model: torch.nn.Module, config: Any) -> torch.optim.Optimizer:
     return optimizer_class(model.parameters(), lr=learning_rate)
 
 
+@dataclass(frozen=True)
+class ClassificationSpec:
+    """Validated dataset/prediction contract for classification telemetry."""
+
+    classes: int
+    labels: list[str]
+    target_name: str
+    one_hot: bool
+    binary: bool
+
+
+def _classification_spec(
+    model: CompiledPrograms,
+    definition: DatasetDefinition,
+    loader: Any,
+    device: torch.device,
+) -> ClassificationSpec | None:
+    """Validate class metadata and the target/logit contract before training."""
+    classes = definition.classes
+    if classes is None:
+        return None
+    if len(definition.batch.targets) != 1:
+        raise ValueError("classification datasets must declare exactly one target slot")
+    target_name, target = next(iter(definition.batch.targets.items()))
+    if len(target.shape) == 1 and (target.dtype.startswith("int") or target.dtype.startswith("uint")):
+        one_hot = False
+    elif len(target.shape) == 2 and target.shape[1] == classes.count and target.dtype != "bool":
+        one_hot = True
+    else:
+        raise ValueError("classification target must be integral [B] or numeric [B, C]")
+    labels = list(classes.names or tuple(str(index) for index in range(classes.count)))
+    spec = ClassificationSpec(classes.count, labels, target_name, one_hot, classes.count == 2)
+    _preflight_prediction(model, loader, device, spec)
+    return spec
+
+
+def _preflight_prediction(
+    model: CompiledPrograms, loader: Any, device: torch.device, spec: ClassificationSpec
+) -> None:
+    try:
+        batch = normalize_training_batch(next(iter(loader))).to(device)
+        logits = model.prediction(batch.inputs)
+    except StopIteration:
+        raise ValueError("classification dataset must provide a non-empty training loader")
+    except Exception as exc:
+        raise ValueError("classification prediction program is incompatible with the dataset") from exc
+    if not isinstance(logits, torch.Tensor) or logits.ndim != 2 or logits.shape[1] != spec.classes:
+        raise ValueError("classification prediction must return logits with shape [B, C]")
+    _target_indices(batch.targets[spec.target_name], spec)
+
+
+def _target_indices(target: torch.Tensor, spec: ClassificationSpec) -> torch.Tensor:
+    if spec.one_hot:
+        if target.ndim != 2 or target.shape[1] != spec.classes:
+            raise ValueError("classification target must have shape [B, C]")
+        indices = target.argmax(dim=1)
+    else:
+        if target.ndim != 1 or target.dtype == torch.bool or target.dtype.is_floating_point:
+            raise ValueError("classification class-index target must be integral [B]")
+        indices = target.to(dtype=torch.long)
+    if indices.numel() and (int(indices.min()) < 0 or int(indices.max()) >= spec.classes):
+        raise ValueError("classification target contains an out-of-range class index")
+    return indices
+
+
+def _classification_pass(
+    model: CompiledPrograms, loader: Any, device: torch.device, spec: ClassificationSpec
+) -> dict[str, Any]:
+    accumulator = _ClassificationAccumulator(spec.classes)
+    total_loss = 0.0
+    batches = 0
+    model.eval()
+    with torch.no_grad():
+        for raw_batch in loader:
+            batch = normalize_training_batch(raw_batch).to(device)
+            logits = model.prediction(batch.inputs)
+            if not isinstance(logits, torch.Tensor) or logits.ndim != 2 or logits.shape[1] != spec.classes:
+                raise ValueError("classification prediction must return logits with shape [B, C]")
+            targets = _target_indices(batch.targets[spec.target_name], spec)
+            if logits.shape[0] != targets.shape[0]:
+                raise ValueError("classification prediction and target batch sizes differ")
+            accumulator.add(targets, logits.argmax(dim=1))
+            total_loss += float(model.objective(batch.inputs, batch.targets))
+            batches += 1
+    model.train()
+    metrics = accumulator.metrics(binary=spec.binary)
+    metrics.update(
+        {
+            "loss": total_loss / max(1, batches),
+            "count": len(accumulator.actual),
+            "labels": spec.labels,
+            "actual": accumulator.actual,
+            "predicted": accumulator.predicted,
+            "confusion_matrix": accumulator.matrix,
+            "binary": spec.binary,
+        }
+    )
+    return metrics
+
+
+def _epoch_classification_metrics(values: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if values is None:
+        return None
+    return {name: values[name] for name in CLASSIFICATION_METRICS if name in values}
+
+
+class _ClassificationAccumulator:
+    def __init__(self, classes: int) -> None:
+        self.matrix = [[0 for _ in range(classes)] for _ in range(classes)]
+        self.actual: list[int] = []
+        self.predicted: list[int] = []
+
+    def add(self, actual: torch.Tensor, predicted: torch.Tensor) -> None:
+        for truth, prediction in zip(actual.detach().cpu().tolist(), predicted.detach().cpu().tolist()):
+            truth, prediction = int(truth), int(prediction)
+            self.actual.append(truth)
+            self.predicted.append(prediction)
+            self.matrix[truth][prediction] += 1
+
+    def metrics(self, *, binary: bool) -> dict[str, float]:
+        total = sum(map(sum, self.matrix))
+        accuracy = sum(self.matrix[i][i] for i in range(len(self.matrix))) / total if total else 0.0
+        precision, recall, f1 = [], [], []
+        for index, row in enumerate(self.matrix):
+            tp = row[index]
+            fp = sum(other[index] for other in self.matrix) - tp
+            fn = sum(row) - tp
+            p = tp / (tp + fp) if tp + fp else 0.0
+            r = tp / (tp + fn) if tp + fn else 0.0
+            precision.append(p)
+            recall.append(r)
+            f1.append(2 * p * r / (p + r) if p + r else 0.0)
+        result = {
+            "accuracy": accuracy,
+            "macro_precision": sum(precision) / len(precision),
+            "macro_recall": sum(recall) / len(recall),
+            "macro_f1": sum(f1) / len(f1),
+        }
+        if binary:
+            result.update({"precision": precision[1], "recall": recall[1], "f1": f1[1]})
+            tn, fp = self.matrix[0][0], self.matrix[0][1]
+            result["specificity"] = tn / (tn + fp) if tn + fp else 0.0
+        return result
+
+
+def _dataset_test_loader(dataset: Any) -> Any:
+    division = dataset.division()
+    return division["test"]
+
+
 @torch.no_grad()
-def _evaluate(model: CompiledPrograms, loader: Any, device: torch.device) -> float:
+def _evaluate(
+    model: CompiledPrograms,
+    loader: Any,
+    device: torch.device,
+    classification: "ClassificationSpec | None" = None,
+    *,
+    on_batch_loss: Callable[[float], None] | None = None,
+) -> tuple[float, dict[str, Any] | None]:
     model.eval()
     total = 0.0
     batches = 0
     for raw_batch in loader:
         batch = normalize_training_batch(raw_batch).to(device)
-        total += float(model.objective(batch.inputs, batch.targets))
+        batch_loss = float(model.objective(batch.inputs, batch.targets))
+        total += batch_loss
         batches += 1
+        if on_batch_loss is not None:
+            on_batch_loss(batch_loss)
     model.train()
-    return total / max(1, batches)
+    return total / max(1, batches), (_classification_pass(model, loader, device, classification) if classification else None)
 
 
 def _validate_graph_bindings(package: Any, definition: DatasetDefinition) -> None:
@@ -528,7 +741,8 @@ def main() -> None:
             credentials = read_credentials_stdin(stream)
         finally:
             sys.stdin.close()
-    print(json.dumps(run(args.input, args.artifacts, wandb_credentials=credentials), sort_keys=True), flush=True)
+    run(args.input, args.artifacts, wandb_credentials=credentials)
+    print(f"Training completed | result={args.artifacts / 'package-worker-result.json'}", flush=True)
 
 
 if __name__ == "__main__":

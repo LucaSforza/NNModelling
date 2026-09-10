@@ -37,6 +37,10 @@ reconfiguring anything.
   Treat that socket as host-administrator authority.
 - Worker images must be immutable digest references. Never silently use a
   mutable tag or a host-Python fallback.
+- When code or dependencies executed by the worker change, run
+  `just --justfile converted/backend/justfile worker-build`, then restart
+  FastAPI with the printed `NNM_CONTAINER_IMAGE` digest. Restarting a backend
+  alone deliberately preserves its previously configured worker image.
 - Disabled and offline W&B jobs use `--network none` and receive no credential.
   Online jobs require an operator-managed egress network, allowlisting proxy,
   and owner-only credential file delivered to the worker over stdin.
@@ -68,6 +72,51 @@ reconfiguring anything.
 6. **Finish safely.** Confirm terminal job state and artifacts, report only
    sanitized configuration, and leave unrelated services and user changes
    untouched.
+
+## Persistent Podman Compose deployment
+
+`converted/backend/docker-compose.yml` is the supported single-file
+instantiation for the persistent local backend. On this machine use Podman:
+`podman compose`, not `docker compose`. The file starts Valkey, the FastAPI
+service, and the trusted container controller; it does not create the
+operator-managed W&B egress network or proxy. Those must already exist when
+online W&B jobs are enabled.
+
+The standard path is:
+
+```text
+just --justfile converted/backend/justfile compose
+```
+
+That recipe builds the worker first, obtains its immutable image digest, starts
+the rootless Podman socket, and passes the host paths required by the backend
+and controller. It uses the unsafe-unlimited dataset-size mode and localhost
+Origins from the Compose defaults. Do not put tokens or W&B keys in the
+command line or Compose file.
+
+For a non-standard user requirement, the backend administrator should execute
+`podman compose` directly instead of using `just compose`, explicitly setting
+the needed `NNM_*` variables. At minimum, validate the expanded file before
+starting it:
+
+```text
+podman compose --project-name nnm-backend \
+  -f converted/backend/docker-compose.yml config
+podman compose --project-name nnm-backend \
+  -f converted/backend/docker-compose.yml up --build -d
+```
+
+The required host-path variables are `NNM_HOST_VALKEY_DATA`, `NNM_HOST_JOBS`,
+`NNM_HOST_DATA`, `NNM_HOST_ADMIN_TOKEN`, and
+`NNM_HOST_CONTROLLER_TOKEN`; `NNM_CONTAINER_IMAGE` must be a digest-pinned
+worker reference. Use `NNM_WANDB_CREDENTIAL_FILE`, `NNM_WANDB_NETWORK`, and
+`NNM_WANDB_PROXY_URL` only for the already-configured W&B integration. The
+controller is the only Compose service that receives the Podman socket; the
+backend talks to it through the authenticated controller socket.
+
+Inspect without changing state with `podman compose ... ps` and stop the
+deployment with `podman compose ... down`. Do not add `--volumes`: the Valkey
+data and job directories are host-mounted persistent state.
 
 ## Authorization and stopping rules
 

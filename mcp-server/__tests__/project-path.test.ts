@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { gunzipSync } from "node:zlib"
 import { fileURLToPath } from "node:url"
 import { applyProjectResource, openProjectAtPath, validateProjectPath, validateProjectResourcePath } from "../src/project-path"
 
@@ -87,7 +88,9 @@ describe("project path boundary", () => {
       await fs.writeFile(path.join(projectPath, "dataset.bin"), data)
 
       const opened = await openProjectAtPath(projectPath, parent)
-      const reopened = Buffer.from(opened.resources["dataset.bin"].data, "base64")
+      const resource = opened.resources["dataset.bin"]
+      const encoded = Buffer.from(resource.data, "base64")
+      const reopened = resource.encoding === "base64+gzip" ? gunzipSync(encoded) : encoded
       expect(reopened.byteLength).toBe(data.byteLength)
       expect(reopened[0]).toBe(1)
       expect(reopened.at(-1)).toBe(1)

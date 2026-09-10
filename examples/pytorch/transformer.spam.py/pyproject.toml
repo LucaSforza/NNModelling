@@ -1,0 +1,14 @@
+[project]
+name = "transformer-spam-pytorch"
+version = "0.1.0"
+description = "Standalone PyTorch reproduction of the transformer.spam classifier"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "torch>=2.5",
+    "wandb>=0.19",
+]
+
+[tool.uv]
+package = false

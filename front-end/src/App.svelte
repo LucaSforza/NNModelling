@@ -54,7 +54,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   async function activatePathProject(payload: ProjectPathPayload): Promise<Record<string, unknown>> {
     const previous = workspaceSession;
-    const session = createPathProjectSession(payload, async (operation) => {
+    const session = await createPathProjectSession(payload, async (operation) => {
       // The MCP owner validates the selected project path and acknowledges the
       // filesystem operation only after it has completed on disk.
       await rpcHandler.request("project_resource", { projectPath: payload.projectPath, operation });

@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # Project-owned datasets and named training batches
@@ -159,6 +159,12 @@ registry or Python import target to discover.
 - The backend stores the immutable archive by digest under the authenticated
   connection and returns an opaque dataset reference. Jobs persist the exact
   dataset ID, version, digest and normalized parameters.
+- Authorization of an opaque dataset reference is connection-scoped. Session
+  renewal preserves that identity, but revocation or replacing the pairing does
+  not transfer its dataset ACL. The browser must republish the same project
+  dataset under the new connection before submitting a job; the backend may
+  deduplicate identical bytes while granting the new owner access, but neither
+  side may fabricate or rewrite the content digest.
 - The controller mounts the resolved dataset archive read-only inside the same
   least-privilege worker used for browser-supplied package Python. The worker's
   fixed loader imports the declared dataset entrypoint only inside that

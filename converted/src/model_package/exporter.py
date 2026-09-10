@@ -272,6 +272,7 @@ def _copy_runtime(package_dir: Path) -> None:
     )
     (runtime_dir / "compiler.py").write_text(compiler, encoding="utf-8")
     shutil.copy2(source_dir.parent / "package_runtime" / "loader.py", runtime_dir / "loader.py")
+    shutil.copy2(source_dir.parent / "package_runtime" / "jcs.py", runtime_dir / "jcs.py")
     stereotype_dir = package_dir / "stereotype_runtime"
     stereotype_dir.mkdir()
     source_stereotype = source_dir.parent / "stereotype_runtime"

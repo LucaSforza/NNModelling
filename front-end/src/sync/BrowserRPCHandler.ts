@@ -129,8 +129,10 @@ export class BrowserRPCHandler {
 
   /**
    * @param diagram  The Diagram instance to mutate (single source of truth).
-   * @param url      WebSocket URL. Defaults to /ws in dev (proxied via Vite),
-   *                 or ws://localhost:9339 in production.
+   * @param url      WebSocket URL. Defaults to the MCP server directly in dev,
+   *                 or ws://localhost:9339 in production. Direct dev access
+   *                 avoids the Vite proxy's smaller frame limit for projects
+   *                 carrying large dataset resources.
    * @param viewport Optional viewport controller (fitView/setCenter).
    *                 Passed from FlowCanvas.svelte via useSvelteFlow().
    */
@@ -140,7 +142,7 @@ export class BrowserRPCHandler {
     this.url =
       url ??
       (import.meta.env.DEV
-        ? `ws://${window.location.host}/ws`
+        ? `ws://localhost:9339`
         : `ws://localhost:9339`);
     this.viewport = viewport;
     this.training = training;

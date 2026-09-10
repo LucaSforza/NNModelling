@@ -46,6 +46,26 @@ a typed `network.format="package"` training request. Jobs are executed by the
 configured Podman or Docker container controller and expose status, logs,
 events, cancellation and the portable model wheel through the API.
 
+## Package worker image
+
+The worker is an immutable container image. Rebuild it whenever a change affects
+code or dependencies executed in the worker, then restart FastAPI with the
+printed digest. Restarting FastAPI alone keeps using its previous worker image.
+
+```bash
+just --justfile converted/backend/justfile worker-build
+# Copy the printed NNM_CONTAINER_IMAGE=...@sha256:... value into the backend launch.
+```
+
+Pass an optional local tag when keeping multiple development images:
+
+```bash
+just --justfile converted/backend/justfile worker-build classification-metrics
+```
+
+The tag is only a local build label. Always configure FastAPI with the printed
+digest reference, never the tag.
+
 ## Weights & Biases administration
 
 W&B uses one backend-administrator-owned account. Connect it from the repository
@@ -61,7 +81,7 @@ just --justfile converted/backend/justfile wandb-disconnect
 ```
 
 `wandb-connect` verifies the account before atomically writing
-`converted/valkey-data/wandb-credentials.json` with mode `0600`.
+`converted/backend-secrets/wandb-credentials.json` with mode `0600`.
 `wandb-status` prints only the schema version, entity and base URL. Override the
 machine-local path with `NNM_WANDB_CREDENTIAL_FILE` when required.
 

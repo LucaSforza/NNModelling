@@ -58,6 +58,25 @@ def test_job_submission_accepts_only_package_network_format() -> None:
 
     assert package.network.format == "package"
     assert "overrides" not in package.training.model_dump()
+    assert package.training.trainer.log_every_n_steps == 10
+
+    configured = JobSubmission(
+        network={
+            "format": "package",
+            "value": {"graph": {}, "bundle_ref": "bundle-1"},
+        },
+        training={**_training(), "trainer": {"log_every_n_steps": 7}},
+    )
+    assert configured.training.trainer.log_every_n_steps == 7
+
+    with pytest.raises(ValidationError, match="log_every_n_steps"):
+        JobSubmission(
+            network={
+                "format": "package",
+                "value": {"graph": {}, "bundle_ref": "bundle-1"},
+            },
+            training={**_training(), "trainer": {"log_every_n_steps": 0}},
+        )
 
     with pytest.raises(ValidationError, match="reference"):
         JobSubmission(

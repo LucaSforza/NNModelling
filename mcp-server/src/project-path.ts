@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 
 import { MCPServerError } from "./errors.js"
 import fs from "node:fs/promises"
+import { gzipSync } from "node:zlib"
 
 const PROJECT_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
@@ -41,7 +42,7 @@ export function validateProjectPath(projectPath: string, projectRoot?: string): 
 export type ProjectPathPayload = {
   readonly projectPath: string
   readonly modelJson: string
-  readonly resources: Record<string, { readonly encoding: "utf8" | "base64"; readonly data: string }>
+  readonly resources: Record<string, { readonly encoding: "utf8" | "base64" | "base64+gzip"; readonly data: string }>
 }
 
 export type ProjectResourceOperation =
@@ -162,7 +163,7 @@ export async function rollbackCreatedProject(projectPath: string, projectRoot: s
 async function readFiles(
   directory: string,
   prefix: string,
-  resources: Record<string, { encoding: "utf8" | "base64"; data: string }>,
+  resources: Record<string, { encoding: "utf8" | "base64" | "base64+gzip"; data: string }>,
 ): Promise<void> {
   if (Object.keys(resources).length >= 512) throw new MCPServerError("PROJECT_TOO_LARGE", "project contains too many files")
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
@@ -171,9 +172,16 @@ async function readFiles(
     else if (entry.isFile()) {
       const bytes = await fs.readFile(path.join(directory, entry.name))
       const resourcePath = relative.split(path.sep).join("/")
-      resources[resourcePath] = resourcePath === "model.json"
-        ? { encoding: "utf8", data: bytes.toString("utf8") }
-        : { encoding: "base64", data: bytes.toString("base64") }
+      if (resourcePath === "model.json") {
+        resources[resourcePath] = { encoding: "utf8", data: bytes.toString("utf8") }
+      } else {
+        const candidate = bytes.length >= 1024 * 1024 ? gzipSync(bytes) : bytes
+        const compressed = candidate.length < bytes.length ? candidate : bytes
+        resources[resourcePath] = {
+          encoding: compressed === bytes ? "base64" : "base64+gzip",
+          data: compressed.toString("base64"),
+        }
+      }
     }
   }
 }

@@ -288,18 +288,38 @@ class ContainerExecutor:
                         on_finished: FinishedCallback) -> None:
         assert self._remote is not None
         while True:
-            status = self._remote.finished(job_id)
-            if status.get("state") == "finished":
-                on_finished(int(status["code"]), status)
+            try:
+                status = self._remote.finished(job_id)
+                if status.get("state") == "finished":
+                    on_finished(int(status["code"]), status)
+                    return
+                if status.get("state") == "unknown":
+                    on_finished(1, _controller_lost_details(job_id))
+                    return
+                heartbeat = self._remote.heartbeat(job_id)
+                if heartbeat.get("state") == "unknown":
+                    on_finished(1, _controller_lost_details(job_id))
+                    return
+                on_heartbeat(heartbeat)
+            except (ContainerCapabilityError, ControllerProtocolError, OSError, ConnectionError):
+                # A controller restart discards its in-memory process table.
+                # Treat that as a lost execution so JobManager can remove the
+                # stale active slot and let the scheduler continue.
+                on_finished(1, _controller_lost_details(job_id))
                 return
-            on_heartbeat(self._remote.heartbeat(job_id))
             time.sleep(1)
 
     def cancel(self, job_id: str) -> bool:
         """Terminate the engine process group, which stops the container."""
-        if self._remote is not None:
-            return self._remote.cancel(job_id)
-        return self._controller.cancel(job_id) if self._controller is not None else False
+        try:
+            if self._remote is not None:
+                return self._remote.cancel(job_id)
+            return self._controller.cancel(job_id) if self._controller is not None else False
+        except (ContainerCapabilityError, ControllerProtocolError, OSError, ConnectionError):
+            # The manager has already persisted ``cancelled``. A controller
+            # that disappears during the signal cannot confirm the process,
+            # but returning False lets the manager release its active slot.
+            return False
 
 
 def _unavailable_wandb_capabilities(reason: str) -> dict[str, Any]:
@@ -308,4 +328,14 @@ def _unavailable_wandb_capabilities(reason: str) -> dict[str, Any]:
     return {
         "available_modes": ["disabled", "offline"],
         "online": {"configured": False, "entity": None, "base_url": None, "reason": reason},
+    }
+
+
+def _controller_lost_details(job_id: str) -> dict[str, Any]:
+    """Describe an execution whose controller no longer tracks its process."""
+
+    return {
+        "job_id": job_id,
+        "controller_lost": True,
+        "error": "Container controller lost the job state; the job must be resubmitted.",
     }
