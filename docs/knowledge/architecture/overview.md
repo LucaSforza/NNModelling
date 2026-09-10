@@ -1,20 +1,23 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-29
+updated: 2026-09-10
 ---
 
 # System architecture
 
-NNModelling is a browser-owned visual DSL. The current editor builds package
-graphs and infers their tensor semantics locally. Public user documentation
-lives under `docs2/`.
+NNModelling is a renderer-owned visual DSL delivered through the web and an
+Electron Linux desktop shell. Both hosts build package graphs and infer their
+tensor semantics locally from the same frontend source. Public user
+documentation lives under `docs2/`.
 
 ## Components
 
 | Area | Responsibility | State authority |
 | --- | --- | --- |
-| `front-end/` | Svelte editor, graph mutations, package catalog, Lua type inference and browser RPC | Browser `DiagramCore` |
+| `front-end/` | Shared Svelte editor, graph mutations, package catalog, Lua type inference and renderer RPC | Active renderer `DiagramCore` |
+| `desktop/` | Electron main/preload host and typed desktop platform bridge | No diagram or type state |
+| `flatpak/` | Linux sandbox, launcher and distribution metadata | No application state |
 | `stereotype-packages/` | Globally shared core definitions, Lua inference and PyTorch entrypoints | Core package manifests and resources |
 | `mcp-server/` | Thin proxy to the selected browser tab | No diagram or type state |
 | `converted/` | Package compiler/runtime, authenticated API, scheduler and worker controller | Valkey job state and backend stores |
@@ -38,9 +41,11 @@ model manifest + local package dirs ─┘       = core + current custom package
                               visible editor + MCP       backend bundle export
 ```
 
-The browser is the only source of truth for a live diagram. The MCP server
-routes request/response RPC and must not mirror the graph, catalog or inferred
-types. See [Browser-backed MCP](browser-mcp.md).
+The active frontend renderer is the only source of truth for a live diagram,
+whether hosted by a browser or Electron. Electron main/preload processes and
+the MCP server must not mirror the graph, catalog or inferred types. See
+[Browser-backed MCP](browser-mcp.md) and the accepted
+[desktop distribution decision](../decisions/web-and-flatpak-desktop-distribution.md).
 
 Every frontend node persists only exact package ID and version. Definition
 metadata drives topology, parameters, presentation and dtype controls;
