@@ -1,5 +1,7 @@
 <script lang="ts">
   import ProjectForm, { type ProjectFormSubmission } from "./ProjectForm.svelte";
+  import LanguageSwitcher from "./LanguageSwitcher.svelte";
+  import { useI18n } from "../i18n.svelte";
   import {
     ProjectSelectionCancelledError,
     ProjectWorkspaceAdapter,
@@ -14,6 +16,7 @@
   };
 
   let { workspaceAdapter, onOpen, initialError = null }: ProjectStartProps = $props();
+  const { t } = useI18n();
   let mode = $state<"chooser" | "new">("chooser");
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -25,7 +28,7 @@
 
   function showError(cause: unknown): void {
     if (cause instanceof ProjectSelectionCancelledError) {
-      message = "Selezione annullata. Puoi riprovare.";
+      message = t("Selection cancelled. You can try again.");
       return;
     }
     error = cause instanceof ProjectWorkspaceError
@@ -73,17 +76,18 @@
 </script>
 
 <main class="project-start" aria-busy={busy}>
+  <LanguageSwitcher />
   {#if mode === "chooser"}
     <section class="project-card" aria-labelledby="project-start-title">
       <p class="eyebrow">NNModelling</p>
-      <h1 id="project-start-title">Apri un progetto</h1>
-      <p class="project-lead">Scegli una cartella di progetto per iniziare a costruire il tuo modello.</p>
+      <h1 id="project-start-title">{t("Open a project")}</h1>
+      <p class="project-lead">{t("Choose a project folder to start building your model.")}</p>
       <div class="project-actions">
-        <button class="primary" type="button" onclick={startNew} disabled={busy}>＋ Nuovo progetto</button>
-        <button class="secondary" type="button" onclick={openProject} disabled={busy}>↗ Apri progetto</button>
+        <button class="primary" type="button" onclick={startNew} disabled={busy}>＋ {t("New project")}</button>
+        <button class="secondary" type="button" onclick={openProject} disabled={busy}>↗ {t("Open project")}</button>
       </div>
       {#if error ?? initialError}
-        <p class="project-error" role="alert">{error ?? initialError}</p>
+        <p class="project-error" role="alert">{t(error ?? initialError ?? "")}</p>
       {/if}
       {#if message}
         <p class="project-message" role="status">{message}</p>

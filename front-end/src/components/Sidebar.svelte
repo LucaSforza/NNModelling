@@ -25,6 +25,7 @@ Licensed under the GNU General Public License v3 or later.
   } from "../type-system/editor/package-ui";
   import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
   import { packageIdentity as nodePackageIdentity, type GraphNodeResult } from "../type-system/graph/types";
+  import { useI18n } from "../i18n.svelte";
 
   interface Props {
     diagram: Diagram;
@@ -36,6 +37,7 @@ Licensed under the GNU General Public License v3 or later.
   }
 
   let { diagram, selectedNode, isOpen, onClose, getSpawnPosition, trainingController }: Props = $props();
+  const { t } = useI18n();
 
   let form = $state({
     name: "",
@@ -261,13 +263,13 @@ Licensed under the GNU General Public License v3 or later.
       const state = result.nodes.get(node.id);
       if (!state || state.status === "success") continue;
       if (state.status === "error") diagnostics.push({
-        nodeId: node.id, severity: "error", title: "Type error", message: state.message,
+      nodeId: node.id, severity: "error", title: t("Type error"), message: t(state.message),
       });
       else if (state.status === "unresolved") diagnostics.push({
         nodeId: node.id,
         severity: "unresolved",
-        title: "Incomplete",
-        message: "missingParameters" in state ? `Missing: ${state.missingParameters.join(", ")}` : state.reason,
+        title: t("Incomplete"),
+        message: "missingParameters" in state ? t("Missing: {parameters}", { parameters: state.missingParameters.join(", ") }) : state.reason,
       });
     }
     return diagnostics;
@@ -282,26 +284,26 @@ Licensed under the GNU General Public License v3 or later.
         occurrenceId: "runtime:wandb-online-capability",
         severity: "fatal",
         phase: "validation",
-        message: `W&B online non disponibile: ${online.reason ?? "configurazione incompleta"}`,
+        message: t("W&B online unavailable: {reason}", { reason: online.reason ?? t("incomplete configuration") }),
       });
     }
     return diagnostics;
   });
 
   function runtimeDiagnosticIdentity(diagnostic: (typeof runtimeDiagnostics)[number]): string {
-    if (diagnostic.occurrenceId === "runtime:wandb-online-capability") return "W&B backend";
+    if (diagnostic.occurrenceId === "runtime:wandb-online-capability") return t("W&B backend");
     if (diagnostic.packageId && diagnostic.packageVersion) return `${diagnostic.packageId}@${diagnostic.packageVersion}`;
     if (diagnostic.packageId) return diagnostic.packageId;
-    return "Type-system runtime";
+    return t("Type-system runtime");
   }
 
   function packageStateMessage(state: EditorInferenceState | GraphNodeResult | undefined): string {
-    if (!state) return "Package type-system is initializing.";
-    if (state.status === "fault") return `Runtime fault: ${state.fault.message}`;
-    if (state.status === "error") return state.message;
+    if (!state) return t("Package type system is initializing.");
+    if (state.status === "fault") return t("Runtime fault: {message}", { message: state.fault.message });
+    if (state.status === "error") return t(state.message);
     if (state.status === "unresolved") return "reason" in state
-      ? `Unresolved: ${state.reason}`
-      : `Unresolved: ${state.missingParameters.join(", ")}`;
+      ? t("Unresolved: {reason}", { reason: state.reason })
+      : t("Missing: {parameters}", { parameters: state.missingParameters.join(", ") });
     return "";
   }
 </script>
@@ -310,32 +312,32 @@ Licensed under the GNU General Public License v3 or later.
   <aside class="sidebar" style={`width: ${sidebarWidth}px; user-select: ${isDragging ? "none" : "auto"};`}>
     <div class="resizer" onmousedown={startResize} role="separator" aria-orientation="vertical" tabindex="0"></div>
     <div class="sidebar-header">
-      <h3>{!isEditing ? "Nuovo Nodo" : isPackageNode ? "Modifica Package" : selectedNode?.type === "subflow" ? "Modifica Subflow" : "Modifica Nodo"}</h3>
+      <h3>{!isEditing ? t("New node") : isPackageNode ? t("Edit package") : selectedNode?.type === "subflow" ? t("Edit subflow") : t("Edit node")}</h3>
       <button class="close-btn" onclick={onClose}>✖</button>
     </div>
 
     <div class="form-container">
-      <label>{selectedNode?.type === "subflow" ? "Etichetta Sottografo" : "Nome"}
+      <label>{selectedNode?.type === "subflow" ? t("Subgraph label") : t("Name")}
         <input type="text" bind:value={form.name} oninput={handleManualUpdate} />
       </label>
 
       <div class="row">
-        <label>Colore <input type="color" bind:value={form.color} oninput={handleManualUpdate} /></label>
-        <label>Width <input type="number" bind:value={form.width} oninput={() => { geometryDirty.width = true; handleManualUpdate(); }} /></label>
-        <label>Height <input type="number" bind:value={form.height} oninput={() => { geometryDirty.height = true; handleManualUpdate(); }} /></label>
+        <label>{t("Color")} <input type="color" bind:value={form.color} oninput={handleManualUpdate} /></label>
+        <label>{t("Width")} <input type="number" bind:value={form.width} oninput={() => { geometryDirty.width = true; handleManualUpdate(); }} /></label>
+        <label>{t("Height")} <input type="number" bind:value={form.height} oninput={() => { geometryDirty.height = true; handleManualUpdate(); }} /></label>
       </div>
 
       {#if !isEditing || isPackageNode}
         <div>
-          <label>Package</label>
+          <label>{t("Package")}</label>
           <SDropdown {diagram} packageCatalog={diagram.packageCatalog} selectedPackage={packageSelection} onPackageChange={onPackageChange} />
         </div>
       {/if}
 
       {#if packageSelection}
-        <div class="package-kind">Kind: {packageSelection.definition.kind}</div>
+        <div class="package-kind">{t("Kind")}: {t(packageSelection.definition.kind)}</div>
         <div class="params-section">
-          <h4>Parametri</h4>
+          <h4>{t("Parameters")}</h4>
           {#each packageParameters as [key, config] (key)}
             {@const current = parameterValue(form.params, key, config)}
             <div class="param-row">
@@ -348,7 +350,7 @@ Licensed under the GNU General Public License v3 or later.
                 <input id={`package-param-${key}`} type="checkbox" checked={Boolean(current)} onchange={(event) => updatePackageParameter(key, config, (event.target as HTMLInputElement).checked)} />
               {:else if config.type === "stereotype"}
                 <select id={`package-param-${key}`} value={referenceMetadata(current) ? `${referenceMetadata(current)?.id}@${referenceMetadata(current)?.version}` : ""} onchange={(event) => updateReference(key, diagram.packageCatalog.find((metadata) => `${metadata.id}@${metadata.version}` === (event.target as HTMLSelectElement).value) ?? null)}>
-                  <option value="">-- select {config.kind} --</option>
+                  <option value="">{t("-- select {kind} --", { kind: t(config.kind) })}</option>
                   {#each diagram.packageCatalog.filter((metadata) => metadata.definition.kind === config.kind) as metadata (`${metadata.id}@${metadata.version}`)}
                     <option value={`${metadata.id}@${metadata.version}`}>{metadata.definition.name}</option>
                   {/each}
@@ -398,14 +400,14 @@ Licensed under the GNU General Public License v3 or later.
       {/if}
 
       {#if !isEditing && packageSelection}
-        <button class="create-btn" onclick={handleCreate}>➕ Aggiungi al Canvas</button>
+        <button class="create-btn" onclick={handleCreate}>➕ {t("Add to canvas")}</button>
       {:else if isEditing}
-        <button class="update-btn" onclick={handleManualUpdate}>💾 Salva Modifiche</button>
+        <button class="update-btn" onclick={handleManualUpdate}>💾 {t("Save changes")}</button>
       {/if}
 
       {#if isPackageNode}
         <div class="package-type-summary">
-          <h4>Package Type</h4>
+          <h4>{t("Package type")}</h4>
           {#if packageOutput}<div class="type-success">Output: {packageOutput}</div>{/if}
           {#if packageState && packageState.status !== "success"}<div class="type-error-msg">{packageStateMessage(packageState)}</div>{/if}
         </div>
@@ -413,18 +415,18 @@ Licensed under the GNU General Public License v3 or later.
 
       <section class="type-error-panel" aria-labelledby="type-check-heading">
         <div class="type-error-panel-header" id="type-check-heading">
-          <span>Type Check</span>
+          <span>{t("Type check")}</span>
           <span class:has-issues={diagnosticCount > 0} class="diagnostic-count">{diagnosticCount}</span>
         </div>
         {#if diagnosticCount === 0}
-          <div class="type-errors-empty">No type issues.</div>
+          <div class="type-errors-empty">{t("No type issues.")}</div>
         {:else}
           {#each packageDiagnostics as diagnostic (`${diagnostic.nodeId}-${diagnostic.message}`)}
             <div class="type-error-item {diagnostic.severity}" role="button" tabindex="0" onclick={() => selectDiagnosticNode(diagnostic.nodeId)} onkeydown={(event) => { if (event.key === "Enter") selectDiagnosticNode(diagnostic.nodeId); }}>
               <span class="type-error-icon" aria-hidden="true">{diagnostic.severity === "fault" ? "⚡" : diagnostic.severity === "error" ? "×" : "!"}</span>
               <div class="type-error-text">
                 <div class="type-error-heading"><span class="type-error-node">{getNodeLabel(diagnostic.nodeId)}</span><span class="type-error-kind">{diagnostic.title}</span></div>
-                <span class="type-error-msg">{diagnostic.message}</span>
+                <span class="type-error-msg">{t(diagnostic.message)}</span>
               </div>
             </div>
           {/each}
@@ -433,11 +435,11 @@ Licensed under the GNU General Public License v3 or later.
 
       <section class="runtime-diagnostic-panel" aria-labelledby="runtime-diagnostic-heading">
         <div class="runtime-diagnostic-panel-header" id="runtime-diagnostic-heading">
-          <span>Package and runtime errors</span>
+          <span>{t("Package and runtime errors")}</span>
           <span class:has-issues={runtimeDiagnostics.length > 0} class="diagnostic-count">{runtimeDiagnostics.length}</span>
         </div>
         {#if runtimeDiagnostics.length === 0}
-          <div class="runtime-diagnostics-empty">No package or runtime errors.</div>
+          <div class="runtime-diagnostics-empty">{t("No package or runtime errors.")}</div>
         {:else}
           {#each runtimeDiagnostics as diagnostic (diagnostic.occurrenceId)}
             <button
@@ -451,10 +453,10 @@ Licensed under the GNU General Public License v3 or later.
               <div class="type-error-text">
                 <div class="type-error-heading">
                   <span class="type-error-node">{runtimeDiagnosticIdentity(diagnostic)}</span>
-                  <span class="type-error-kind">{diagnostic.phase}</span>
+                  <span class="type-error-kind">{t(diagnostic.phase)}</span>
                 </div>
-                {#if diagnostic.nodeId}<span class="runtime-diagnostic-node-label">Node: {getNodeLabel(diagnostic.nodeId)}</span>{/if}
-                <span class="type-error-msg">{diagnostic.message}</span>
+                {#if diagnostic.nodeId}<span class="runtime-diagnostic-node-label">{t("Node: {name}", { name: getNodeLabel(diagnostic.nodeId) })}</span>{/if}
+                <span class="type-error-msg">{t(diagnostic.message)}</span>
               </div>
             </button>
           {/each}

@@ -13,6 +13,7 @@ See the LICENSE file for details.
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { routePointsFromData } from "../core/edgeRoute";
   import { getOrthogonalRoutePath, type RoutePoint } from "./routePath";
+  import { useI18n } from "../i18n.svelte";
 
   type Gesture = {
     pointerId: number;
@@ -40,6 +41,7 @@ See the LICENSE file for details.
   }: EdgeProps = $props();
 
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
+  const { t } = useI18n();
   const { getInternalNode, screenToFlowPosition } = useSvelteFlow();
   let previewPoints = $state<RoutePoint[] | null>(null);
   let gesture = $state<Gesture | null>(null);
@@ -206,7 +208,7 @@ See the LICENSE file for details.
 {/if}
 
 {#if selected && !isDocked}
-  <g class="editable-edge-controls nopan" data-png-exclude="true" aria-label="Edge route controls">
+  <g class="editable-edge-controls nopan" data-png-exclude="true" aria-label={t("Edge route controls")}>
     {#each displayedPoints as point, index (`${index}-${point.x}-${point.y}`)}
       {@const absolutePoint = { x: point.x + scopeOrigin.x, y: point.y + scopeOrigin.y }}
       <circle
@@ -216,7 +218,7 @@ See the LICENSE file for details.
         r="6"
         role="button"
         tabindex="0"
-        aria-label={`Move bend ${index + 1}; press Delete to remove`}
+        aria-label={t("Move bend {number}; press Delete to remove", { number: index + 1 })}
         onpointerdown={(event) => beginMove(event, index)}
         onpointermove={moveGesture}
         onpointerup={finishGesture}
@@ -228,7 +230,7 @@ See the LICENSE file for details.
         transform={`translate(${absolutePoint.x + 10}, ${absolutePoint.y - 10})`}
         role="button"
         tabindex="0"
-        aria-label={`Remove bend ${index + 1}`}
+        aria-label={t("Remove bend {number}", { number: index + 1 })}
         onclick={(event) => removePoint(event, index)}
         onkeydown={(event) => controlKeyDown(event, () => diagram.updateEdgeRoute(
           id,
@@ -244,12 +246,12 @@ See the LICENSE file for details.
       transform={`translate(${controlAnchor.x}, ${controlAnchor.y})`}
       role="button"
       tabindex="0"
-      aria-label="Reset edge route"
+      aria-label={t("Reset edge route")}
       onclick={resetRoute}
       onkeydown={(event) => controlKeyDown(event, () => diagram.clearEdgeRoute(id))}
     >
       <rect x="-18" y="-10" width="36" height="20" rx="4" />
-      <text text-anchor="middle" dominant-baseline="central">Reset</text>
+      <text text-anchor="middle" dominant-baseline="central">{t("Reset")}</text>
     </g>
   </g>
 {/if}

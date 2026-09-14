@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ModelManifest } from "../core/types";
   import { createEmptyProjectJson, manifestFromProjectForm } from "../utils";
+  import { useI18n } from "../i18n.svelte";
 
   export type ProjectFormSubmission = {
     readonly manifest: ModelManifest;
@@ -14,6 +15,7 @@
   };
 
   let { onSubmit, onCancel, submitting = false }: ProjectFormProps = $props();
+  const { t } = useI18n();
   let id = $state("");
   let version = $state("0.1.0");
   let name = $state("");
@@ -35,34 +37,34 @@
 <form class="project-form" onsubmit={submit} aria-labelledby="project-form-title">
   <div class="project-form-heading">
     <div>
-      <p class="eyebrow">Nuovo progetto</p>
-      <h1 id="project-form-title">Descrivi il tuo modello</h1>
+      <p class="eyebrow">{t("New project")}</p>
+      <h1 id="project-form-title">{t("Describe your model")}</h1>
     </div>
-    <button type="button" class="secondary" onclick={onCancel} disabled={submitting}>Annulla</button>
+    <button type="button" class="secondary" onclick={onCancel} disabled={submitting}>{t("Cancel")}</button>
   </div>
 
   <label>
-    ID modello
-    <input bind:value={id} name="id" autocomplete="off" placeholder="es. vision.mnist" required />
-    <small>Minuscole, numeri, punti e trattini.</small>
+    {t("Model ID")}
+    <input bind:value={id} name="id" autocomplete="off" placeholder="e.g. vision.mnist" required />
+    <small>{t("Lowercase letters, numbers, dots, and hyphens.")}</small>
   </label>
   <label>
-    Versione
+    {t("Version")}
     <input bind:value={version} name="version" autocomplete="off" placeholder="0.1.0" required />
   </label>
   <label>
-    Nome
-    <input bind:value={name} name="name" autocomplete="off" placeholder="Il mio modello" required />
+    {t("Name")}
+    <input bind:value={name} name="name" autocomplete="off" placeholder={t("My model")} required />
   </label>
   <label>
-    Descrizione <span>(opzionale)</span>
-    <textarea bind:value={description} name="description" rows="3" placeholder="A cosa serve questo modello?"></textarea>
+    {t("Description")} <span>({t("optional")})</span>
+    <textarea bind:value={description} name="description" rows="3" placeholder={t("What does this model do?")}></textarea>
   </label>
 
   {#if error}
-    <p class="project-error" role="alert">{error}</p>
+    <p class="project-error" role="alert">{t(error)}</p>
   {/if}
   <button type="submit" class="primary" disabled={submitting}>
-    {submitting ? "Creazione…" : "Crea progetto"}
+    {submitting ? t("Creating…") : t("Create project")}
   </button>
 </form>

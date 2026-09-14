@@ -21,9 +21,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
+  import { useI18n } from "../i18n.svelte";
 
   let { data, selected, isConnectable, id }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
+  const { t } = useI18n();
   let isNodeHovered = $state(false);
   let targetPosition = $derived(
     diagram.layoutDirection === "horizontal" ? Position.Left : Position.Top,
@@ -97,7 +99,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         <div class="param-row"><span class="param-key">{key}</span><span class="param-value">{String(param ?? "")}</span></div>
       {/each}
     </div>
-    <div class="node-title">{data.name || "Senza Nome"}</div>
+    <div class="node-title">{data.name || t("Untitled")}</div>
     <div class="params-container bottom-params">
       {#each bottomParams as [key, param]}
         <div class="param-row"><span class="param-key">{key}</span><span class="param-value">{String(param ?? "")}</span></div>

@@ -28,6 +28,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import DockedGroup from "./components/DockedGroup.svelte";
   import TrainingSidebar from "./components/TrainingSidebar.svelte";
   import PackageManager from "./components/PackageManager.svelte";
+  import LanguageSwitcher from "./components/LanguageSwitcher.svelte";
+  import { useI18n } from "./i18n.svelte";
 
   const {
     getInternalNode,
@@ -95,6 +97,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   };
 
   let { session, trainingController = new TrainingController(), onInitializationError, rpcHandler, onSessionReady }: FlowCanvasProps = $props();
+  const { t } = useI18n();
 
   // The Diagram is created only after App has obtained a writable workspace.
   // It remains the sole graph authority for the lifetime of this editor.
@@ -225,7 +228,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       try {
         await diagram.waitForPackageRuntime();
         const snapshot = diagram.parseProjectJson(session.modelJson);
-        if (!snapshot) throw new Error("Il progetto contiene un modello non valido.");
+        if (!snapshot) throw new Error(t("The project contains an invalid model."));
         let projectResourceError: string | undefined;
         try {
           const loadedProjectDatasetResources = loadProjectDatasetResources(session);
@@ -249,7 +252,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           diagram.modelManifest = snapshot.manifest;
           diagram.refreshTypes();
         } else if (!await diagram.importProjectJson(session.modelJson, session.resources)) {
-          throw new Error("Impossibile attivare le risorse del progetto.");
+          throw new Error(t("Could not activate project resources."));
         }
         // Importing a model replaces the Cordis host, so restore the
         // project-owned dataset catalog on the committed runtime before the
@@ -301,9 +304,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   });
 
   let saveLabel = $derived(
-    saveStatus.state === "pending" ? "Salvataggio…" :
-      saveStatus.state === "failed" ? "Salvataggio fallito" :
-        hasUnsavedChanges ? "Da salvare" : "Salvato",
+    saveStatus.state === "pending" ? t("Saving…") :
+      saveStatus.state === "failed" ? t("Save failed") :
+        hasUnsavedChanges ? t("Unsaved changes") : t("Saved"),
   );
 
   // Auto-apertura quando si seleziona un nodo
@@ -358,7 +361,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     } catch (error) {
       layoutError = error instanceof Error
         ? error.message
-        : "Impossibile disporre automaticamente il diagramma.";
+        : t("Could not automatically arrange the diagram.");
     }
   }
 
@@ -525,7 +528,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   function handleAddSubGraph() {
-    alert("I subflow richiedono un package attivo; seleziona un package Subflow dalla sidebar.");
+    alert(t("Subflows require an active package; select a Subflow package in the sidebar."));
   }
 
   function deleteSelectedElements() {
@@ -620,9 +623,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 <svelte:document onclick={handleDocumentClick} />
 
 {#if initializationError && !isSessionReady}
-  <div class="editor-loading editor-error" role="alert">{initializationError}</div>
+  <div class="editor-loading editor-error" role="alert">{t(initializationError)}</div>
 {:else if !isSessionReady}
-  <div class="editor-loading" role="status">Apertura progetto…</div>
+  <div class="editor-loading" role="status">{t("Opening project…")}</div>
 {:else}
 <div class="editor-layout">
   <div class="canvas-container" bind:this={canvasRef}>
@@ -666,7 +669,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
         >
           <span class="save-indicator" aria-hidden="true"></span>{saveLabel}
           {#if saveStatus.state === "failed" && saveStatus.error}
-            <span class="save-error">{saveErrorMessage(saveStatus.error)}</span>
+            <span class="save-error">{t(saveErrorMessage(saveStatus.error))}</span>
           {/if}
         </div>
         <button
@@ -675,16 +678,16 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
           onclick={saveModel}
           disabled={!hasUnsavedChanges}
         >
-          💾 Salva
+          💾 {t("Save")}
         </button>
         <button onclick={handleExportPng} class="toolbar-btn"
-          >🖼️ Esporta PNG</button
+          >🖼️ {t("Export PNG")}</button
         >
         <button onclick={() => (isPackageManagerOpen = !isPackageManagerOpen)} class="toolbar-btn">
-          📦 Packages
+          📦 {t("Packages")}
         </button>
         <button onclick={handleAddSubGraph} class="toolbar-btn"
-          >📦 Aggiungi SubGraph</button
+          >📦 {t("Add SubGraph")}</button
         >
         <div class="layout-control" bind:this={layoutControlRef}>
           <button
@@ -697,7 +700,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
             onclick={() => (isLayoutMenuOpen = !isLayoutMenuOpen)}
             onkeydown={handleLayoutButtonKeyDown}
           >
-            ↔️ Disponi
+            ↔️ {t("Auto arrange")}
           </button>
           {#if isLayoutMenuOpen}
             <div
@@ -706,7 +709,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
               class="layout-menu"
               role="menu"
               tabindex="-1"
-              aria-label="Direzione disposizione automatica"
+              aria-label={t("Automatic layout direction")}
               onkeydown={handleLayoutMenuKeyDown}
             >
               <button
@@ -714,25 +717,25 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
                 role="menuitemradio"
                 aria-checked={diagram.layoutDirection === "vertical"}
                 onclick={() => handleAutoLayout("vertical")}
-              >Verticale</button>
+              >{t("Vertical")}</button>
               <button
                 type="button"
                 role="menuitemradio"
                 aria-checked={diagram.layoutDirection === "horizontal"}
                 onclick={() => handleAutoLayout("horizontal")}
-              >Orizzontale</button>
+              >{t("Horizontal")}</button>
             </div>
           {/if}
         </div>
         {#if layoutError}
-          <div class="layout-error" role="alert">{layoutError}</div>
+          <div class="layout-error" role="alert">{t(layoutError)}</div>
         {/if}
         <button
           onclick={deleteSelectedElements}
           disabled={!hasSelection}
           class:danger={hasSelection}
         >
-          ❌ Elimina
+          ❌ {t("Delete")}
         </button>
       </Panel>
       <Panel position="top-right">
@@ -743,13 +746,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
             isSidebarOpen = false;
           }}
         >
-          🧪 Training
+          🧪 {t("Training")}
         </button>
         <button
           class="toggle-sidebar-btn"
           onclick={() => (isSidebarOpen = !isSidebarOpen)}
         >
-          {isSidebarOpen ? "Nascondi Proprietà" : "⚙️ Mostra Proprietà"}
+          {isSidebarOpen ? t("Hide properties") : `⚙️ ${t("Show properties")}`}
         </button>
       </Panel>
     </SvelteFlow>
@@ -776,22 +779,23 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       <button
         class="package-manager-close"
         type="button"
-        aria-label="Chiudi pannello Packages"
-        title="Chiudi pannello Packages"
+        aria-label={t("Close Packages panel")}
+        title={t("Close Packages panel")}
         onclick={() => (isPackageManagerOpen = false)}
       >
         ×
       </button>
-      <PackageManager
+    <PackageManager
         packages={diagram.packageCatalog}
         onAuthoringRequest={authorStereotype}
         {projectDatasets}
         onDatasetAuthoringRequest={authorDataset}
         onDatasetUpdateRequest={updateDataset}
         onDatasetDeleteRequest={deleteDataset}
-      />
-    </div>
+    />
+  </div>
   {/if}
+  <LanguageSwitcher placement="editor" />
 </div>
 {/if}
 

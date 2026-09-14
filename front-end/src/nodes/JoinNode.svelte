@@ -22,9 +22,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { getContext, tick } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { packageDiagnostic, packageOutputLabel } from "../type-system/graph/presentation";
+  import { useI18n } from "../i18n.svelte";
 
   let { id, data, selected, isConnectable }: NodeProps = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
+  const { t } = useI18n();
   const updateNodeInternals = useUpdateNodeInternals();
   
   // Usiamo l'API nativa per aggiornare i dati del nodo senza impazzire con classi esterne
@@ -32,7 +34,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   // Reattività nativa Svelte 5 basata sul payload "data"
   let inputsCount = $derived((data.inputsCount as number) || 2);
-  let name = $derived((data.name as string) || "Join");
+  let name = $derived((data.name as string) || t("Join"));
   let isNodeHovered = $state(false);
   let isHorizontal = $derived(diagram.layoutDirection === "horizontal");
   let targetPosition = $derived(isHorizontal ? Position.Left : Position.Top);
@@ -78,7 +80,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 </script>
 
 <div class={["node-wrapper", { selected, horizontal: isHorizontal }]} style="position: relative;" onmouseenter={() => isNodeHovered = true} onmouseleave={() => isNodeHovered = false}>
-  <button class="btn-branch" onclick={decrease} disabled={inputsCount <= 2}>
+  <button class="btn-branch" onclick={decrease} disabled={inputsCount <= 2} aria-label={t("Remove input branch")} title={t("Remove input branch")}>
     -
   </button>
 
@@ -109,7 +111,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     </div>
   </div>
 
-  <button class="btn-branch" onclick={increase}>+</button>
+  <button class="btn-branch" onclick={increase} aria-label={t("Add input branch")} title={t("Add input branch")}>+</button>
 
   <div class="join-label" title={name}>
     {name.length > 8 ? name.slice(0, 8) + '...' : name}

@@ -15,6 +15,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { SvelteFlowProvider } from "@xyflow/svelte";
   import FlowCanvas from "./FlowCanvas.svelte";
   import ProjectStart from "./components/ProjectStart.svelte";
+  import { createI18n, provideI18n } from "./i18n.svelte";
   import TrainingLogWindow from "./components/TrainingLogWindow.svelte";
   import type { ProjectWorkspaceSession } from "./project-workspace";
   import { projectWorkspaceForHost } from "./project-workspace/desktop";
@@ -24,6 +25,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import "@xyflow/svelte/dist/style.css";
 
   const trainingLogJobId = new URL(window.location.href).searchParams.get("training-log");
+  const i18n = createI18n();
+  provideI18n(i18n);
   let workspaceSession = $state<ProjectWorkspaceSession | null>(null);
   let workspaceError = $state<string | null>(null);
   let readyWaiter: { resolve: () => void; reject: (error: Error) => void; previous: ProjectWorkspaceSession | null } | undefined;

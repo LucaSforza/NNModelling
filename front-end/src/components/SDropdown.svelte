@@ -2,6 +2,7 @@
   import type { Diagram } from "../Diagram.svelte";
   import type { ActivePackageMetadata } from "../type-system/host";
   import { groupedPackages } from "../type-system/editor/package-ui";
+  import { useI18n } from "../i18n.svelte";
 
   interface Props {
     diagram: Diagram;
@@ -16,6 +17,7 @@
     selectedPackage = null,
     onPackageChange,
   }: Props = $props();
+  const { t } = useI18n();
 
   let packageGroups = $derived(groupedPackages(packageCatalog));
 
@@ -33,7 +35,7 @@
   value={selectedPackage ? `${selectedPackage.id}@${selectedPackage.version}` : ""}
   onchange={handleChange}
 >
-  <option value="">-- aggiungi package --</option>
+  <option value="">{t("-- add package --")}</option>
     {#each packageGroups as group (group.name)}
       <optgroup label={group.name}>
         {#each group.packages as metadata (`${metadata.id}@${metadata.version}`)}

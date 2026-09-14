@@ -10,6 +10,7 @@
   import type { GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
   import type { ModelDatasetReference } from "../project-workspace/dataset-contract";
   import type { DType, Dimension } from "../type-system/tensor-type";
+  import { useI18n } from "../i18n.svelte";
 
   interface Props {
     readonly projectDatasets?: readonly GeneratedDatasetResources[];
@@ -19,6 +20,7 @@
   }
 
   let { projectDatasets = [], onAuthoringRequest, onUpdateRequest, onDeleteRequest }: Props = $props();
+  const { t } = useI18n();
   let id = $state("project.dataset");
   let version = $state("1.0.0");
   let directory = $state("datasets/project-dataset");
@@ -161,7 +163,7 @@
       if (row.type === "boolean") {
         const value = row.defaultValue.trim();
         if (value !== "true" && value !== "false") {
-          throw new Error(`dataset parameter '${row.name}' boolean default must be true or false`);
+          throw new Error(t("Dataset parameter '{name}' boolean default must be true or false", { name: row.name }));
         }
         return { name: row.name, type: row.type, required: row.required, default: value === "true" };
       }
@@ -207,65 +209,65 @@
 
 <form class="stereotype-form dataset-form" onsubmit={submit} aria-labelledby="dataset-form-title">
   <div class="dataset-form__catalog package-manager__group">
-    <h3>Current project datasets</h3>
-    {#if projectDatasets.length === 0}<p class="package-manager__empty">No project datasets yet.</p>{/if}
+    <h3>{t("Current project datasets")}</h3>
+    {#if projectDatasets.length === 0}<p class="package-manager__empty">{t("No project datasets yet.")}</p>{/if}
     {#each projectDatasets as dataset (`${dataset.modelDataset.id}@${dataset.modelDataset.version}`)}
       <div class="package-manager__row">
         <span><strong>{dataset.definition.name}</strong><small>{dataset.modelDataset.id}@{dataset.modelDataset.version}</small></span>
         <div class="dataset-form__catalog-actions">
-          <button type="button" onclick={() => editDataset(dataset)}>Edit</button>
-          <button type="button" class="dataset-form__delete" onclick={() => (pendingDeletion = dataset)}>Delete</button>
+          <button type="button" onclick={() => editDataset(dataset)}>{t("Edit")}</button>
+          <button type="button" class="dataset-form__delete" onclick={() => (pendingDeletion = dataset)}>{t("Delete")}</button>
         </div>
       </div>
     {/each}
   </div>
-  <div class="stereotype-form__heading"><div><h3 id="dataset-form-title">{isEditing ? "Edit dataset" : "Author dataset"}</h3><p>{isEditing ? "Update the dataset contract while preserving its Python source and existing data files." : "Generate a manifest, editable Python scaffold, and project-local data directory."}</p></div>{#if isEditing}<button type="button" onclick={resetForm}>New dataset</button>{/if}</div>
+  <div class="stereotype-form__heading"><div><h3 id="dataset-form-title">{isEditing ? t("Edit dataset") : t("Author dataset")}</h3><p>{isEditing ? t("Update the dataset contract while preserving its Python source and existing data files.") : t("Generate a manifest, editable Python scaffold, and project-local data directory.")}</p></div>{#if isEditing}<button type="button" onclick={resetForm}>{t("New dataset")}</button>{/if}</div>
   {#if pendingDeletion}
     <div class="package-manager__message package-manager__message--error" role="alert">
-      Delete <strong>{pendingDeletion.definition.name}</strong>, its project folder, and its active training entry?
-      <div class="dataset-form__confirmation-actions"><button type="button" onclick={() => (pendingDeletion = null)} disabled={deleting}>Cancel</button><button type="button" class="dataset-form__delete" onclick={deleteDataset} disabled={deleting}>{deleting ? "Deleting…" : "Delete dataset"}</button></div>
+      {t("Delete {name}, its project folder, and its active training entry?", { name: pendingDeletion.definition.name })}
+      <div class="dataset-form__confirmation-actions"><button type="button" onclick={() => (pendingDeletion = null)} disabled={deleting}>{t("Cancel")}</button><button type="button" class="dataset-form__delete" onclick={deleteDataset} disabled={deleting}>{deleting ? t("Deleting…") : t("Delete dataset")}</button></div>
     </div>
   {/if}
-  {#if error}<p class="package-manager__message package-manager__message--error" role="alert">{error}</p>{:else if success}<p class="package-manager__message" role="status">{isEditing ? "Dataset updated." : "Dataset created."}</p>{/if}
+  {#if error}<p class="package-manager__message package-manager__message--error" role="alert">{t(error)}</p>{:else if success}<p class="package-manager__message" role="status">{isEditing ? t("Dataset updated.") : t("Dataset created.")}</p>{/if}
 
-  <fieldset disabled={submitting || readingFiles}><legend>Identity and metadata</legend><div class="stereotype-form__grid">
+  <fieldset disabled={submitting || readingFiles}><legend>{t("Identity and metadata")}</legend><div class="stereotype-form__grid">
     <label>ID <input required bind:value={id} autocomplete="off" readonly={isEditing} /></label>
-    <label>Version <input required bind:value={version} autocomplete="off" readonly={isEditing} /></label>
-    <label class="stereotype-form__wide">Directory <input required bind:value={directory} autocomplete="off" readonly={isEditing} aria-describedby="dataset-directory-help" /></label>
-    <label class="stereotype-form__wide">Name <input required bind:value={name} /></label>
-    <label class="stereotype-form__wide">Description <textarea bind:value={description} rows="2"></textarea></label>
-  </div><small id="dataset-directory-help" class="stereotype-form__help">Normalized path under <code>datasets/</code>; generated source never reads outside it.</small></fieldset>
+    <label>{t("Version")} <input required bind:value={version} autocomplete="off" readonly={isEditing} /></label>
+    <label class="stereotype-form__wide">{t("Directory")} <input required bind:value={directory} autocomplete="off" readonly={isEditing} aria-describedby="dataset-directory-help" /></label>
+    <label class="stereotype-form__wide">{t("Name")} <input required bind:value={name} /></label>
+    <label class="stereotype-form__wide">{t("Description")} <textarea bind:value={description} rows="2"></textarea></label>
+  </div><small id="dataset-directory-help" class="stereotype-form__help">{t("Normalized path under {directory}; generated source never reads outside it.", { directory: "datasets/" })}</small></fieldset>
 
-  <fieldset disabled={submitting || readingFiles}><legend>Parameters</legend>
-    {#if parameters.length === 0}<p class="package-manager__empty">No configurable parameters.</p>{/if}
+  <fieldset disabled={submitting || readingFiles}><legend>{t("Parameters")}</legend>
+    {#if parameters.length === 0}<p class="package-manager__empty">{t("No configurable parameters.")}</p>{/if}
     {#each parameters as parameter, index (index)}<div class="dataset-form__row dataset-form__parameter-row">
-      <input aria-label={`Parameter ${index + 1} name`} placeholder="name" value={parameter.name} oninput={(event) => updateParameter(index, { name: (event.target as HTMLInputElement).value })} />
-      <select aria-label={`Parameter ${index + 1} type`} value={parameter.type} onchange={(event) => updateParameter(index, { type: (event.target as HTMLSelectElement).value as ParameterRow["type"] })}><option value="string">string</option><option value="integer">integer</option><option value="number">number</option><option value="boolean">boolean</option></select>
-      <label class="parameter-row__checkbox"><input type="checkbox" checked={parameter.required} onchange={(event) => updateParameter(index, { required: (event.target as HTMLInputElement).checked })} /> required</label>
-      <input aria-label={`Parameter ${index + 1} default`} placeholder="default" value={parameter.defaultValue} oninput={(event) => updateParameter(index, { defaultValue: (event.target as HTMLInputElement).value })} />
-      <button type="button" class="dataset-form__remove" onclick={() => removeParameter(index)} aria-label={`Remove parameter ${parameter.name}`}>×</button>
+      <input aria-label={t("Parameter {number} name", { number: index + 1 })} placeholder={t("name")} value={parameter.name} oninput={(event) => updateParameter(index, { name: (event.target as HTMLInputElement).value })} />
+      <select aria-label={t("Parameter {number} type", { number: index + 1 })} value={parameter.type} onchange={(event) => updateParameter(index, { type: (event.target as HTMLSelectElement).value as ParameterRow["type"] })}><option value="string">{t("string")}</option><option value="integer">{t("integer")}</option><option value="number">{t("number")}</option><option value="boolean">{t("boolean")}</option></select>
+      <label class="parameter-row__checkbox"><input type="checkbox" checked={parameter.required} onchange={(event) => updateParameter(index, { required: (event.target as HTMLInputElement).checked })} /> {t("required")}</label>
+      <input aria-label={t("Parameter {number} default", { number: index + 1 })} placeholder={t("default")} value={parameter.defaultValue} oninput={(event) => updateParameter(index, { defaultValue: (event.target as HTMLInputElement).value })} />
+      <button type="button" class="dataset-form__remove" onclick={() => removeParameter(index)} aria-label={t("Remove parameter {name}", { name: parameter.name })}>×</button>
     </div>{/each}
-    <button type="button" class="parameter-form__add" onclick={addParameter}>+ Add parameter</button>
+    <button type="button" class="parameter-form__add" onclick={addParameter}>+ {t("Add parameter")}</button>
   </fieldset>
 
   {#each [{ kind: "input", title: "Named input slots", rows: inputs }, { kind: "target", title: "Named target slots", rows: targets }] as group (group.kind)}
-    <fieldset disabled={submitting || readingFiles}><legend>{group.title}</legend>
+    <fieldset disabled={submitting || readingFiles}><legend>{t(group.title)}</legend>
       {#each group.rows as slot, index (index)}<div class="dataset-form__row dataset-form__slot-row">
-        <input aria-label={`${group.kind} slot ${index + 1} name`} placeholder="slot name" value={slot.name} oninput={(event) => updateSlot(group.kind as "input" | "target", index, { name: (event.target as HTMLInputElement).value })} />
-        <input aria-label={`${group.kind} slot ${index + 1} shape`} placeholder="B, T" value={slot.shape} oninput={(event) => updateSlot(group.kind as "input" | "target", index, { shape: (event.target as HTMLInputElement).value })} />
-        <select aria-label={`${group.kind} slot ${index + 1} dtype`} value={slot.dtype} onchange={(event) => updateSlot(group.kind as "input" | "target", index, { dtype: (event.target as HTMLSelectElement).value as DType })}>{#each dtypes as dtype}<option value={dtype}>{dtype}</option>{/each}</select>
-        <button type="button" class="dataset-form__remove" onclick={() => removeSlot(group.kind as "input" | "target", index)} aria-label={`Remove ${group.kind} slot ${slot.name}`}>×</button>
+        <input aria-label={t("{kind} slot {number} name", { kind: t(group.kind), number: index + 1 })} placeholder={t("slot name")} value={slot.name} oninput={(event) => updateSlot(group.kind as "input" | "target", index, { name: (event.target as HTMLInputElement).value })} />
+        <input aria-label={t("{kind} slot {number} shape", { kind: t(group.kind), number: index + 1 })} placeholder="B, T" value={slot.shape} oninput={(event) => updateSlot(group.kind as "input" | "target", index, { shape: (event.target as HTMLInputElement).value })} />
+        <select aria-label={t("{kind} slot {number} dtype", { kind: t(group.kind), number: index + 1 })} value={slot.dtype} onchange={(event) => updateSlot(group.kind as "input" | "target", index, { dtype: (event.target as HTMLSelectElement).value as DType })}>{#each dtypes as dtype}<option value={dtype}>{dtype}</option>{/each}</select>
+        <button type="button" class="dataset-form__remove" onclick={() => removeSlot(group.kind as "input" | "target", index)} aria-label={t("Remove {kind} slot {name}", { kind: t(group.kind), name: slot.name })}>×</button>
       </div>{/each}
-      <button type="button" class="parameter-form__add" onclick={() => addSlot(group.kind as "input" | "target")}>+ Add slot</button>
+      <button type="button" class="parameter-form__add" onclick={() => addSlot(group.kind as "input" | "target")}>+ {t("Add slot")}</button>
     </fieldset>
   {/each}
 
-  <fieldset disabled={submitting || readingFiles}><legend>Classes and local data</legend>
-    <div class="stereotype-form__grid"><label>Class count <input type="number" min="1" step="1" bind:value={classCount} /></label><label>Class names <input bind:value={classNames} placeholder="cat, dog" /></label></div>
-    <label class="dataset-form__file-picker">Add files under <code>data/</code><input type="file" multiple onchange={handleFileSelection} /></label>
-    {#if readingFiles}<p class="package-manager__empty">Reading selected files…</p>{/if}
-    {#each fileFeedback as file (file.path)}<div class="dataset-form__file-row"><span>{file.path}</span><small>{file.size.toLocaleString()} bytes · {file.totalSize.toLocaleString()} bytes total</small></div>{/each}
-    <small class="stereotype-form__help">Files are copied into the dataset directory. Symlinks and external paths are not accepted.</small>
+  <fieldset disabled={submitting || readingFiles}><legend>{t("Classes and local data")}</legend>
+    <div class="stereotype-form__grid"><label>{t("Class count")} <input type="number" min="1" step="1" bind:value={classCount} /></label><label>{t("Class names")} <input bind:value={classNames} placeholder={t("cat, dog")} /></label></div>
+    <label class="dataset-form__file-picker">{t("Add files under {directory}", { directory: "data/" })}<input type="file" multiple onchange={handleFileSelection} /></label>
+    {#if readingFiles}<p class="package-manager__empty">{t("Reading selected files…")}</p>{/if}
+    {#each fileFeedback as file (file.path)}<div class="dataset-form__file-row"><span>{file.path}</span><small>{t("{size} bytes · {total} bytes total", { size: file.size.toLocaleString(), total: file.totalSize.toLocaleString() })}</small></div>{/each}
+    <small class="stereotype-form__help">{t("Files are copied into the dataset directory. Symlinks and external paths are not accepted.")}</small>
   </fieldset>
-  <button class="stereotype-form__submit" type="submit" disabled={submitting || readingFiles || deleting} aria-busy={submitting}>{submitting ? (isEditing ? "Saving…" : "Creating…") : (isEditing ? "Save dataset" : "Create project dataset")}</button>
+  <button class="stereotype-form__submit" type="submit" disabled={submitting || readingFiles || deleting} aria-busy={submitting}>{submitting ? (isEditing ? t("Saving…") : t("Creating…")) : (isEditing ? t("Save dataset") : t("Create project dataset"))}</button>
 </form>

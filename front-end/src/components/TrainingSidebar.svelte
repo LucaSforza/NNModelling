@@ -18,6 +18,7 @@
   import { trainingLogWindowUrl } from "../training/windows";
   import { RefreshGate } from "../training/refreshGate";
   import { coerceTrainingValue } from "../training/coerce";
+  import { useI18n } from "../i18n.svelte";
 
   interface Props {
     diagram: Diagram;
@@ -35,6 +36,7 @@
     | "error";
 
   let { diagram, controller, onClose }: Props = $props();
+  const { t } = useI18n();
 
   let datasets = $state.raw<DatasetInfo[]>([]);
   let jobs = $state.raw<TrainingJobStatus[]>([]);
@@ -158,7 +160,7 @@
   }
 
   async function revokeAndForget() {
-    if (!api || !confirm("Revocare questa connessione sul backend?")) return;
+    if (!api || !confirm(t("Revoke this connection on the backend?"))) return;
     try {
       await controller.disconnect(true);
     } catch (error) {
@@ -233,14 +235,14 @@
     loading = true;
     errorMessage = "";
     successMessage = "";
-    const logWindow = openWaitingWindow("Preparazione del terminale del training…");
+    const logWindow = openWaitingWindow(t("Training terminal is being prepared…"));
     const wandbWindow = wandbMode === "online"
-      ? openWaitingWindow("In attesa che W&B inizializzi la run…")
+      ? openWaitingWindow(t("Waiting for W&B to initialize the run…"))
       : null;
     try {
       const submission = await controller.submitTraining(diagram);
       const job = submission.job;
-      successMessage = `Job ${job.id} accodato.`;
+      successMessage = `Job ${job.id} queued.`;
       selectedJobId = job.id;
       openLogWindow(job.id, logWindow);
       startEvents(job.id, (wandbRun) => openWandbWindow(wandbWindow, wandbRun));
@@ -349,7 +351,7 @@
   async function downloadModelPackage(job: TrainingJobStatus) {
     if (!job.model_package) return;
     const packageName = window.prompt(
-      "Nome del package Python da esportare (formato nnm_<nome>)",
+      t("Python package name to export (format nnm_<name>)"),
       job.model_package.package_name,
     );
     if (packageName === null) return;
@@ -370,7 +372,7 @@
   }
 
   function requireApi(): TrainingApiClient {
-    if (!api) throw new Error("Collega prima un backend");
+    if (!api) throw new Error("Connect to a backend first");
     return api;
   }
 
@@ -388,12 +390,24 @@
   }
 
   function errorText(error: unknown): string {
-    if (error instanceof TypeError) return "Backend irraggiungibile o Origin CORS non autorizzata";
+    if (error instanceof TypeError) return "Backend unreachable or CORS Origin not allowed";
     return error instanceof Error ? error.message : String(error);
   }
 
   function formatExpiry(value: string | null | undefined): string {
-    return value ? new Date(value).toLocaleString() : "non disponibile";
+    return value ? new Date(value).toLocaleString() : t("not available");
+  }
+
+  function jobStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      queued: "Queued",
+      starting: "Starting",
+      running: "Running",
+      succeeded: "Succeeded",
+      failed: "Failed",
+      cancelled: "Cancelled",
+    };
+    return labels[status] ? t(labels[status]) : status;
   }
 
 </script>
@@ -401,56 +415,56 @@
 <aside class="training-sidebar">
   <header>
     <h2>Training</h2>
-    <button class="close" onclick={onClose} aria-label="Chiudi training">✖</button>
+    <button class="close" onclick={onClose} aria-label={t("Close training")}>✖</button>
   </header>
 
-  {#if errorMessage}<div class="message error" role="alert">{errorMessage}</div>{/if}
-  {#if successMessage}<div class="message success">{successMessage}</div>{/if}
+  {#if errorMessage}<div class="message error" role="alert">{t(errorMessage)}</div>{/if}
+  {#if successMessage}<div class="message success">{t(successMessage)}</div>{/if}
 
   <section class="connection">
-    <h3>Backend</h3>
+    <h3>{t("Backend")}</h3>
     {#if connectionState === "active"}
       <div class="connection-summary">
-        <strong>Connesso</strong>
+        <strong>{t("Connected")}</strong>
         <span>{backendUrl}</span>
-        <small>{session?.device_name ?? "Dispositivo senza nome"}</small>
-        <small>Scade: {formatExpiry(session?.expires_at)}</small>
+        <small>{session?.device_name ?? t("Unnamed device")}</small>
+        <small>{t("Expires: {value}", { value: formatExpiry(session?.expires_at) })}</small>
       </div>
       <div class="actions">
-        <button onclick={forget}>Dimentica su questo browser</button>
-        <button class="danger" onclick={revokeAndForget}>Disconnetti e revoca</button>
+        <button onclick={forget}>{t("Forget on this browser")}</button>
+        <button class="danger" onclick={revokeAndForget}>{t("Disconnect and revoke")}</button>
       </div>
     {:else if connectionState === "pending" && pairing}
-      <p>Richiesta in attesa di approvazione sulla macchina backend.</p>
-      <div class="verification-code" aria-label="Codice di associazione">
+      <p>{t("Request awaiting approval on the backend machine.")}</p>
+      <div class="verification-code" aria-label={t("Pairing code")}>
         {pairing.verification_code}
       </div>
-      <small>Esegui <code>just pairing-pending</code> e verifica questo codice.</small>
-      <button onclick={forget}>Annulla e dimentica</button>
+      <small>{t("Run {command} and verify this code.", { command: "just pairing-pending" })}</small>
+      <button onclick={forget}>{t("Cancel and forget")}</button>
     {:else if connectionState === "checking"}
-      <p>Verifica della connessione…</p>
+      <p>{t("Checking connection…")}</p>
     {:else}
       {#if connectionState === "expired"}
-        <p>La connessione è scaduta e richiede una nuova approvazione.</p>
+        <p>{t("Connection expired and requires new approval.")}</p>
         <div class="actions">
-          <button class="primary" onclick={renew}>Richiedi rinnovo</button>
-          <button onclick={forget}>Dimentica</button>
+          <button class="primary" onclick={renew}>{t("Request renewal")}</button>
+          <button onclick={forget}>{t("Forget")}</button>
         </div>
       {:else}
-        {#if connectionState === "rejected"}<p>La richiesta è stata rifiutata o revocata.</p>{/if}
-        <label>URL backend
+        {#if connectionState === "rejected"}<p>{t("Request rejected or revoked.")}</p>{/if}
+        <label>{t("Backend URL")}
           <input bind:value={backendUrl} placeholder="http://192.168.1.20:8000" />
         </label>
-        <label>Nome dispositivo (facoltativo)
-          <input bind:value={deviceName} placeholder="Portatile laboratorio" maxlength="80" />
+        <label>{t("Device name (optional)")}
+          <input bind:value={deviceName} placeholder={t("Lab laptop")} maxlength="80" />
         </label>
-        <button class="primary" onclick={connect}>Richiedi connessione</button>
+        <button class="primary" onclick={connect}>{t("Request connection")}</button>
       {/if}
     {/if}
   </section>
 
   <section>
-    <h3>Dataset</h3>
+    <h3>{t("Dataset")}</h3>
     <label>Dataset
       <select value={selectedDataset} onchange={(event) => {
         const target = datasets.find((item) => item.reference.ref === (event.currentTarget as HTMLSelectElement).value);
@@ -463,7 +477,7 @@
     </label>
     {#if selectedDatasetInfo}
       {#if selectedDatasetInfo.definition.classes}
-        <small>Classi rilevate dal dataset: {selectedDatasetInfo.definition.classes.count}</small>
+        <small>{t("Detected classes: {count}", { count: selectedDatasetInfo.definition.classes.count })}</small>
       {/if}
       {#each selectedDatasetInfo.definition.parameters as parameter (parameter.name)}
         <label>{parameter.name}
@@ -471,20 +485,20 @@
         </label>
       {/each}
     {/if}
-    <label>Seed<input type="number" bind:value={seed} /></label>
+    <label>{t("Seed")}<input type="number" bind:value={seed} /></label>
   </section>
 
   {#if connectionState === "active"}
 
     <section>
-      <h3>Ottimizzazione</h3>
-      <label>Optimizer target<input bind:value={optimizerTarget} /></label>
+      <h3>{t("Optimization")}</h3>
+      <label>{t("Optimizer target")}<input bind:value={optimizerTarget} /></label>
       <div class="grid">
-        <label>Learning rate<input type="number" step="0.0001" bind:value={learningRate} /></label>
-        <label>Epochs<input type="number" bind:value={maxEpochs} /></label>
-        <label>Accelerator<input bind:value={accelerator} /></label>
-        <label>Patience<input type="number" bind:value={patience} /></label>
-        <label>Min delta<input type="number" step="0.001" bind:value={minDelta} /></label>
+        <label>{t("Learning rate")}<input type="number" step="0.0001" bind:value={learningRate} /></label>
+        <label>{t("Epochs")}<input type="number" bind:value={maxEpochs} /></label>
+        <label>{t("Accelerator")}<input bind:value={accelerator} /></label>
+        <label>{t("Patience")}<input type="number" bind:value={patience} /></label>
+        <label>{t("Min delta")}<input type="number" step="0.001" bind:value={minDelta} /></label>
       </div>
     </section>
 
@@ -493,48 +507,48 @@
       {#if wandbCapabilities?.online}
         <div class="wandb-capability" aria-live="polite">
           {#if wandbCapabilities.online.configured}
-            <strong>Online configurato</strong>
-            <small>Entity: {wandbCapabilities.online.entity ?? "amministratore"}</small>
-            <small>Base URL: {wandbCapabilities.online.base_url ?? "non disponibile"}</small>
+            <strong>{t("Online configured")}</strong>
+            <small>{t("Entity: {entity}", { entity: wandbCapabilities.online.entity ?? t("administrator") })}</small>
+            <small>{t("Base URL: {url}", { url: wandbCapabilities.online.base_url ?? t("not available") })}</small>
           {:else}
-            <strong>Online non disponibile</strong>
-            <small>{wandbCapabilities.online.reason ?? "Configurazione W&B mancante"}</small>
+            <strong>{t("Online unavailable")}</strong>
+            <small>{t(wandbCapabilities.online.reason ?? "Missing W&B configuration")}</small>
           {/if}
         </div>
       {/if}
       <div class="grid">
-        <label>Project<input bind:value={wandbProject} /></label>
-        <label>Mode
+        <label>{t("Project")}<input bind:value={wandbProject} /></label>
+        <label>{t("Mode")}
           <select value={wandbMode} onchange={(event) => {
             wandbMode = (event.currentTarget as HTMLSelectElement).value as WandbMode;
             syncConfigFromDraft();
           }}>
-            <option value="disabled">Disabilitato</option>
-            <option value="offline">Offline</option>
-            <option value="online" disabled={!wandbCapabilities?.available_modes.includes("online")}>Online (consigliato)</option>
+            <option value="disabled">{t("Disabled")}</option>
+            <option value="offline">{t("Offline")}</option>
+            <option value="online" disabled={!wandbCapabilities?.available_modes.includes("online")}>{t("Online (recommended)")}</option>
           </select>
         </label>
-        <label>Log loss ogni N batch
+        <label>{t("Log loss every N batches")}
           <input type="number" min="1" step="1" bind:value={logEveryNSteps} />
         </label>
       </div>
       {#if wandbMode === "online" && !wandbCapabilities?.available_modes.includes("online")}
-        <small class="wandb-warning">La modalità online resta selezionata ma non può essere inviata finché il backend non la abilita.</small>
+        <small class="wandb-warning">{t("Online mode remains selected but cannot be submitted until the backend enables it.")}</small>
       {/if}
     </section>
 
     <section>
-      <h3>Risorse e priorità</h3>
+      <h3>{t("Resources and priority")}</h3>
       <div class="grid">
         <label>CPU<input type="number" bind:value={cpu} /></label>
         <label>RAM GB<input type="number" bind:value={memoryGb} /></label>
         <label>GPU<input type="number" bind:value={gpu} /></label>
         <label>GPU RAM GB<input type="number" bind:value={gpuMemoryGb} /></label>
       </div>
-      <label>Tipo GPU<input bind:value={gpuType} placeholder="A100" /></label>
-      <label>Nodo<input bind:value={node} placeholder="qualsiasi" /></label>
-      <label>Priorità<input type="number" bind:value={priority} /></label>
-      <button class="submit" onclick={submit} disabled={loading}>{loading ? "Invio..." : "Invia training"}</button>
+      <label>{t("GPU type")}<input bind:value={gpuType} placeholder="A100" /></label>
+      <label>{t("Node")}<input bind:value={node} placeholder={t("Any node")} /></label>
+      <label>{t("Priority")}<input type="number" bind:value={priority} /></label>
+      <button class="submit" onclick={submit} disabled={loading}>{loading ? t("Submitting training…") : t("Submit training")}</button>
     </section>
 
     <section class="jobs">
@@ -542,35 +556,35 @@
       {#each jobs as job (job.id)}
         <article class:selected={selectedJobId === job.id}>
           <button class="job-title" onclick={() => selectJob(job.id)}>
-            <span>{job.id.slice(0, 8)}</span><strong>{job.status}</strong>
+            <span>{job.id.slice(0, 8)}</span><strong>{jobStatusLabel(job.status)}</strong>
           </button>
-          <small>priorità {job.priority} · {job.executor ?? "in coda"}</small>
-          {#if job.error}<pre>{job.error}</pre>{/if}
-          {#if canCancelTrainingJob(job.status)}<button onclick={() => cancel(job.id)}>Annulla</button>{/if}
-          {#if job.wandb_run && isWandbRun(job.wandb_run) && job.wandb_run.mode === "online" && job.wandb_run.url}<button onclick={() => openWandb(job)}>Apri W&B</button>{/if}
-          {#if job.wandb_run?.mode === "offline"}<button onclick={() => void downloadWandbOffline(job)}>Scarica W&B offline</button>{/if}
-          <button onclick={() => openLogWindow(job.id)}>Apri terminale</button>
+          <small>{t("Priority: {priority} · {executor}", { priority: job.priority, executor: job.executor ?? t("in queue") })}</small>
+          {#if job.error}<pre>{t(job.error)}</pre>{/if}
+          {#if canCancelTrainingJob(job.status)}<button onclick={() => cancel(job.id)}>{t("Cancel")}</button>{/if}
+          {#if job.wandb_run && isWandbRun(job.wandb_run) && job.wandb_run.mode === "online" && job.wandb_run.url}<button onclick={() => openWandb(job)}>{t("Open W&B")}</button>{/if}
+          {#if job.wandb_run?.mode === "offline"}<button onclick={() => void downloadWandbOffline(job)}>{t("Download offline W&B")}</button>{/if}
+          <button onclick={() => openLogWindow(job.id)}>{t("Open terminal")}</button>
           {#if job.model_package}
-            <button onclick={() => void downloadModelPackage(job)}>Scarica wheel</button>
+            <button onclick={() => void downloadModelPackage(job)}>{t("Download wheel")}</button>
           {:else if job.package_error}
-            <small>Export wheel non riuscito: {job.package_error}</small>
+            <small>{t("Wheel export failed: {error}", { error: job.package_error })}</small>
           {/if}
           {#if selectedJobId === job.id}
             <button onclick={() => void loadJobLogs(job.id)} disabled={loadingLogs}>
-              {loadingLogs ? "Caricamento log..." : "Aggiorna log"}
+              {loadingLogs ? t("Loading logs…") : t("Refresh logs")}
             </button>
             {#if selectedJobLogs}
               <details open>
-                <summary>Log job</summary>
+                <summary>{t("Job log")}</summary>
                 {#if selectedJobLogs.stdout}<pre>{selectedJobLogs.stdout}</pre>{/if}
                 {#if selectedJobLogs.stderr}<pre>{selectedJobLogs.stderr}</pre>{/if}
-                {#if !selectedJobLogs.stdout && !selectedJobLogs.stderr}<small>Nessun log disponibile.</small>{/if}
+                {#if !selectedJobLogs.stdout && !selectedJobLogs.stderr}<small>{t("No logs available.")}</small>{/if}
               </details>
             {/if}
           {/if}
         </article>
       {:else}
-        <p>Nessun job.</p>
+        <p>{t("No jobs.")}</p>
       {/each}
     </section>
   {/if}

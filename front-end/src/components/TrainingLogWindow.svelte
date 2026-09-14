@@ -2,12 +2,15 @@
   import { onMount } from "svelte";
   import { TrainingApiClient, type TrainingJobStatus } from "../training/api";
   import { loadBackendConnection } from "../training/connection";
+  import LanguageSwitcher from "./LanguageSwitcher.svelte";
+  import { useI18n } from "../i18n.svelte";
 
   interface Props {
     jobId: string;
   }
 
   let { jobId }: Props = $props();
+  const { t } = useI18n();
   let stdout = $state("");
   let stderr = $state("");
   let status = $state<TrainingJobStatus["status"] | null>(null);
@@ -19,7 +22,7 @@
   onMount(() => {
     const connection = loadBackendConnection();
     if (!connection) {
-      errorMessage = "Nessuna connessione al backend disponibile in questo browser.";
+      errorMessage = "No backend connection is available in this browser.";
       return;
     }
     const api = new TrainingApiClient(connection.baseUrl, connection.token);
@@ -40,7 +43,7 @@
           window.setTimeout(() => void poll(), 750);
         }
       } catch (error) {
-        errorMessage = error instanceof Error ? error.message : "Impossibile leggere i log del job.";
+        errorMessage = error instanceof Error ? error.message : "Training log cannot be read for this job.";
       }
     }
 
@@ -54,22 +57,24 @@
 <main>
   <header>
     <div>
-      <h1>Training log</h1>
+      <h1>{t("Training log")}</h1>
       <p>{jobId}</p>
     </div>
-    <strong>{status ?? "connessione…"}</strong>
+    <strong>{status ? t(status[0].toUpperCase() + status.slice(1)) : t("connection…")}</strong>
   </header>
 
+  <LanguageSwitcher placement="editor" />
+
   {#if errorMessage}
-    <p class="error">{errorMessage}</p>
+    <p class="error">{t(errorMessage)}</p>
   {:else}
     <section>
       <h2>stdout</h2>
-      <pre>{stdout || "In attesa di output…"}</pre>
+      <pre>{stdout || t("Waiting for output…")}</pre>
     </section>
     <section>
       <h2>stderr</h2>
-      <pre class:error-output={stderr.length > 0}>{stderr || "Nessun errore."}</pre>
+      <pre class:error-output={stderr.length > 0}>{stderr || t("No errors.")}</pre>
     </section>
   {/if}
 </main>

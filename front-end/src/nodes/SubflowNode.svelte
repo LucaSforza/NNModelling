@@ -22,6 +22,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   import { getContext } from "svelte";
   import { DIAGRAM_CONTEXT_KEY, type Diagram } from "../Diagram.svelte";
   import { packageDiagnostic } from "../type-system/graph/presentation";
+  import { useI18n } from "../i18n.svelte";
 
   type SubflowData = {
     label: string;
@@ -35,6 +36,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   let { data, selected, id }: NodeProps<MySubflowNode> = $props();
   const diagram = getContext<Diagram>(DIAGRAM_CONTEXT_KEY);
+  const { t } = useI18n();
   let targetPosition = $derived(
     diagram.layoutDirection === "horizontal" ? Position.Left : Position.Top,
   );
@@ -76,6 +78,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     <button
       class="collapse-btn"
       onclick={() => diagram.toggleSubflow(id, !data.isCollapsed)}
+      aria-label={t(data.isCollapsed ? "Expand subflow" : "Collapse subflow")}
+      title={t(data.isCollapsed ? "Expand subflow" : "Collapse subflow")}
     >
       {data.isCollapsed ? "+" : "-"}
     </button>
