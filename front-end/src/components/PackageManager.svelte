@@ -1,9 +1,23 @@
+<script module lang="ts">
+  import type { ModelPackageReference as ModuleModelPackageReference } from "../core/types";
+
+  export function modelPackageDeleteTarget(
+    packageInfo: { readonly key: string; readonly source: string },
+    modelPackages: readonly ModuleModelPackageReference[],
+  ): ModuleModelPackageReference | undefined {
+    if (packageInfo.source !== "model") return undefined;
+    const target = modelPackages.find((candidate) => `${candidate.id}@${candidate.version}` === packageInfo.key);
+    return target ? { ...target } : undefined;
+  }
+</script>
+
 <script lang="ts">
   import "../styles/package-manager.css";
   import DatasetForm from "./DatasetForm.svelte";
   import StereotypeForm from "./StereotypeForm.svelte";
   import type { DatasetAuthoringRequest, GeneratedDatasetResources } from "../project-workspace/dataset-authoring";
   import type { ModelDatasetReference } from "../project-workspace/dataset-contract";
+  import type { ModelPackageReference } from "../core/types";
   import type { InstalledPackageRecord } from "../type-system/packages/types";
   import type { StereotypeAuthoringRequest } from "../stereotype-authoring";
   import { useI18n } from "../i18n.svelte";
@@ -12,7 +26,9 @@
 
   interface Props {
     packages: readonly PackageManagerPackage[];
+    modelPackages?: readonly ModelPackageReference[];
     onAuthoringRequest?: (request: StereotypeAuthoringRequest) => Promise<void> | void;
+    onStereotypeDeleteRequest?: (target: ModelPackageReference) => Promise<void> | void;
     projectDatasets?: readonly GeneratedDatasetResources[];
     onDatasetAuthoringRequest?: (request: DatasetAuthoringRequest) => Promise<void> | void;
     onDatasetUpdateRequest?: (target: ModelDatasetReference, request: DatasetAuthoringRequest) => Promise<void> | void;
@@ -23,7 +39,9 @@
 
   let {
     packages,
+    modelPackages = [],
     onAuthoringRequest,
+    onStereotypeDeleteRequest,
     projectDatasets = [],
     onDatasetAuthoringRequest,
     onDatasetUpdateRequest,
@@ -33,6 +51,29 @@
   let bundled = $derived(packages.filter((item) => item.source === "bundled"));
   let project = $derived(packages.filter((item) => item.source === "model"));
   let creationType = $state<"stereotype" | "dataset">("stereotype");
+  let pendingStereotypeDeletion = $state<ModelPackageReference | null>(null);
+  let stereotypeDeletionError = $state<string | null>(null);
+  let deletingStereotype = $state(false);
+
+  function requestStereotypeDelete(target: ModelPackageReference): void {
+    pendingStereotypeDeletion = target;
+    stereotypeDeletionError = null;
+  }
+
+  async function deleteStereotype(): Promise<void> {
+    const target = pendingStereotypeDeletion;
+    if (!target || !onStereotypeDeleteRequest || deletingStereotype) return;
+    deletingStereotype = true;
+    stereotypeDeletionError = null;
+    try {
+      await onStereotypeDeleteRequest(target);
+      pendingStereotypeDeletion = null;
+    } catch (cause) {
+      stereotypeDeletionError = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      deletingStereotype = false;
+    }
+  }
 </script>
 
 <section class="package-manager" aria-label={t("Package manager")}>
@@ -47,11 +88,36 @@
     <div class="package-manager__group">
       <h3>{t("User packages")}</h3>
       {#each project as packageInfo (packageInfo.key)}
+        {@const target = modelPackageDeleteTarget(packageInfo, modelPackages)}
         <div class="package-manager__row">
           <span><strong>{packageInfo.definition.name}</strong><small>{packageInfo.key}</small></span>
           <em>{t("Project")}</em>
+          {#if target && onStereotypeDeleteRequest}
+            <button
+              type="button"
+              class="dataset-form__delete"
+              onclick={() => requestStereotypeDelete(target)}
+              disabled={deletingStereotype || pendingStereotypeDeletion !== null}
+            >{t("Delete")}</button>
+          {/if}
         </div>
       {/each}
+    </div>
+  {/if}
+
+  {#if pendingStereotypeDeletion}
+    <div class="package-manager__message" aria-live="polite">
+      <p>{t("Delete this project stereotype and its folder?")}</p>
+      <small>{pendingStereotypeDeletion.id}@{pendingStereotypeDeletion.version} · {pendingStereotypeDeletion.path}</small>
+      {#if stereotypeDeletionError}
+        <p class="package-manager__message--error" role="alert">{t(stereotypeDeletionError)}</p>
+      {/if}
+      <div class="dataset-form__confirmation-actions">
+        <button type="button" onclick={() => (pendingStereotypeDeletion = null)} disabled={deletingStereotype}>{t("Cancel")}</button>
+        <button type="button" class="dataset-form__delete" onclick={deleteStereotype} disabled={deletingStereotype} aria-busy={deletingStereotype}>
+          {deletingStereotype ? t("Deleting…") : t("Delete stereotype")}
+        </button>
+      </div>
     </div>
   {/if}
 

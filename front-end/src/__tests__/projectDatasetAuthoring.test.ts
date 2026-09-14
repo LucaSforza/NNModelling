@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import {
   createProjectWorkspace,
   openProjectWorkspace,
@@ -12,8 +12,10 @@ import {
   ProjectDatasetAuthoringCoordinator,
   generateDatasetResources,
   readDatasetDataFile,
+  type GeneratedDatasetResources,
 } from "../project-workspace/dataset-authoring"
-import type { ModelManifestV2 } from "../project-workspace/dataset-contract"
+import { ProjectAuthoringService } from "../project-workspace/authoring-service"
+import type { ModelDatasetReference, ModelManifestV2 } from "../project-workspace/dataset-contract"
 
 class MemoryFile implements ProjectFile {
   constructor(public value: string | Uint8Array) {}
@@ -279,6 +281,94 @@ describe("project dataset authoring", () => {
     const restored = JSON.parse((await readProjectWorkspace(session.directory)).modelJson)
     expect(restored.nodes).toEqual([{ id: "latest", position: { x: 350, y: 20 } }])
     expect(restored.manifest.customDatasets).toEqual([])
+  })
+
+  test("shared project authoring returns exact identities and synchronizes dataset catalogs", async () => {
+    const parent = new MemoryDirectory()
+    const session = await createProjectWorkspace(parent, "demo", MODEL)
+    const stereotypeIdentity = { id: "model.custom", version: "1.0.0", path: "packages/custom" }
+    const stereotypes = {
+      author: vi.fn().mockResolvedValue({ generated: { modelPackage: stereotypeIdentity }, modelJson: MODEL } as never),
+      delete: vi.fn().mockResolvedValue(stereotypeIdentity),
+    }
+    const installed: GeneratedDatasetResources[] = []
+    const removed: ModelDatasetReference[] = []
+    const service = new ProjectAuthoringService(
+      stereotypes,
+      new ProjectDatasetAuthoringCoordinator(session),
+      { installDataset: (generated) => installed.push(generated), removeDataset: (target) => removed.push(target) },
+    )
+
+    await expect(service.createStereotype({
+      id: "model.custom",
+      version: "1.0.0",
+      directory: "packages/custom",
+      name: "Custom",
+      kind: "layer",
+      view: { color: "#123456", width: 100, height: 80 },
+      parameters: [],
+    })).resolves.toEqual(stereotypeIdentity)
+    await expect(service.deleteStereotype(stereotypeIdentity)).resolves.toEqual(stereotypeIdentity)
+
+    const createdDataset = await service.createDataset(REQUEST)
+    expect(createdDataset).toEqual({ id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" })
+    expect(installed).toHaveLength(1)
+    expect(installed[0]?.modelDataset).toEqual(createdDataset)
+    await expect(service.deleteDataset(createdDataset)).resolves.toEqual(createdDataset)
+    expect(removed).toEqual([createdDataset])
+    expect(new ProjectDatasetAuthoringCoordinator(session).listProjectDatasets()).toEqual([])
+  })
+
+  test("serializes stereotype and dataset mutations through the shared service", async () => {
+    const stereotypeIdentity = { id: "model.custom", version: "1.0.0", path: "packages/custom" }
+    let releaseStereotype!: () => void
+    const stereotypeBlocked = new Promise<void>((resolve) => { releaseStereotype = resolve })
+    const order: string[] = []
+    const stereotypes = {
+      author: vi.fn(async () => {
+        order.push("stereotype-start")
+        await stereotypeBlocked
+        order.push("stereotype-end")
+        return { generated: { modelPackage: stereotypeIdentity }, modelJson: MODEL } as never
+      }),
+      delete: vi.fn().mockResolvedValue(stereotypeIdentity),
+    }
+    const generated = generateDatasetResources(REQUEST)
+    const datasets = {
+      author: vi.fn(async () => {
+        order.push("dataset")
+        return { generated, modelJson: MODEL }
+      }),
+      update: vi.fn(),
+      delete: vi.fn(),
+    }
+    const service = new ProjectAuthoringService(
+      stereotypes,
+      datasets,
+      { installDataset: () => undefined, removeDataset: () => undefined },
+    )
+
+    const stereotypeRequest = {
+      id: "model.custom",
+      version: "1.0.0",
+      directory: "packages/custom",
+      name: "Custom",
+      kind: "layer" as const,
+      view: { color: "#123456", width: 100, height: 80 },
+      parameters: [],
+    }
+    const stereotypeOperation = service.createStereotype(stereotypeRequest)
+    const datasetOperation = service.createDataset(REQUEST)
+    await Promise.resolve()
+    expect(order).toEqual(["stereotype-start"])
+    expect(datasets.author).not.toHaveBeenCalled()
+
+    releaseStereotype()
+    await expect(Promise.all([stereotypeOperation, datasetOperation])).resolves.toEqual([
+      stereotypeIdentity,
+      generated.modelDataset,
+    ])
+    expect(order).toEqual(["stereotype-start", "stereotype-end", "dataset"])
   })
 })
 

@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import { BrowserRPCHandler } from "../sync/BrowserRPCHandler"
+import type { ProjectAuthoringOperations } from "../project-workspace/authoring-service"
 
 function harness() {
   const sent: Array<Record<string, unknown>> = []
@@ -113,5 +114,105 @@ describe("BrowserRPCHandler training download", () => {
 
     expect(downloadTrainingWheel).toHaveBeenCalledWith("job-1", "nnm_vae")
     expect(sent[0]?.result).toEqual({ status: "ok" })
+  })
+})
+
+describe("BrowserRPCHandler project authoring", () => {
+  test("routes all four top-level requests to the shared project operations", async () => {
+    const stereotype = { id: "model.custom", version: "1.0.0", path: "packages/custom" }
+    const dataset = { id: "demo.tokens", version: "1.0.0", path: "datasets/tokens" }
+    const authoring: ProjectAuthoringOperations = {
+      createStereotype: vi.fn().mockResolvedValue(stereotype),
+      deleteStereotype: vi.fn().mockResolvedValue(stereotype),
+      createDataset: vi.fn().mockResolvedValue(dataset),
+      deleteDataset: vi.fn().mockResolvedValue(dataset),
+    }
+    const diagram = { nodes: [], edges: [], packageCatalog: [] } as any
+    const sent: Array<Record<string, unknown>> = []
+    const handler: any = new BrowserRPCHandler(diagram, "ws://test", undefined, undefined, undefined, authoring)
+    handler.ws = { readyState: 1, send(payload: string) { sent.push(JSON.parse(payload)) } }
+    const stereotypeRequest = {
+      id: "model.custom",
+      version: "1.0.0",
+      directory: "packages/custom",
+      name: "Custom",
+      kind: "layer",
+      view: { color: "#123456", width: 120, height: 80 },
+      dependencies: { "core.relu": "^0.1.0" },
+      parameters: [],
+    }
+    const datasetRequest = {
+      id: "demo.tokens",
+      version: "1.0.0",
+      directory: "datasets/tokens",
+      name: "Tokens",
+      parameters: [],
+      inputs: [{ name: "tokens", shape: ["B", "T"], dtype: "int64" }],
+      targets: [{ name: "next_tokens", shape: ["B", "T"], dtype: "int64" }],
+      classes: { count: 2, names: ["no", "yes"] },
+      dataFiles: [{ path: "train.pt", dataBase64: "AQID" }],
+    }
+    const calls = [
+      { id: "create-stereotype", method: "create_stereotype", params: stereotypeRequest },
+      { id: "delete-stereotype", method: "delete_stereotype", params: stereotype },
+      { id: "create-dataset", method: "create_dataset", params: datasetRequest },
+      { id: "delete-dataset", method: "delete_dataset", params: dataset },
+    ]
+    for (const call of calls) handler.handleMessage({ data: JSON.stringify(call) })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(authoring.createStereotype).toHaveBeenCalledWith(stereotypeRequest)
+    expect(authoring.deleteStereotype).toHaveBeenCalledWith(stereotype)
+    expect(authoring.createDataset).toHaveBeenCalledWith({
+      ...datasetRequest,
+      dataFiles: [{ path: "train.pt", bytes: new Uint8Array([1, 2, 3]) }],
+    })
+    expect(authoring.deleteDataset).toHaveBeenCalledWith(dataset)
+    expect(sent.map((response) => response.result)).toEqual([stereotype, stereotype, dataset, dataset])
+  })
+
+  test("rejects non-canonical dataset base64 before the shared coordinator runs", async () => {
+    const createDataset = vi.fn()
+    const authoring = {
+      createStereotype: vi.fn(),
+      deleteStereotype: vi.fn(),
+      createDataset,
+      deleteDataset: vi.fn(),
+    } as unknown as ProjectAuthoringOperations
+    const sent: Array<Record<string, unknown>> = []
+    const handler: any = new BrowserRPCHandler({} as any, "ws://test", undefined, undefined, undefined, authoring)
+    handler.ws = { readyState: 1, send(payload: string) { sent.push(JSON.parse(payload)) } }
+
+    handler.handleMessage({ data: JSON.stringify({
+      id: "bad-dataset",
+      method: "create_dataset",
+      params: { id: "demo.tokens", dataFiles: [{ path: "train.pt", dataBase64: "AB==" }] },
+    }) })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(createDataset).not.toHaveBeenCalled()
+    expect(sent[0]?.error).toMatchObject({ message: expect.stringMatching(/canonical base64/) })
+  })
+
+  test("returns coordinator failures without reporting a successful delete", async () => {
+    const authoring: ProjectAuthoringOperations = {
+      createStereotype: vi.fn(),
+      deleteStereotype: vi.fn().mockRejectedValue(new Error("stereotype is required by another package")),
+      createDataset: vi.fn(),
+      deleteDataset: vi.fn(),
+    }
+    const sent: Array<Record<string, unknown>> = []
+    const handler: any = new BrowserRPCHandler({} as any, "ws://test", undefined, undefined, undefined, authoring)
+    handler.ws = { readyState: 1, send(payload: string) { sent.push(JSON.parse(payload)) } }
+
+    handler.handleMessage({ data: JSON.stringify({
+      id: "blocked-delete",
+      method: "delete_stereotype",
+      params: { id: "model.custom", version: "1.0.0", path: "packages/custom" },
+    }) })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(sent[0]?.result).toBeUndefined()
+    expect(sent[0]?.error).toEqual({ message: "stereotype is required by another package" })
   })
 })

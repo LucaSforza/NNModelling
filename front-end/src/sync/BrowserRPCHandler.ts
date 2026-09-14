@@ -21,6 +21,7 @@
 //                  | { id: string, error: { message: string } }
 
 import type { Diagram } from "../Diagram.svelte";
+import type { ModelPackageReference } from "../core/types";
 import type { Node, Edge } from "@xyflow/svelte";
 import type { GraphInferenceResult } from "../type-system/graph/types";
 import { packageIdentity } from "../type-system/graph/types";
@@ -28,7 +29,10 @@ import { compileGraphBindings } from "../type-system/graph/bindings";
 import { initialPackageParameters, validatePackageParameterValues } from "../type-system/editor/package-ui";
 import { TrainingController } from "../training/controller";
 import type { ProjectPathPayload } from "../project-workspace/path";
-import type { DatasetParameterValue } from "../project-workspace/dataset-contract";
+import type { DatasetParameterValue, ModelDatasetReference } from "../project-workspace/dataset-contract";
+import type { DatasetAuthoringRequest } from "../project-workspace/dataset-authoring";
+import type { ProjectAuthoringOperations } from "../project-workspace/authoring-service";
+import type { StereotypeAuthoringRequest } from "../stereotype-authoring";
 
 // ── RPC Types ──────────────────────────────────────────────────────────
 
@@ -124,6 +128,7 @@ export class BrowserRPCHandler {
   private viewport?: ViewportController;
   private training?: TrainingController;
   private project?: ProjectRPCBridge;
+  private authoring?: ProjectAuthoringOperations;
   private readonly pendingBrowserRequests = new Map<string, PendingBrowserRequest>();
   private nextBrowserRequestId = 0;
 
@@ -136,7 +141,14 @@ export class BrowserRPCHandler {
    * @param viewport Optional viewport controller (fitView/setCenter).
    *                 Passed from FlowCanvas.svelte via useSvelteFlow().
    */
-  constructor(diagram: Diagram | undefined, url?: string, viewport?: ViewportController, training?: TrainingController, project?: ProjectRPCBridge) {
+  constructor(
+    diagram: Diagram | undefined,
+    url?: string,
+    viewport?: ViewportController,
+    training?: TrainingController,
+    project?: ProjectRPCBridge,
+    authoring?: ProjectAuthoringOperations,
+  ) {
     this.diagram = diagram as Diagram;
     this.diagramActive = diagram !== undefined;
     this.url =
@@ -147,11 +159,16 @@ export class BrowserRPCHandler {
     this.viewport = viewport;
     this.training = training;
     this.project = project;
+    this.authoring = authoring;
   }
 
   bindDiagram(diagram: Diagram | undefined): void {
     this.diagramActive = diagram !== undefined;
     if (diagram) this.diagram = diagram;
+  }
+
+  bindAuthoringService(authoring: ProjectAuthoringOperations | undefined): void {
+    this.authoring = authoring;
   }
 
   /** Send a fire-and-forget browser-owned notification to the MCP bridge. */
@@ -302,6 +319,20 @@ export class BrowserRPCHandler {
           break;
         case "get_package_diagnostics":
           result = this.handleGetPackageDiagnostics();
+          break;
+
+        // ── Project authoring ────────────────────────────────────
+        case "create_stereotype":
+          result = this.requireAuthoringService().createStereotype(params as unknown as StereotypeAuthoringRequest);
+          break;
+        case "delete_stereotype":
+          result = this.requireAuthoringService().deleteStereotype(projectPackageIdentity(params));
+          break;
+        case "create_dataset":
+          result = this.requireAuthoringService().createDataset(decodeDatasetAuthoringRequest(params));
+          break;
+        case "delete_dataset":
+          result = this.requireAuthoringService().deleteDataset(projectDatasetIdentity(params));
           break;
 
         // ── Mutations ─────────────────────────────────────────────
@@ -464,6 +495,11 @@ export class BrowserRPCHandler {
   private requireTraining(): TrainingController {
     if (!this.training) throw new Error("Training controller unavailable for this editor");
     return this.training;
+  }
+
+  private requireAuthoringService(): ProjectAuthoringOperations {
+    if (!this.authoring) throw Object.assign(new Error("Project authoring service unavailable for this editor"), { code: "PROJECT_AUTHORING_UNAVAILABLE" });
+    return this.authoring;
   }
 
   private syncDatasetInference(): void {
@@ -1191,4 +1227,59 @@ export class BrowserRPCHandler {
       activeTransaction: null,
     };
   }
+}
+
+function projectPackageIdentity(params: unknown): ModelPackageReference {
+  return projectResourceIdentity(params, "stereotype")
+}
+
+function projectDatasetIdentity(params: unknown): ModelDatasetReference {
+  return projectResourceIdentity(params, "dataset")
+}
+
+function projectResourceIdentity<T extends ModelPackageReference | ModelDatasetReference>(
+  value: unknown,
+  resource: "stereotype" | "dataset",
+): T {
+  if (!isRecord(value)) throw new Error(`${resource} identity must be an object`)
+  for (const key of ["id", "version", "path"] as const) {
+    if (typeof value[key] !== "string" || value[key].length === 0) {
+      throw new Error(`${resource} identity '${key}' must be a non-empty string`)
+    }
+  }
+  return { id: value.id as string, version: value.version as string, path: value.path as string } as T
+}
+
+function decodeDatasetAuthoringRequest(value: unknown): DatasetAuthoringRequest {
+  if (!isRecord(value)) throw new Error("dataset authoring request must be an object")
+  if (value.dataFiles === undefined) return value as unknown as DatasetAuthoringRequest
+  if (!Array.isArray(value.dataFiles)) throw new Error("dataset dataFiles must be an array")
+  const dataFiles = value.dataFiles.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`dataset data file ${index} must be an object`)
+    if (typeof entry.path !== "string") throw new Error(`dataset data file ${index} path must be a string`)
+    if (typeof entry.dataBase64 !== "string") throw new Error(`dataset data file ${index} dataBase64 must be a string`)
+    return { path: entry.path, bytes: decodeStrictBase64(entry.dataBase64) }
+  })
+  return { ...value, dataFiles } as unknown as DatasetAuthoringRequest
+}
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+
+function decodeStrictBase64(value: string): Uint8Array {
+  if (!BASE64.test(value)) throw new Error("dataset data file dataBase64 must be canonical base64")
+  let binary: string
+  try {
+    binary = atob(value)
+  } catch {
+    throw new Error("dataset data file dataBase64 must be canonical base64")
+  }
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  let encodedBytes = ""
+  for (const byte of bytes) encodedBytes += String.fromCharCode(byte)
+  if (btoa(encodedBytes) !== value) throw new Error("dataset data file dataBase64 must be canonical base64")
+  return bytes
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }

@@ -57,9 +57,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   // 1. Importiamo la classe Diagram
   import { Diagram, DIAGRAM_CONTEXT_KEY } from "./Diagram.svelte";
   import { setContext, tick } from "svelte";
+  import type { ModelPackageReference } from "./core/types";
   import type { ProjectSaveStatus, ProjectWorkspaceSession } from "./project-workspace";
   import { ProjectStereotypeAuthoringCoordinator } from "./project-workspace";
   import { ProjectDatasetAuthoringCoordinator, type DatasetAuthoringRequest, type GeneratedDatasetResources } from "./project-workspace/dataset-authoring";
+  import { ProjectAuthoringService } from "./project-workspace/authoring-service";
   import type { DatasetParameterValue, DatasetReference, ModelDatasetReference } from "./project-workspace/dataset-contract";
   import type { StereotypeAuthoringRequest } from "./stereotype-authoring";
   import type { DatasetInfo } from "./training/api";
@@ -169,7 +171,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   function authorStereotype(request: StereotypeAuthoringRequest): Promise<void> {
-    return stereotypeAuthoring.author(request).then(() => undefined);
+    return authoringService.createStereotype(request).then(() => undefined);
+  }
+
+  function deleteStereotype(target: ModelPackageReference): Promise<void> {
+    return authoringService.deleteStereotype(target).then(() => undefined);
   }
 
   function datasetReference(modelDataset: ModelDatasetReference): DatasetReference {
@@ -198,17 +204,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   }
 
   async function authorDataset(request: DatasetAuthoringRequest): Promise<void> {
-    const { generated } = await datasetAuthoring.author(request);
-    installProjectDataset(generated);
+    await authoringService.createDataset(request);
   }
 
   async function updateDataset(target: ModelDatasetReference, request: DatasetAuthoringRequest): Promise<void> {
-    const { generated } = await datasetAuthoring.update(target, request);
-    installProjectDataset(generated);
+    await authoringService.updateDataset(target, request);
   }
 
-  async function deleteDataset(target: ModelDatasetReference): Promise<void> {
-    await datasetAuthoring.delete(target);
+  function removeProjectDataset(target: ModelDatasetReference): void {
     const reference = datasetReference(target);
     projectDatasetInfos = projectDatasetInfos.filter((dataset) => dataset.reference.ref !== reference.ref);
     const nextResources = new Map(projectDatasetResources);
@@ -216,6 +219,15 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     projectDatasetResources = nextResources;
     trainingController.setProjectDatasets(projectDatasetInfos, projectDatasetResources);
     diagram.setDatasetCatalog(projectDatasetInfos.map((dataset) => dataset.definition));
+  }
+
+  const authoringService = new ProjectAuthoringService(stereotypeAuthoring, datasetAuthoring, {
+    installDataset: installProjectDataset,
+    removeDataset: removeProjectDataset,
+  });
+
+  function deleteDataset(target: ModelDatasetReference): Promise<void> {
+    return authoringService.deleteDataset(target).then(() => undefined);
   }
 
   // Stage package-aware import before exposing Svelte Flow. New projects carry
@@ -320,10 +332,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   let syncClient: BrowserRPCHandler;
 
   $effect(() => {
-    syncClient = rpcHandler ?? new BrowserRPCHandler(diagram, undefined, { fitView, setCenter }, trainingController);
+    syncClient = rpcHandler ?? new BrowserRPCHandler(diagram, undefined, { fitView, setCenter }, trainingController, undefined, authoringService);
     if (rpcHandler) {
       syncClient.bindDiagram(diagram);
-      return () => syncClient.bindDiagram(undefined);
+      syncClient.bindAuthoringService(authoringService);
+      return () => {
+        syncClient.bindDiagram(undefined);
+        syncClient.bindAuthoringService(undefined);
+      };
     }
     syncClient.connect();
     return () => syncClient.disconnect();
@@ -787,7 +803,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
       </button>
     <PackageManager
         packages={diagram.packageCatalog}
+        modelPackages={diagram.modelManifest.customPackages}
         onAuthoringRequest={authorStereotype}
+        onStereotypeDeleteRequest={deleteStereotype}
         {projectDatasets}
         onDatasetAuthoringRequest={authorDataset}
         onDatasetUpdateRequest={updateDataset}

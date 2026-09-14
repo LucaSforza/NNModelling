@@ -44,7 +44,7 @@ for (const directory of [join(repositoryRoot, "examples/diagrams")]) {
     if (!Array.isArray(document.nodes)) continue
     for (const node of document.nodes) {
       const identity = node?.data?.package
-      if (typeof identity?.id !== "string" || typeof identity?.version !== "string" || typeof identity?.name !== "string") {
+      if (typeof identity?.id !== "string" || typeof identity?.version !== "string") {
         failures.push(`${path} node ${String(node?.id)} lacks exact data.package identity`)
       }
       if (wrapped(node?.data?.params)) failures.push(`${path} node ${String(node?.id)} contains wrapped parameter values`)
