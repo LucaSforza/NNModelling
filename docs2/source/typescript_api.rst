@@ -7,52 +7,55 @@ documentation is available as a static site.
 Viewing the TypeScript API
 --------------------------
 
-After building the documentation (see :doc:`user_guide`), open:
+After running ``pnpm run docs`` from the repository root, open:
 
 .. code-block:: text
 
    docs2/build/typedoc/index.html
 
-This page provides full API documentation for all exported symbols, including:
+The current entry points document the following public symbols:
 
 * ``DiagramCore`` — main state authority with all graph manipulation methods
-* ``StereotypeCore`` — browser stereotype JSON loader (Vite ``import.meta.glob``)
 * ``BrowserRPCHandler`` — WebSocket RPC handler for MCP integration
 * ``checkValidConnection`` — standalone connection validation
 * ``findDirectedCycle`` — cycle detection over directed graph edges
 * ``Position``, ``NodeConfig``, ``JoinNodeConfig``, ``DiagramCoreSnapshot`` —
   core type definitions
 
+The retired ``StereotypeCore`` loader is not part of the current API; packages
+are activated through the package type-system runtime.
+
 Generating the TypeScript API
 -----------------------------
 
-To regenerate the TypeDoc output:
+To regenerate only the TypeDoc output:
 
 .. code-block:: bash
 
-   cd front-end
-   pnpm exec typedoc --options typedoc.json
-
-Or as part of the full documentation build:
-
-.. code-block:: bash
-
-   # From project root
    pnpm run docs:typedoc
+
+To regenerate both TypeDoc and Sphinx:
+
+.. code-block:: bash
+
+   pnpm run docs
 
 Architecture Overview
 ---------------------
 
+The TypeScript API documentation is generated from ``src/core/index.ts`` and
+``src/sync/index.ts``. The core barrel exports ``DiagramCore``, selected core
+types and graph-validation functions; the sync barrel exports
+``BrowserRPCHandler``.
+
 The TypeScript codebase is organized into two layers:
 
-**core/** (Pure TypeScript — no Svelte dependencies)
-    These modules can run in any JavaScript environment and are the foundation
-    of the editor's business logic:
+**core/** (TypeScript graph core)
+    These modules contain the editor's graph business logic without Svelte
+    components. Their public node and edge types use Svelte Flow types:
 
     * ``DiagramCore`` — manages nodes, edges, undo/redo, import/export, and
       exposes the synchronous ``onGraphChanged`` graph-change subscription
-    * ``StereotypeCore`` — loads stereotype JSON from the ``Stereotypes/``
-      directory via Vite's ``import.meta.glob`` (browser)
     * ``types.ts`` — shared type definitions (``Position``, ``NodeConfig``,
       ``JoinNodeConfig``, ``DiagramCoreSnapshot``)
     * ``validation.ts`` — connection validation rules and cycle detection
@@ -80,7 +83,7 @@ The ``core`` barrel exports these configuration and snapshot types (the
      color?: string;
      width?: number;
      height?: number;
-     params?: Record<string, any>;
+     params?: Record<string, unknown>;
    }
 
    interface JoinNodeConfig extends NodeConfig {
@@ -90,6 +93,8 @@ The ``core`` barrel exports these configuration and snapshot types (the
    interface DiagramCoreSnapshot {
      nodes: Node[];
      edges: Edge[];
+     layoutDirection: LayoutDirection;
+     manifest: ModelManifest;
    }
 
 ``DiagramCore`` also exposes the synchronous ``onGraphChanged(handler)``
@@ -98,5 +103,6 @@ mutation (add/update/delete/move operations, edge changes, undo/redo, snapshot
 restore, import and reset), carries no payload, and returns an unsubscribe
 function. Rejected connections and no-op operations do not notify.
 
-For complete type signatures and method documentation, refer to the
-TypeDoc output linked above.
+TypeDoc documents the selected public entry points. Types referenced from
+other modules may appear in signatures without having standalone pages; consult
+their source definitions for those supporting types.

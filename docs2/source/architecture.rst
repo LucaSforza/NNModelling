@@ -15,7 +15,10 @@ The MCP server only forwards requests:
    MCP stdio -> BrowserRPCClient -> BrowserRPCHandler -> DiagramCore
 
 It keeps no graph mirror and exposes package graph inspection, mutation,
-serialization and validation as narrow browser proxies.
+serialization and selected validation operations as browser proxies. These
+checks are not a complete type checker: ``validate_graph`` covers only selected
+topology rules, while connection and subflow validation can report
+``supported: false``. Package Lua inference remains the semantic authority.
 
 Backend boundary
 ----------------
@@ -43,5 +46,4 @@ Security
 The API process has no authority to execute uploaded package code. Workers use
 least-privilege mounts, bounded resources, network policy and an explicit
 runtime image. Container execution is the only package-job executor; there is
-
 no host-Python fallback.

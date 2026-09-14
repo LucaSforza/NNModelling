@@ -77,20 +77,29 @@ pnpm docs
 
 ## Documentation
 
-For the local documentation site:
+Build the full documentation set, including the TypeDoc frontend API:
 
 ```bash
-cd docs2 && uv run make html
+pnpm run docs
 ```
 
-The Sphinx docs cover:
+This generates Sphinx HTML in `docs2/build/html/` and TypeDoc in
+`docs2/build/typedoc/`. To build only Sphinx:
 
-- **User Guide** — how to use the visual editor
-- **Architecture** — system design, data flow, components
-- **Stereotypes Reference** — JSON format, categories, all parameters
-- **Python API Reference** — convert.py, main.py, infer.py, Net, ops
-- **TypeScript API Reference** — DiagramCore, StereotypeCore, BrowserRPCHandler
-- **Examples** — walkthrough of all 10 example diagrams
+```bash
+cd docs2
+uv run make html
+```
+
+The documentation covers:
+
+- **User and training guides** — package graphs, dataset bindings and training
+- **Architecture** — browser ownership, MCP proxy and package backend
+- **Package definitions and tensor type system** — package kinds, Lua inference
+  rules and dataset-backed Input contracts
+- **Python API Reference** — package runtime, worker and authenticated backend
+- **TypeScript API Reference** — DiagramCore, graph validation and browser RPC
+- **Examples** — editable package-format model diagrams
 
 See also `CLAUDE.md` / `AGENTS.md` for the AI agent project guide.
 
