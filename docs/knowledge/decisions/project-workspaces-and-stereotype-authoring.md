@@ -1,7 +1,7 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-09-10
+updated: 2026-09-14
 ---
 
 # Writable project workspaces and model-owned stereotype authoring
@@ -58,6 +58,18 @@ the user can edit the Lua and PyTorch implementations outside NNModelling.
   `inference.lua`, and `pytorch.py`, adds the exact relative entry to the
   model's `manifest.customPackages`, stages the resulting package scope, and
   exposes the stereotype in the current palette.
+- An exact project-owned stereotype may be deleted from the visible manager or
+through browser-backed MCP. Core packages are immutable. Deletion is rejected
+when the graph uses the exact package identity or another project-owned package
+resolves it as a dependency; the operation never cascades into nodes or rewrites
+dependencies. The editor runtime resolves dependency ranges against the complete
+model scope while loading project package records and exposes those exact keys
+through `packageExports()` for the shared UI/MCP deletion guard.
+- Successful deletion removes the exact `manifest.customPackages` entry,
+  project-relative package directory and active runtime/catalog entry. The next
+  scope is staged before commit. On write, removal or activation failure, the
+  previous manifest, package bytes and runtime scope are restored; unrelated
+  project resources are never removed.
 - Generation is transactional from the application's perspective: validate
   all content and the staged package scope before committing it; on a later
   filesystem or activation failure, restore the previous model and remove only
@@ -85,6 +97,9 @@ the user can edit the Lua and PyTorch implementations outside NNModelling.
   automatic saving.
 - Project creation, opening, graph editing, package authoring, and backend
   export all operate on the same `core + current-model-custom` package scope.
+- UI and browser-backed MCP creation/deletion call the same project authoring
+  coordinators. The MCP boundary adapts JSON transport but does not own a second
+  generator, package catalog or filesystem model.
 - Direct edits made by another application are not watched automatically.
   Reloading a project or an explicit future refresh action is the boundary for
   rereading those files.
@@ -100,5 +115,8 @@ the user can edit the Lua and PyTorch implementations outside NNModelling.
 
 ## Implementation
 
-The executable work is defined in
+The base workspace and authoring work is defined in
 [`../../plans/active/project-workspaces-and-stereotype-authoring/plan.md`](../../plans/active/project-workspaces-and-stereotype-authoring/plan.md).
+UI/MCP creation and deletion parity is tracked by the
+[`../../plans/active/mcp-project-authoring-parity/plan.md`](../../plans/active/mcp-project-authoring-parity/plan.md)
+initiative.

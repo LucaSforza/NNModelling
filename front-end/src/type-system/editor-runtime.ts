@@ -3,7 +3,7 @@ import type { DatasetDefinition } from "../project-workspace/dataset-contract"
 import { PackageGraphScheduler } from "./graph/scheduler"
 import { TypeSystemHost, type ActivePackageMetadata, type PackageSelection } from "./host"
 import { bundledCoreRecords } from "./bundled/catalog"
-import { PackageCatalog, packageKey, packageRecordKey } from "./packages/catalog"
+import { immutableRecord, PackageCatalog, packageKey, packageRecordKey } from "./packages/catalog"
 import type { InstalledPackageRecord, PackageExportInfo, PackageKey, PackageSource } from "./packages/types"
 import { parseModelManifest, type ModelManifest, type PackageIdentity } from "../core/types"
 import { parseDefinition, parseManifest } from "./packages/validation"
@@ -226,7 +226,7 @@ export class EditorTypeSystemRuntime {
     graphIdentities: readonly RuntimePackageIdentity[] = [],
   ): Promise<PreparedModelScope> {
     const manifest = parseModelManifest(manifestValue)
-    const customPackages = await resolveModelPackageRecords(manifest, bundle)
+    const customPackages = await resolveModelPackageRecords(manifest, bundle, this.bundled)
     const catalog = PackageCatalog.composeModel(this.bundled, customPackages)
     const host = await TypeSystemHost.create(catalog.records().map((record) => ({ resources: record.resources })))
     const coordinator = new PackageActivationCoordinator(host, catalog)
@@ -299,6 +299,7 @@ export class EditorTypeSystemRuntime {
 export async function resolveModelPackageRecords(
   manifest: ModelManifest,
   bundle: ModelBundleResources | undefined,
+  bundled: readonly InstalledPackageRecord[] = [],
 ): Promise<readonly InstalledPackageRecord[]> {
   if (manifest.customPackages.length > 0 && bundle === undefined) {
     throw new Error(`model '${manifest.id}' declares custom packages but no model bundle was provided`)
@@ -335,7 +336,11 @@ export async function resolveModelPackageRecords(
       resources,
     }))
   }
-  return records
+  const resolver = PackageCatalog.composeModel(bundled, records)
+  return records.map((record) => immutableRecord({
+    ...record,
+    resolvedDependencies: resolver.resolveDependencies(record.key),
+  }))
 }
 
 function decodeModelResource(value: string | Uint8Array): string {

@@ -51,6 +51,7 @@ import * as connectionTools from "./tools/connection.js";
 import * as screenshotTools from "./tools/screenshot.js";
 import * as remoteTrainingTools from "./tools/remote-training.js";
 import * as projectTools from "./tools/project.js";
+import * as authoringTools from "./tools/authoring.js";
 import { applyProjectResource, type ProjectResourceOperation } from "./project-path.js";
 
 // ── ServerContext ───────────────────────────────────────────────────────
@@ -180,6 +181,7 @@ export async function createServer(
     screenshotTools,
     remoteTrainingTools,
     projectTools,
+    authoringTools,
   ] as Record<string, unknown>[];
 
   for (const module of allToolModules) {

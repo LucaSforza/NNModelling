@@ -1,7 +1,7 @@
 ---
 kind: knowledge
 status: current
-updated: 2026-08-30
+updated: 2026-09-14
 ---
 
 # Browser-backed MCP architecture
@@ -116,6 +116,16 @@ counterparts use the distinct routes above.
 | Format view | `FlowCanvas` calls `diagram.autoLayout` for horizontal/vertical **Disponi**. No MCP tool or browser RPC case exposes it. `fit_view`, `center_view` and `move_nodes` are not equivalent. |
 | Screenshot | CDP capture supports optional reload and output-handle hover. It neither performs layout nor waits for the editor's layout/render completion, so it does not enforce the required layout-before-capture workflow. |
 | Open a project | MCP exposes `create_project({projectPath,id,version,name,description})` and `open_project({projectPath})` through a confined `NNM_PROJECT_ROOT`; the server prepares/loads bytes and the browser bridge owns activation and model-save notifications. A live browser tab is still required before activation; `import_diagram`/`reset_diagram` remain distinct operations. |
+| Create stereotype | `create_stereotype` validates the complete JSON form shape at MCP, then delegates the unchanged semantic request to the selected browser's shared project-authoring service and stereotype coordinator. The browser writes, stages and activates the project package. |
+| Delete stereotype | `delete_stereotype({id,version,path})` delegates exact ownership, graph-use and dependency checks to the shared browser coordinator. The UI uses the same operation with confirmation; core, missing, in-use and dependency-required packages are rejected without cascade. |
+| Create dataset | `create_dataset` exposes the complete dataset form shape. Optional file bytes use canonical base64 only across JSON and are decoded before the shared browser dataset coordinator validates and writes them. |
+| Delete dataset | `delete_dataset({id,version,path})` delegates to the same coordinator as the UI. It removes the project manifest/directory/catalog/training descriptor while preserving backend archives and historical jobs. |
+
+The four authoring operations are serialized by the browser-owned project
+authoring service. Package-scope transitions temporarily suppress the visible
+catalog and reject package-node additions until the runtime commit or rollback
+finishes, so asynchronous create/delete/import work cannot reintroduce an
+identity absent from the committed project scope.
 
 ### Implementation evidence
 

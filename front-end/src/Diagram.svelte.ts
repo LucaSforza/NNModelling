@@ -21,7 +21,7 @@ import type { LayoutDirection } from "./layout/autoLayout";
 import type { DatasetInferenceContext, GraphInferenceResult } from "./type-system/graph/types";
 import { EditorTypeSystemRuntime } from "./type-system/editor-runtime";
 import type { ModelBundleResources, PackageCatalogMetadata, PreparedModelScope } from "./type-system/editor-runtime";
-import type { PackageExportInfo } from "./type-system/packages/types";
+import type { PackageExportInfo, PackageKey } from "./type-system/packages/types";
 import type { PackageIdentity } from "./core/types";
 import type { DatasetDefinition } from "./project-workspace/dataset-contract";
 import type { DiagramCoreSnapshot } from "./core/types";
@@ -46,6 +46,7 @@ export class Diagram extends DiagramCore {
   public packageRuntimeDiagnostics: PackageRuntimeDiagnostic[] = $state.raw([]);
   /** Current dataset instance used to resolve top-level Input nodes. */
   public datasetInferenceContext: DatasetInferenceContext | null = $state.raw(null);
+  private projectScopeTransition = false;
   private packageTypeRuntime: EditorTypeSystemRuntime | null = null;
   private readonly packageRuntimeReadyPromise: Promise<void>;
   private readonly diagnosticCollection = new PackageRuntimeDiagnosticCollection();
@@ -133,6 +134,21 @@ export class Diagram extends DiagramCore {
     // Catalog replacement changes the Input capability immediately. Keep the
     // visible result in lockstep with the authoritative DiagramCore state.
     this.refreshTypes()
+  }
+
+  /** Add only packages from the visible, committed scope. */
+  public override addPackageNode(
+    identity: PackageIdentity,
+    kind: Parameters<DiagramCore["addPackageNode"]>[1],
+    x: number,
+    y: number,
+    config?: Parameters<DiagramCore["addPackageNode"]>[4],
+  ): Node {
+    const key: PackageKey = `${identity.id}@${identity.version}`;
+    if (this.projectScopeTransition || !this.packageCatalog.some((metadata) => metadata.key === key)) {
+      throw new Error(`package '${key}' is unavailable in the active project scope`);
+    }
+    return super.addPackageNode(identity, kind, x, y, config);
   }
 
   /** Presentation docking is intentionally limited to ordinary layer nodes. */
@@ -259,25 +275,74 @@ export class Diagram extends DiagramCore {
   }
 
   /** Commit one already-prepared scope through DiagramCore and refresh UI state. */
-  public async commitPreparedProjectScope(prepared: { readonly snapshot: DiagramCoreSnapshot; readonly scope: PreparedModelScope }): Promise<void> {
-    await this.packageRuntimeReadyPromise;
-    if (!this.packageTypeRuntime) throw new Error("package type-system is unavailable");
-    this.commitProject(prepared.snapshot);
-    await this.packageTypeRuntime.commitModelScope(prepared.scope);
-    this.diagnosticCollection.clear();
-    this.syncPackageCatalog();
-    this.syncRuntimeDiagnostics();
-    this.refreshTypes();
+  public async commitPreparedProjectScope(
+    prepared: { readonly snapshot: DiagramCoreSnapshot; readonly scope: PreparedModelScope },
+    options: { readonly preserveLiveGraph?: boolean } = {},
+  ): Promise<void> {
+    let runtime = this.packageTypeRuntime;
+    if (!runtime) {
+      await this.packageRuntimeReadyPromise;
+      runtime = this.packageTypeRuntime;
+    }
+    if (!runtime) throw new Error("package type-system is unavailable");
+
+    // Authoring prepares package resources asynchronously. Capture the graph
+    // at the synchronous commit boundary so edits made during staging are not
+    // replaced by the older graph included in the prepared model snapshot.
+    const snapshot = options.preserveLiveGraph
+      ? { ...this.getSnapshot(), manifest: prepared.snapshot.manifest }
+      : prepared.snapshot;
+    if (options.preserveLiveGraph) {
+      for (const node of snapshot.nodes) {
+        const identity = node.data?.package as { readonly id?: unknown; readonly version?: unknown } | undefined;
+        if (typeof identity?.id !== "string" || typeof identity.version !== "string") continue;
+        const key: PackageKey = `${identity.id}@${identity.version}`;
+        if (!prepared.scope.catalog.getExact(key) || prepared.scope.coordinator.status(key)?.state !== "active") {
+          throw new Error(`package '${key}' is unavailable in the prepared model scope`);
+        }
+      }
+    }
+    await this.commitProjectScopeSnapshot(snapshot, prepared.scope, runtime, { retainBarrierOnFailure: true });
   }
 
   /** Restore a previously committed project after a failed authoring commit. */
   public async restoreProjectScope(modelJson: string, modelBundle: ModelBundleResources): Promise<void> {
     const prepared = await this.prepareProjectScope(modelJson, modelBundle);
-    await this.commitPreparedProjectScope(prepared);
+    await this.commitPreparedProjectScope(prepared, { preserveLiveGraph: true });
   }
 
   private syncPackageCatalog(): void {
+    if (this.projectScopeTransition) return;
     if (this.packageTypeRuntime) this.packageCatalog = this.packageTypeRuntime.availablePackages();
+  }
+
+  /** Swap graph and runtime behind one package-addition barrier. */
+  private async commitProjectScopeSnapshot(
+    snapshot: DiagramCoreSnapshot,
+    scope: PreparedModelScope,
+    runtime: EditorTypeSystemRuntime,
+    options: { readonly retainBarrierOnFailure?: boolean } = {},
+  ): Promise<void> {
+    this.projectScopeTransition = true;
+    this.packageCatalog = [];
+    try {
+      this.commitProject(snapshot);
+      await runtime.commitModelScope(scope);
+    } catch (cause) {
+      // Authoring callers keep additions disabled for their coordinated rollback.
+      // A plain model import has no rollback owner, so republish the runtime's
+      // current catalog if its scope swap cannot finish cleanly.
+      if (!options.retainBarrierOnFailure) {
+        this.projectScopeTransition = false;
+        this.syncPackageCatalog();
+      }
+      throw cause;
+    }
+    this.projectScopeTransition = false;
+    this.diagnosticCollection.clear();
+    this.syncPackageCatalog();
+    this.syncRuntimeDiagnostics();
+    this.refreshTypes();
   }
 
   /** Reconcile exact package references before the single graph commit. */
@@ -285,7 +350,8 @@ export class Diagram extends DiagramCore {
     const parsed = this.parseProjectJson(jsonString);
     if (!parsed) return false;
     await this.packageRuntimeReadyPromise;
-    if (this.packageTypeRuntime) {
+    const runtime = this.packageTypeRuntime;
+    if (runtime) {
       let prepared;
       try {
         const graphIdentities = parsed.nodes.flatMap((node) => {
@@ -294,7 +360,7 @@ export class Diagram extends DiagramCore {
             ? [{ id: identity.id, version: identity.version, ...(typeof identity.name === "string" ? { name: identity.name } : {}) }]
             : [];
         });
-        prepared = await this.packageTypeRuntime.prepareModelScope(parsed.manifest, modelBundle, graphIdentities);
+        prepared = await runtime.prepareModelScope(parsed.manifest, modelBundle, graphIdentities);
       } catch (error) {
         this.diagnosticCollection.record({
           occurrenceId: `runtime:model-switch:${parsed.manifest.id}@${parsed.manifest.version}`,
@@ -304,14 +370,9 @@ export class Diagram extends DiagramCore {
         this.publishDiagnostics();
         return false;
       }
-      // DiagramCore remains the graph authority: prepare all package runtime
-      // resources first, then commit the parsed graph and finally swap scopes.
-      this.commitProject(parsed);
-      await this.packageTypeRuntime.commitModelScope(prepared);
-      this.diagnosticCollection.clear();
-      this.syncPackageCatalog();
-      this.syncRuntimeDiagnostics();
-      this.refreshTypes();
+      // DiagramCore remains the graph authority; imports share the same
+      // package-addition barrier as transactional authoring scope swaps.
+      await this.commitProjectScopeSnapshot(parsed, prepared, runtime);
       return true;
     }
     this.commitProject(parsed);

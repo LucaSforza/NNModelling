@@ -185,6 +185,8 @@ const italianMessages: Record<string, string> = {
   "Delete {name}, its project folder, and its active training entry?": "Eliminare {name}, la cartella del progetto e la relativa voce di training attiva?",
   "Deleting…": "Eliminazione…",
   "Delete dataset": "Elimina dataset",
+  "Delete this project stereotype and its folder?": "Eliminare questo stereotype del progetto e la relativa cartella?",
+  "Delete stereotype": "Elimina stereotype",
   "Dataset updated.": "Dataset aggiornato.",
   "Dataset created.": "Dataset creato.",
   "Identity and metadata": "Identità e metadati",

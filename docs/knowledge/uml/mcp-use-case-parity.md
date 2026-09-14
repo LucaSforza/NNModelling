@@ -1,21 +1,22 @@
 ---
 kind: decision
 status: accepted
-updated: 2026-08-30
+updated: 2026-09-14
 ---
 
 # MCP use-case parity with the editor
 
 ## Context and authority
 
-The MCP interface must expose the agent-facing modeling and training workflows
-below, not merely a collection of low-level graph and HTTP operations. This is
+The MCP interface must expose the agent-facing modeling, project-authoring and
+training workflows below, not merely a collection of low-level graph and HTTP operations. This is
 an accepted functional constraint, not a claim that the server already
 implements it. The [browser-backed MCP architecture](../architecture/browser-mcp.md)
 describes actual implementation and gaps separately. The
-[adaptation plan](../../plans/active/mcp-use-case-parity/plan.md) maps these
-requirements to implementation tasks and verification gates; its existence does
-not mean the server already satisfies this constraint.
+[adaptation plan](../../plans/active/mcp-use-case-parity/plan.md) and the
+[project-authoring parity plan](../../plans/active/mcp-project-authoring-parity/plan.md)
+map these requirements to implementation tasks and verification gates; their
+existence does not mean the server already satisfies this constraint.
 
 The diagram preserves the user-supplied use cases, associations, extension and
 notes. `Agent` is the single primary actor. The two groups are capability areas,
@@ -31,21 +32,25 @@ flowchart LR
 
     subgraph TRAINING["Training"]
         direction TB
-        T1(["Collegarsi al backend"])
-        T2(["Modificare parametri"])
-        T3(["Lanciare training"])
-        T4(["Monitoraggio training"])
+        T1(["Connect to backend"])
+        T2(["Edit training parameters"])
+        T3(["Start training"])
+        T4(["Monitor training"])
         T5(["Download wheel"])
     end
 
-    subgraph MODELLAZIONE["Modellazione"]
+    subgraph MODELING["Modeling"]
         direction TB
-        M1(["Aggiungere nodo al canvas"])
-        M2(["Collegare nodi"])
-        M3(["Modificare parametri nodi"])
-        M4(["Formattare la vista"])
-        M5(["Screenshot<br/>─────────────<br/>extension points<br/>Formattare la vista"])
-        M6(["Aprire un progetto"])
+        M1(["Add node to canvas"])
+        M2(["Connect nodes"])
+        M3(["Edit node parameters"])
+        M4(["Format view"])
+        M5(["Screenshot<br/>─────────────<br/>extension points<br/>Format view"])
+        M6(["Open a project"])
+        M7(["Create stereotype"])
+        M8(["Delete stereotype"])
+        M9(["Create dataset"])
+        M10(["Delete dataset"])
 
         M4 -. "«extend»" .-> M5
     end
@@ -62,19 +67,28 @@ flowchart LR
     A --- M4
     A --- M5
     A --- M6
+    A --- M7
+    A --- M8
+    A --- M9
+    A --- M10
 
     N1["«note»<br/>Every training parameter shown in the sidebar<br/>must be editable through MCP."]
 
     N2["«note»<br/>Create a node by filling in its stereotype parameters.<br/>Creation must behave exactly like selecting the stereotype<br/>in the browser sidebar and clicking Create."]
 
-    N3["«note»<br/>Use the editor's Arrange (Disponi) operation<br/>to place nodes in a standard layout.<br/>Run it BEFORE capturing the browser screenshot.<br/>Support both horizontal and vertical layouts."]
+    N3["«note»<br/>Use the editor's Arrange operation<br/>to place nodes in a standard layout.<br/>Run it BEFORE capturing the browser screenshot.<br/>Support both horizontal and vertical layouts."]
 
     N4["«note»<br/>The MCP server must create a new project<br/>or open an existing one.<br/>Project creation must use the same parameters and behavior<br/>as the graphical interface, sharing as much code as possible."]
+    N5["«note»<br/>MCP stereotype and dataset creation uses the same semantic<br/>parameters, validation, defaults and project transaction as the UI.<br/>Deletion is available in both UI and MCP and removes only project-owned resources."]
 
     T2 -.- N1
     M1 -.- N2
     M4 -.- N3
     M6 -.- N4
+    M7 -.- N5
+    M8 -.- N5
+    M9 -.- N5
+    M10 -.- N5
 ```
 
 ## Required observable behavior
@@ -92,6 +106,18 @@ flowchart LR
 | M4 | Format view | Apply the editor's **Disponi** auto-layout in either horizontal or vertical direction. Panning, zooming, fitting the viewport, or manually guessing node coordinates are not equivalent. |
 | M5 | Screenshot | Capture the browser diagram after the required layout has been applied and rendered. |
 | M6 | Open a project | Create a new project or open an existing one through the browser's shared project workflow. Creation exposes the same form parameters, defaults, validation and behavior as the UI; opening activates the same writable project and resource scope. |
+| M7 | Create stereotype | Create one project-owned stereotype with the UI form's complete semantic request: identity, directory, display metadata, kind, view, dependencies, parameter definitions and optional objective metadata. The shared browser transaction writes and activates the package. |
+| M8 | Delete stereotype | Delete only an exact project-owned stereotype through a UI confirmation or MCP request. Reject core, missing, graph-used or dependency-required packages. Success removes the exact manifest entry, project directory, active catalog/runtime entry and palette entry without deleting nodes or cascading to other packages. |
+| M9 | Create dataset | Create one project-owned dataset with the UI form's complete semantic request: identity, directory, display metadata, parameter definitions, named input/target slots, class metadata and optional data files. Binary file transport may be adapted to JSON-safe base64 without changing domain semantics. |
+| M10 | Delete dataset | Delete only an exact project-owned dataset through a UI confirmation or MCP request. Success removes its manifest entry, exact project directory, browser catalog entry and active training descriptor; immutable backend uploads and historical jobs are preserved. |
+
+Creation and deletion are project authoring operations, not graph-node creation
+or backend archive administration. Both entry points must call the same
+browser-owned coordinators. Destructive calls identify the exact project
+resource by ID, version and relative path; display names are never identities.
+Failures preserve the previous manifest, runtime/catalog state and unrelated
+files. No deletion operation may cascade into graph nodes, dependent packages,
+backend dataset archives or historical jobs.
 
 The original `«extend»` relation is retained faithfully. Its note explicitly
 requires layout **before** screenshot; this ordering is the acceptance rule,
