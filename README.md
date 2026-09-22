@@ -3,115 +3,88 @@
 [![CI](https://github.com/LucaSforza/NNModelling/actions/workflows/ci.yml/badge.svg)](https://github.com/LucaSforza/NNModelling/actions/workflows/ci.yml)
 [![GitHub Pages](https://img.shields.io/badge/demo-GitHub%20Pages-2ea44f?logo=github)](https://lucasforza.github.io/NNModelling/)
 
-A visual editor and DSL for designing neural networks. Create diagrams in the browser, compile them to NNTree, and generate PyTorch/Lightning training pipelines.
+Design neural networks as visual graphs, inspect tensor shapes and dtypes while
+editing, and train through an isolated backend. Export a Python wheel that runs
+the trained prediction model without this checkout.
 
-## Try the editor
-
-**[Open NNModelling in your browser](https://lucasforza.github.io/NNModelling/)**
-
-The GitHub Pages demo contains the visual editor and runs entirely in the browser. Remote training, conversion, and MCP/browser integration require a local or separately deployed backend.
-
-Linux users can also run the same editor as an Electron Flatpak. The Flatpak
-contains the desktop shell and shared frontend; FastAPI, Valkey, Podman/Docker
-and worker images remain in the separately managed backend. See the
-[Linux desktop documentation](docs2/source/desktop.rst) for source builds,
-installation and the exact `app://nnmodelling` backend origin.
-
-```
-Stereotypes/ (JSON) → Svelte Flow Editor → NNTree (JSON) → convert.py → Hydra YAML → main.py → Training
-                                                                                       → infer.py  → Inference
+```text
+Project directory → editor + Lua tensor inference → authenticated uploads
+                  → container training worker → portable prediction wheel
 ```
 
-## Quick Start
-
-### Frontend (Editor)
+## Run the editor
 
 ```bash
-# From the repository root
-pnpm install
-pnpm --dir front-end dev       # Development server with hot reload
-pnpm --dir front-end build     # Production build
-pnpm --dir front-end preview   # Preview production build
+pnpm install --frozen-lockfile
+pnpm --dir front-end dev --host 127.0.0.1 --port 5174
 ```
 
-### Backend (Training)
+Open the URL printed by Vite. Choose **New project** to create a writable project
+directory, or **Open project** to select one containing `model.json`. Graph
+changes save automatically. The web editor needs writable directory access
+through the browser's File System Access API.
 
-```bash
-cd converted
-uv sync
-uv run python src/convert.py <nn_tree_json> <output_dir>
-uv run python src/main.py --config-dir <dir>
-```
+You can also [open the web distribution](https://lucasforza.github.io/NNModelling/)
+or build the [Linux desktop application](docs2/source/desktop.rst). The desktop
+host uses the same editor and project format. Neither distribution includes a
+training backend.
 
-### MCP Server
+To try an existing model, copy an entire directory from
+`examples/diagrams/package/models/`, including its custom packages and datasets,
+then open the copy. Start with the [VAE or ResNet guide](docs2/source/examples.rst).
+Prepare their data files before training; cloning the example does not download
+MNIST.
 
-```bash
-cd mcp-server
-pnpm run build      # Compile TypeScript
-pnpm run start      # Start server (node dist/index.js)
-```
+## Train and use a model
 
-## Key Concepts
+The Training sidebar pairs with an operator-managed backend. Select a project
+dataset, match graph Input bindings to its named tensor slots, and configure the
+objective and job settings. A successful job provides a downloadable wheel with
+trained weights and the public `Model` prediction API.
 
-- **Nodes**: Layers (Linear, Conv2d, ReLU...), Joins (Addition, Concat, MatMul...), SubFlows (Repeat, HorizontalRepeat), Loss (CrossEntropyLoss...)
-- **Edges**: Data flow between nodes. Forks implicit, joins explicit.
-- **NNTree**: Intermediate representation — compiled DAG preserving sequential chains, join ordering, and recursive subflows.
-- **SubFlows**: Containers with internal graph topology. Repeat (sequential N times with independent weights) and HorizontalRepeat (parallel N copies via vmap).
-- **Join ordering**: Non-commutative joins (MatMul, ScaledDotProduct) receive inputs ordered by edge targetHandle, not BFS arrival.
-- **Stereotypes**: JSON files defining node category, Python class mapping, view defaults, and configurable parameters.
-- **MCP Server**: Thin proxy that enables LLM agents to manipulate the diagram via WebSocket RPC to the browser.
+- [Training workflow](docs2/source/training_user_guide.rst)
+- [Backend installation, pairing and operations](docs2/source/training_admin_guide.rst)
+- [Using an exported model in Python](docs2/source/python_api.rst)
 
-## Building from Source
-
-```bash
-# Install dependencies
-pnpm install
-
-# Build all packages
-pnpm --dir front-end build          # Visual editor
-pnpm --dir mcp-server build         # MCP server
-
-# Build documentation
-pnpm docs
-```
+The supported backend accepts package graphs and project datasets. Historical
+NNTree fixtures are not editable projects or inputs to this workflow.
 
 ## Documentation
 
-Build the full documentation set, including the TypeDoc frontend API:
+Build the public Sphinx guides and generated TypeScript reference:
 
 ```bash
 pnpm run docs
 ```
 
-This generates Sphinx HTML in `docs2/build/html/` and TypeDoc in
-`docs2/build/typedoc/`. To build only Sphinx:
+Outputs are `docs2/build/html/` and `docs2/build/typedoc/`.
+[Documentation build instructions](docs2/README.md) cover prerequisites,
+previewing both sites and strict checks.
+
+- [Getting started](docs2/source/getting_started.rst)
+- [Projects and graph editing](docs2/source/user_guide.rst)
+- [Project datasets](docs2/source/datasets.rst)
+- [Custom stereotypes](docs2/source/stereotypes.rst)
+- [Tensor type system](docs2/source/type_system.rst)
+- [Architecture](docs2/source/architecture.rst)
+- [Troubleshooting](docs2/source/troubleshooting.rst)
+
+Internal architecture and contributor contracts are indexed in
+[docs/README.md](docs/README.md). Repository instructions live in
+[AGENTS.md](AGENTS.md), with package-specific guidance below it.
+
+## Development checks
+
+Run the checks for the package you change:
 
 ```bash
-cd docs2
-uv run make html
-```
-
-The documentation covers:
-
-- **User and training guides** — package graphs, dataset bindings and training
-- **Architecture** — browser ownership, MCP proxy and package backend
-- **Package definitions and tensor type system** — package kinds, Lua inference
-  rules and dataset-backed Input contracts
-- **Python API Reference** — package runtime, worker and authenticated backend
-- **TypeScript API Reference** — DiagramCore, graph validation and browser RPC
-- **Examples** — editable package-format model diagrams
-
-See also `CLAUDE.md` / `AGENTS.md` for the AI agent project guide.
-
-## Testing
-
-```bash
-# Frontend unit tests
+pnpm --dir front-end check
 pnpm --dir front-end test
-
-# Integration tests (tiered: compile → convert → forward → train → infer)
-pnpm --dir front-end test:integration
-
-# Python tests
-cd converted && uv run pytest src/tests/ -v
+pnpm --dir mcp-server test
+cd converted && uv run pytest src/tests/ -m fast -q
 ```
+
+Frontend and MCP builds use `pnpm --dir <package> build`. Slow backend and
+integration tiers have separate prerequisites; consult the relevant package's
+`AGENTS.md` before running them. Browser-backed MCP needs a running editor and
+selected tab; see the [MCP architecture](docs/knowledge/architecture/browser-mcp.md).

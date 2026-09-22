@@ -1,26 +1,84 @@
-Examples
-========
+Example projects
+================
 
-Editable examples live in ``examples/diagrams/package/models/``. Each model is
-a self-contained package graph; the model manifest owns any custom package
-resources and the browser uploads the resolved bundle.
+Editable projects live in ``examples/diagrams/package/models/``. Copy a whole
+project directory to a writable location, then select it with **Open project**.
+The editor saves changes automatically, including when you open an example
+inside the checkout.
 
-VAE
----
+Each project's ``model.json`` declares its custom stereotypes and datasets.
+Keep those relative directories together. Historical compiled NNTree files
+are not editable projects or inputs to the package training backend.
 
-``examples/diagrams/package/models/variational-autoencoder/model.json`` shows a
-package graph with an explicit prediction output and objective subgraph. Its
-manifest carries the model-owned Sampling and KL divergence packages under
-``packages/``. Train it from the Training sidebar with the MNIST autoencoder
-dataset. Download the portable wheel from the completed job and use its public
-runtime API for reconstruction or generation.
+VAE: image reconstruction
+-------------------------
 
-ResNet classifier
------------------
+Project: ``examples/diagrams/package/models/variational-autoencoder/``.
 
-``examples/diagrams/package/models/resnet/model.json`` demonstrates convolution, pooling,
-flattening and a linear classifier. Add the package Cross Entropy objective;
-targets come from the selected dataset adapter, not from a graph node.
+This graph demonstrates an encoder/decoder, model-owned sampling and KL
+packages, an explicit prediction Output, and reconstruction and KL objectives.
+The project dataset is **Autoencoder MNIST** (``example.vae-mnist@0.1.0``).
+It binds ``image`` and ``target`` to float32 tensors of shape ``[B, 1, 28, 28]``.
 
-The examples are intentionally editable source diagrams. Historical compiled
-artifacts are not an input to the supported backend.
+Prepare these files inside the copied project before training:
+
+.. code-block:: text
+
+   datasets/autoencoder-mnist/data/train.jsonl
+   datasets/autoencoder-mnist/data/test.jsonl
+
+Each non-empty line is a JSON object with an ``image`` array of exactly 784
+integer pixels in row-major order, each from 0 to 255. The loader reads JSONL,
+normalizes the image and uses it as both input and target. Data files are
+ignored by Git and are not supplied merely by cloning the project. The project
+README describes obtaining and converting MNIST data.
+
+In Training, select Autoencoder MNIST, review ``B``, ``num_workers`` and
+``train_size``, then follow :doc:`training_user_guide`. A trained wheel can
+reconstruct images through its prediction API and expose the model's declared
+sampling adapters.
+
+ResNet: digit classification
+----------------------------
+
+Project: ``examples/diagrams/package/models/resnet/``.
+
+This graph demonstrates convolution, residual branches, pooling, flattening
+and classification. It already includes its Cross Entropy objective; do not
+add another loss merely to follow this guide.
+
+The dataset **ResNet MNIST** (``example.resnet-mnist@0.1.0``) supplies float32
+``image`` tensors of shape ``[B, 1, 28, 28]`` and int64 ``target`` labels of
+shape ``[B]``. Prepare:
+
+.. code-block:: text
+
+   datasets/resnet-mnist/data/train.jsonl
+   datasets/resnet-mnist/data/test.jsonl
+
+Each JSONL record contains the same 784-pixel ``image`` array as the VAE data,
+plus an integer ``label`` from 0 to 9. The checked-in loader already supports
+this format. Review ``train_size`` before running: it determines how much of
+the training file is used for training versus validation.
+
+Data size and first runs
+------------------------
+
+The loader splits the training file into training and validation sets; the test
+file supplies a separate test loader. Supply enough records for the chosen
+split to be useful. The complete MNIST JSONL files can exceed default backend
+limits, particularly the expanded per-file cap. Coordinate a finite larger
+limit with the operator or prepare a smaller dataset for a first smoke run;
+see :doc:`training_admin_guide`.
+
+The backend cannot fetch absent project data for you. Opening a graph proves
+that its project resources can load, not that its full dataset is present or
+that it has completed training.
+
+Standalone wheel consumers
+--------------------------
+
+``examples/vae_mnist/`` and ``examples/resnet_mnist/`` contain independent
+Python consumer projects with their own READMEs. They install the downloaded
+wheel and import its public ``Model`` facade. Follow their package naming and
+input requirements; :doc:`python_api` explains the common wheel interface.

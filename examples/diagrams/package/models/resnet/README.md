@@ -28,6 +28,7 @@ Convert the IDX archives to the two JSONL files above, keeping one image and
 its label on each line. Do not commit either the downloaded archives or the
 generated JSONL files.
 
-The checked-in `dataset.py` still refers to the former IDX `.gz` filenames. Its
-JSONL reader must be updated before this project can train with the converted
-files.
+The checked-in `dataset.py` reads these JSONL files directly. Prepare them
+before training; the worker does not download missing data. Full MNIST JSONL
+files can exceed the default backend expanded-file limit, so coordinate a
+finite larger limit with the backend operator or use a smaller first-run dataset.

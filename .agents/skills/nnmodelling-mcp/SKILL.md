@@ -1,6 +1,6 @@
 ---
 name: nnmodelling-mcp
-description: Operate NNModelling through its live browser DiagramCore and browser-backed MCP server. Use when Codex must open or diagnose the editor, frontend, WebSocket bridge, or MCP stdio server; inspect or edit a neural-network diagram; query tensor types; capture screenshots or hover tooltips; convert a diagram; train or run inference; or diagnose leaked ports and disconnected browser sessions. Always use the Codex in-app Browser; never fall back to external Chromium, Chrome, or CDP.
+description: Operate NNModelling through its live browser DiagramCore and browser-backed MCP server. Use when Codex must open or diagnose the editor, frontend, WebSocket bridge, or MCP stdio server; inspect or edit a neural-network diagram; query tensor types; capture screenshots or hover tooltips; convert a diagram; train or run inference; or diagnose leaked ports and disconnected browser sessions. Codex uses the in-app Browser; OpenCode and unsupported hosts may use the documented external-browser fallback.
 ---
 
 # NNModelling Browser and MCP
@@ -40,17 +40,13 @@ UI gestures when reproducing UI behavior, exercising a control that MCP does
 not expose, or satisfying an explicit request to interact manually. Verify any
 UI-driven graph mutation through MCP afterward.
 
-## Mandatory browser surface
+## Browser surface
 
-Every live NNModelling workflow in this skill MUST use the Codex desktop
-in-app Browser. Before any browser action, load and follow the available
-`control-in-app-browser` skill and select the Codex in-app Browser through its
-browser client.
-
-Do not use external Chromium, Chrome, `chrome-direct`, CDP, or the
-`nnm-stack.sh browser` fallback. If the Codex in-app Browser is unavailable,
-cannot connect, or fails during the workflow, stop and report the blocker;
-never switch browser surfaces silently or automatically.
+When running in Codex, use the desktop in-app Browser through the available
+CUA browser tool and its returned API documentation. If that surface is
+unavailable or fails, report the blocker; do not switch to external Chromium
+or CDP. On OpenCode or another non-Codex host, use the external Chromium/CDP
+fallback documented by `chrome-direct` and `nnm-stack.sh` when needed.
 
 ## Start the shared stack
 
@@ -85,8 +81,9 @@ Start only missing components in persistent terminals:
    outside the bundled examples. Reuse a server already listening on port
    9339 only when it was started with the same project root.
 
-3. Open `http://127.0.0.1:5174` through the Codex in-app Browser. Do not run
-   the `browser` subcommand or open a second external copy of the page.
+3. In Codex, open `http://127.0.0.1:5174` through the in-app Browser. On
+   OpenCode or an unsupported host, use the documented external-browser
+   fallback instead.
 
 4. Wait for `Browser tab connected`. With multiple connected frontend tabs,
    call `list_browser_tabs` and `select_browser_tab`; never guess which tab is
@@ -192,8 +189,8 @@ import the diagram before capturing evidence.
    finish with logits and `CrossEntropyLoss`; never add Softmax before that
    loss.
 2. Call `get_type_info({refresh:true})`, `validate_parameters` and
-   `validate_graph`. Require no hard type errors and exactly one top-level
-   `Input` before training.
+   `validate_graph`. Require no hard type errors and at least one top-level
+   `Input`; multiple top-level Inputs must use distinct dataset bindings.
 3. Use the selected-editor training route, which shares the browser's
    `TrainingController` with the Training sidebar:
 

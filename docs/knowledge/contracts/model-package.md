@@ -76,8 +76,8 @@ into the backend payload.
 
 The dataset list is likewise exhaustive project source ownership, but dataset
 resources are not embedded in the model wheel. A selected project dataset is
-validated and uploaded as a separate bounded content-addressed archive, while
-built-in datasets resolve through the backend descriptor catalog. Training
+validated and uploaded as a separate bounded content-addressed archive. The
+current backend has no built-in dataset registry. Training
 jobs retain an opaque resolved dataset reference and exact identity/version/
 digest; inference wheels remain independent of every training dataset. See the
 [project-owned dataset decision](../decisions/project-owned-datasets.md).

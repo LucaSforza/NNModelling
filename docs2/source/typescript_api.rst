@@ -1,5 +1,5 @@
 TypeScript / Frontend API Reference
-====================================
+===================================
 
 The frontend TypeScript API is documented using **TypeDoc**. The generated
 documentation is available as a static site.
@@ -7,7 +7,7 @@ documentation is available as a static site.
 Viewing the TypeScript API
 --------------------------
 
-After running ``pnpm run docs`` from the repository root, open:
+After running ``pnpm run docs`` from the repository root, open the `generated TypeDoc site <../typedoc/index.html>`_, or its local file:
 
 .. code-block:: text
 
@@ -101,7 +101,9 @@ The ``core`` barrel exports these configuration and snapshot types (the
 graph-change subscription: the handler runs once after every successful public
 mutation (add/update/delete/move operations, edge changes, undo/redo, snapshot
 restore, import and reset), carries no payload, and returns an unsubscribe
-function. Rejected connections and no-op operations do not notify.
+function. Rejected connections and no-op operations do not notify. Mutating
+the graph from inside a notification is rejected; schedule follow-up edits
+outside the callback. Listener exceptions are caught and logged.
 
 TypeDoc documents the selected public entry points. Types referenced from
 other modules may appear in signatures without having standalone pages; consult

@@ -55,7 +55,7 @@ with any web origins that should remain supported:
        just --justfile converted/backend/justfile backend
 
 Pairing, bearer-token ownership, package uploads and training permissions are
-the same as for the web renderer. The Flatpak's network permission only allows
-the configured HTTP backend and optional localhost MCP connection; it does not
-grant backend authorization. Project selection uses the desktop portal bridge
+the same as for the web renderer. The Flatpak manifest grants network access with
+``--share=network``; it does not restrict destinations to the configured backend
+or localhost MCP bridge. Backend authorization still requires pairing. Project selection uses the desktop portal bridge
 and does not require blanket home-directory access.

@@ -1,0 +1,96 @@
+{
+  "nodes": [
+    {
+      "id": "a0f21a87-aad0-4503-97a4-1b8b5573ec54",
+      "type": "custom",
+      "position": {
+        "x": 1045.5,
+        "y": 56.5
+      },
+      "width": 30,
+      "height": 30,
+      "data": {
+        "package": {
+          "id": "core.input",
+          "version": "0.1.0"
+        },
+        "name": "Input",
+        "color": "#ffffff",
+        "params": {
+          "binding": "input"
+        }
+      },
+      "measured": {
+        "width": 30,
+        "height": 30
+      },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "886937e6-e738-45d4-afae-c2ba9bd8d55c",
+      "type": "custom",
+      "position": {
+        "x": 941.2314025547962,
+        "y": 154.21518578243237
+      },
+      "width": 240,
+      "height": 120,
+      "data": {
+        "package": {
+          "id": "model.transformer",
+          "version": "1.0.0"
+        },
+        "name": "PretrainedTransformer",
+        "color": "#64748b",
+        "params": {
+          "toBeFreezed": 10,
+          "path": "w"
+        },
+        "wheelAdapters": []
+      },
+      "measured": {
+        "width": 240,
+        "height": 120
+      },
+      "selected": true,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "a0f21a87-aad0-4503-97a4-1b8b5573ec54",
+      "sourceHandle": "out",
+      "target": "886937e6-e738-45d4-afae-c2ba9bd8d55c",
+      "targetHandle": "in",
+      "id": "xy-edge__a0f21a87-aad0-4503-97a4-1b8b5573ec54out-886937e6-e738-45d4-afae-c2ba9bd8d55cin",
+      "type": "editable",
+      "data": {
+        "route": {
+          "points": []
+        }
+      }
+    }
+  ],
+  "layoutDirection": "vertical",
+  "manifest": {
+    "schemaVersion": 2,
+    "id": "finetune.example",
+    "version": "0.1.0",
+    "name": "finetuning",
+    "customPackages": [
+      {
+        "id": "model.transformer",
+        "version": "1.0.0",
+        "path": "packages/model.transformer"
+      }
+    ],
+    "customDatasets": [
+      {
+        "id": "project.dataset",
+        "version": "1.0.0",
+        "path": "datasets/project-dataset"
+      }
+    ]
+  }
+}

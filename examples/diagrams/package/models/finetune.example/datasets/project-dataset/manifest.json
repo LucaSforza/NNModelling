@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "project.dataset",
+  "version": "1.0.0",
+  "entrypoints": {
+    "definition": "dataset.json",
+    "python": "dataset.py"
+  }
+}

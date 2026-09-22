@@ -17,10 +17,13 @@ pnpm --dir mcp-server test
 pnpm --dir mcp-server start
 ```
 
-Browser-backed MCP additionally needs Chromium with remote debugging and the
-WebSocket listener, normally on port 9339. Follow
+Browser-backed MCP additionally needs the WebSocket listener, normally on port
+9339. In Codex, open the frontend through the current in-app Browser CUA tool.
+OpenCode and other non-Codex hosts may use Chromium with remote debugging
+through the external-browser fallback. Follow
 `.agents/skills/nnmodelling-mcp/SKILL.md` and its `scripts/nnm-stack.sh`
-helper. Direct browser work follows `.agents/skills/chrome-direct/SKILL.md`.
+helper; direct external-browser work follows
+`.agents/skills/chrome-direct/SKILL.md`.
 
 ## Electron and Flatpak editor
 

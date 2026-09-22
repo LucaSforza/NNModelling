@@ -60,8 +60,11 @@ stereotype-packages -> browser package catalog -> Cordis/Lua type inference
                     -> DiagramCore -> visible editor and browser-backed MCP
 ```
 
-Package-format compilation, training and backend inference are not implemented
-yet. See `docs/knowledge/architecture/overview.md` and `docs/TODO.md`.
+Package-format compilation and training are implemented through the
+authenticated package backend and isolated worker path. Exported prediction
+wheels support inference outside the checkout. See
+`docs/knowledge/architecture/overview.md` and `docs/TODO.md` for remaining
+gaps.
 
 ## Browser-backed work
 
@@ -71,8 +74,8 @@ inference, or diagnosing browser connectivity:
 
 - `.agents/skills/nnmodelling-mcp/SKILL.md` for all live NNModelling editor,
   diagram, type, conversion, training, inference and browser-connectivity work.
-  It selects the Codex in-app Browser when available and preserves external
-  Chromium/CDP as the OpenCode and unsupported-host fallback.
+  Codex uses the in-app Browser; OpenCode and unsupported hosts may use the
+  documented external Chromium/CDP fallback.
 - `.agents/skills/chrome-direct/SKILL.md` for direct Chrome/Chromium CDP work,
   especially when the user asks to use Chrome directly or not to use MCP.
 
@@ -94,9 +97,10 @@ the live editor or selected-editor training workflow.
   The MCP server must remain a thin proxy and must not introduce a second graph.
 - Package behavior and tensor contracts are data-driven. Avoid package-ID
   switches in inference, topology, parameter or dtype behavior.
-- A top-level model requires exactly one `Input`. An internal subflow may use an
-  `Input` only as its declared boundary entry; `Fork` is the canonical internal
-  pass-through and cannot replace the required top-level `Input`.
+- A top-level model requires at least one `Input`; multiple top-level inputs
+  use distinct named dataset bindings. An internal subflow may use an `Input`
+  only as its declared boundary entry; `Fork` is the canonical internal
+  pass-through and cannot replace a required top-level `Input`.
 - Join parent ordering is determined by `targetHandle` (`in-0`, `in-1`, ...),
   not traversal order. This is required for non-commutative joins.
 - Collapsed or hidden subflow children still compile.

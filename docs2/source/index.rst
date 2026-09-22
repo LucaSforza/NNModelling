@@ -1,31 +1,50 @@
-NNModelling Documentation
+NNModelling documentation
 =========================
 
-NNModelling is a browser-owned visual DSL for package-native neural networks.
-The editor's ``DiagramCore`` owns the graph and package type inference runs
-locally in isolated Lua runtimes.
+NNModelling is a visual editor for neural networks. Build a graph of layers,
+inspect tensor shapes and dtypes as you edit, then train it on a separate
+backend. A successful training job produces an installable Python wheel for
+prediction outside NNModelling.
 
-The supported workflow is:
+Start with :doc:`getting_started` to open a project. The :doc:`user_guide`
+explains editing and saving; :doc:`training_user_guide` takes you from dataset
+selection to a downloaded model.
 
-.. code-block:: text
+What you need
+-------------
 
-   package definitions -> DiagramCore -> authenticated package bundle
-   -> FastAPI -> Podman/Docker worker -> portable prediction wheel
-
-The MCP server is a thin browser proxy. It does not compile legacy graph
-formats or execute Python on the host.
+* **To edit:** a browser with writable directory access, or the Linux desktop
+  application. Graph editing and tensor inference run locally.
+* **To train:** a paired training backend, a project dataset with its data,
+  and a graph with a prediction output and training objective.
+* **To use a trained model:** the downloaded wheel and a Python environment
+  with its dependencies. The editor and training backend are not required.
 
 .. toctree::
    :maxdepth: 2
+   :caption: Use NNModelling
 
+   getting_started
    user_guide
+   datasets
    training_user_guide
-   training_admin_guide
-   architecture
+   examples
+   troubleshooting
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Install and operate
+
    desktop
+   training_admin_guide
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Extend and integrate
+
    stereotypes
+   type_system
+   architecture
    python_api
    typescript_api
-   type_system
-   examples
    license

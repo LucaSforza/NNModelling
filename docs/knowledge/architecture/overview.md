@@ -69,8 +69,8 @@ That target makes package graphs the only backend format and places all
 remains the sole frontend semantic authority; PyTorch is never a type-
 inference fallback.
 
-Built-in and project-owned datasets share one declarative parameter and named
-tensor-slot contract. Project dataset archives travel separately from model
+Project-owned datasets use one declarative parameter and named tensor-slot
+contract; the backend does not provide a built-in dataset registry. Project dataset archives travel separately from model
 packages, resolve through opaque ownership-scoped references and are imported
 only inside the isolated worker; FastAPI never executes project dataset Python.
 See the accepted

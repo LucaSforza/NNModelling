@@ -1,0 +1,22 @@
+{
+  "kind": "layer",
+  "name": "PretrainedTransformer",
+  "parameters": {
+    "path": {
+      "position": "top",
+      "type": "string"
+    },
+    "toBeFreezed": {
+      "default": 5,
+      "maximum": 60,
+      "minimum": 1,
+      "position": "top",
+      "type": "number"
+    }
+  },
+  "view": {
+    "color": "#64748b",
+    "height": 120,
+    "width": 240
+  }
+}
