@@ -1,0 +1,27 @@
+{
+  "name": "Dense ReLU",
+  "description": "Transforms the last dimension with a float32 Linear layer and ReLU.",
+  "kind": "layer",
+  "view": {
+    "color": "#4779c4",
+    "width": 180,
+    "height": 100
+  },
+  "parameters": {
+    "in_features": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "top"
+    },
+    "out_features": {
+      "type": "integer",
+      "minimum": 1,
+      "position": "bottom"
+    },
+    "bias": {
+      "type": "boolean",
+      "default": true,
+      "position": "bottom"
+    }
+  }
+}

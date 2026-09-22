@@ -43,6 +43,7 @@ What you need
    :caption: Extend and integrate
 
    stereotypes
+   stereotype_tutorial
    type_system
    architecture
    python_api

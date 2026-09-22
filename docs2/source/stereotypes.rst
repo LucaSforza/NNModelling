@@ -6,6 +6,10 @@ PyTorch behavior. Each package has an exact ID and version. The palette contains
 core stereotypes plus the custom stereotypes declared by the active project.
 Switching projects changes that custom scope.
 
+For a complete example with downloadable source files, follow
+:doc:`stereotype_tutorial`: a trainable Dense ReLU layer with parameter metadata,
+Lua shape inference and a PyTorch builder.
+
 Create a project stereotype
 ---------------------------
 
